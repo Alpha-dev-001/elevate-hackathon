@@ -1,0 +1,394 @@
+from __future__ import annotations
+from pydantic import BaseModel, Field, EmailStr, field_validator
+from typing import Literal, Any, Optional
+from enum import Enum
+import re
+import secrets
+
+
+# ─── Enums ────────────────────────────────────────────────────────────────────
+
+class EventType(str, Enum):
+    VIEW = "view"
+    HOVER = "hover"
+    CART_ADD = "cart_add"
+    CART_REMOVE = "cart_remove"
+    PURCHASE = "purchase"
+    ABANDON = "abandon"
+
+class ActionType(str, Enum):
+    PRICE_ADJUST = "price_adjust"
+    PROMO_TRIGGER = "promo_trigger"
+    LAYOUT_SHIFT = "layout_shift"
+    QR_CAMPAIGN = "qr_campaign"
+    ALERT = "alert"
+
+class RiskLevel(str, Enum):
+    SAFE = "safe"
+    MODERATE = "moderate"
+    REVIEW = "review"
+
+class Urgency(str, Enum):
+    ROUTINE = "routine"
+    MODERATE = "moderate"
+    URGENT = "urgent"
+
+class AnomalyType(str, Enum):
+    VELOCITY_SPIKE = "velocity_spike"
+    HIGH_ABANDON = "high_abandon"
+    LOW_STOCK_SURGE = "low_stock_surge"
+    DEAD_PRODUCT = "dead_product"
+
+class LayoutVariant(str, Enum):
+    STANDARD = "standard"
+    PROMO_HEAVY = "promo_heavy"
+    MINIMAL = "minimal"
+
+class PatchOp(str, Enum):
+    ADD = "add"
+    REMOVE = "remove"
+    REPLACE = "replace"
+    MOVE = "move"
+    COPY = "copy"
+    TEST = "test"
+
+class StoreCategory(str, Enum):
+    FASHION = "fashion"
+    ELECTRONICS = "electronics"
+    FOOD = "food"
+    BEAUTY = "beauty"
+    HOME = "home"
+    SPORTS = "sports"
+    OTHER = "other"
+
+class OnboardingStatus(str, Enum):
+    STORE_INFO = "store_info"
+    LOGO_UPLOAD = "logo_upload"
+    BRAND_REVIEW = "brand_review"
+    PRODUCTS = "products"
+    LIVE = "live"
+
+
+# ─── 1. The Eyes: qwen-vl-max output ─────────────────────────────────────────
+
+class LogoAnalysis(BaseModel):
+    primary_colors: list[str] = Field(..., description="Hex codes extracted from logo")
+    secondary_colors: list[str] = Field(default_factory=list)
+    mood: str = Field(..., description="e.g., 'bold', 'minimalist', 'playful'")
+    style: str = Field(..., description="e.g., 'geometric', 'organic', 'vintage'")
+    geometry_notes: str = Field(..., description="Notes on shapes, lines, symmetry")
+
+
+# ─── 2. The Brain: qwen-max output ───────────────────────────────────────────
+
+class BrandPalette(BaseModel):
+    primary: str
+    secondary: str
+    accent: str
+    background: str
+    text: str
+
+class BrandTypography(BaseModel):
+    display_font: str    # e.g. 'Syne'
+    body_font: str       # e.g. 'Inter'
+
+class BrandIconSet(BaseModel):
+    logo_mark: str = Field(..., description="SVG string for simplified logo mark")
+    store_icon: str = Field(..., description="SVG string for browser tab / favicon")
+
+class GeneratedBrand(BaseModel):
+    store_name: str
+    tagline: str
+    palette: BrandPalette
+    typography: BrandTypography
+    brand_voice_profile: str = Field(
+        ..., description="Tone and style guidelines — used for product description generation"
+    )
+    icons: BrandIconSet
+    layout_variant: LayoutVariant = LayoutVariant.STANDARD
+    suggested_categories: list[str] = Field(default_factory=list)
+
+
+# ─── 3. The Interceptor: Pre-authored defense ─────────────────────────────────
+
+class BrandGuardRule(BaseModel):
+    rule_id: str
+    field: str           # which UI field triggers this: "accent", "primary", "layout_variant"
+    description: str
+    warning_message: str = Field(
+        ...,
+        description="Qwen's own words — first person, references specific hex values it chose"
+    )
+
+class BrandGuardRules(BaseModel):
+    allowed_color_palette: list[str] = Field(
+        ..., description="Hex codes safe to use — frontend checks instantly, no round-trip"
+    )
+    forbidden_combinations: list[str] = Field(default_factory=list)
+    rules: list[BrandGuardRule]
+
+
+# ─── 4. The Core Brand Package ────────────────────────────────────────────────
+
+class BrandPackage(BaseModel):
+    """
+    Single combined object — one Redis write, one WebSocket payload.
+    analysis + brand + guards travel together always.
+    """
+    analysis: LogoAnalysis
+    brand: GeneratedBrand
+    guards: BrandGuardRules
+
+
+# ─── 5. Merchant ──────────────────────────────────────────────────────────────
+
+class MerchantBase(BaseModel):
+    email: EmailStr
+    store_name: str
+
+class MerchantCreate(MerchantBase):
+    password: str
+    category: StoreCategory = StoreCategory.OTHER
+    description: str = ""
+
+class Merchant(MerchantBase):
+    id: str
+    slug: str
+    logo_url: str
+    category: StoreCategory
+    brand_package: Optional[BrandPackage] = None
+    onboarding_status: OnboardingStatus = OnboardingStatus.STORE_INFO
+    is_live: bool = False
+
+class MerchantInDB(Merchant):
+    hashed_password: str    # never returned in API responses
+
+
+# ─── 6. Product ───────────────────────────────────────────────────────────────
+
+class ProductBase(BaseModel):
+    name: str
+    price: float = Field(gt=0)
+    stock: int = Field(ge=0)
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+
+class ProductCreate(ProductBase):
+    cost_price: float = Field(gt=0)
+
+class Product(ProductBase):
+    id: str
+    merchant_id: str
+    cost_price: float
+    description: Optional[str] = None    # generated by qwen-max
+    qwen_generated: bool = False
+
+
+# ─── 7. Slug Generator ────────────────────────────────────────────────────────
+
+def generate_slug(store_name: str) -> str:
+    """Auto-generate collision-free slug from store name."""
+    slug = re.sub(r'[^a-z0-9]+', '-', store_name.lower()).strip('-')
+    suffix = secrets.token_hex(2)
+    return f"{slug}-{suffix}"
+
+
+# ─── 8. Telemetry ─────────────────────────────────────────────────────────────
+
+class CustomerEvent(BaseModel):
+    session_id: str
+    product_id: str
+    event_type: EventType
+    timestamp: int
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+class Anomaly(BaseModel):
+    type: AnomalyType
+    product_id: Optional[str] = None
+    severity: Literal["low", "medium", "high"]
+    detected_at: int
+    context: dict[str, Any] = Field(default_factory=dict)
+
+class TelemetrySnapshot(BaseModel):
+    captured_at: int
+    active_session_count: int
+    product_velocity: dict[str, float]
+    transaction_rate: float
+    abandon_rate: float
+    hot_products: list[str]
+    anomalies: list[Anomaly]
+
+
+# ─── 9. Business Profile & Constraints ───────────────────────────────────────
+
+class BusinessConstraints(BaseModel):
+    min_profit_margin_percent: float = Field(ge=0, le=100, default=15.0)
+    max_discount_percent: float = Field(ge=0, le=100, default=40.0)
+    min_price: dict[str, float] = Field(default_factory=dict)
+    accessibility_level: Literal["AA", "AAA"] = "AA"
+
+class BusinessProfile(BaseModel):
+    merchant_id: str
+    store_name: str
+    constraints: BusinessConstraints
+    products: list[Product]
+
+
+# ─── 10. Delta / JSON Patch ───────────────────────────────────────────────────
+
+class JsonPatch(BaseModel):
+    op: PatchOp
+    path: str
+    value: Any = None
+    from_path: Optional[str] = Field(None, alias="from")
+
+    model_config = {"populate_by_name": True}
+
+
+# ─── 11. Proposed Actions & Decisions ────────────────────────────────────────
+
+class ProposedAction(BaseModel):
+    id: str
+    type: ActionType
+    label: str
+    description: str
+    patch: list[JsonPatch]
+    risk_level: RiskLevel
+    estimated_revenue_delta: Optional[float] = None
+
+class QwenDecision(BaseModel):
+    reasoning: str
+    proposed_actions: list[ProposedAction]
+    urgency: Urgency
+    estimated_impact: str
+
+
+# ─── 12. System State ────────────────────────────────────────────────────────
+
+class Promo(BaseModel):
+    id: str
+    product_id: str
+    discount_percent: float = Field(ge=0, le=100)
+    label: str
+    expires_at: int
+    triggered_by: Literal["merchant", "auto"]
+
+class LayoutConfig(BaseModel):
+    hero_product_id: Optional[str] = None
+    featured_category: Optional[str] = None
+    banner_text: Optional[str] = None
+    color_accent: Optional[str] = None
+    layout_variant: LayoutVariant = LayoutVariant.STANDARD
+
+class QRCampaign(BaseModel):
+    id: str
+    product_id: str
+    promo_id: Optional[str] = None
+    scan_count: int = 0
+    created_at: int
+    expires_at: Optional[int] = None
+    deep_link_url: str
+
+class SystemState(BaseModel):
+    version: int = 0
+    last_updated: int
+    products: dict[str, Product]
+    active_promos: dict[str, Promo] = Field(default_factory=dict)
+    layout_config: LayoutConfig = Field(default_factory=LayoutConfig)
+    qr_campaigns: dict[str, QRCampaign] = Field(default_factory=dict)
+
+
+# ─── 13. WebSocket Events ────────────────────────────────────────────────────
+
+class WSEventType(str, Enum):
+    # Server → Client
+    BRAND_READY = "brand_ready"
+    DECISION_READY = "decision_ready"
+    STATE_UPDATED = "state_updated"
+    ANOMALY_DETECTED = "anomaly_detected"
+    ACTION_CLAMPED = "action_clamped"
+    ACTION_BLOCKED = "action_blocked"
+    BRAND_WARNING = "brand_warning"
+    SNAPSHOT_UPDATE = "snapshot_update"
+    # Client → Server
+    APPROVE_ACTION = "approve_action"
+    REJECT_ACTION = "reject_action"
+    STAGE_PREVIEW = "stage_preview"
+    ROLLBACK = "rollback"
+    CUSTOMER_EVENT = "customer_event"
+    BRAND_TWEAK = "brand_tweak"
+
+class WSMessage(BaseModel):
+    event: WSEventType
+    payload: dict[str, Any]
+    merchant_id: str
+    timestamp: int
+
+
+# ─── 14. Validation Results ───────────────────────────────────────────────────
+
+class Violation(BaseModel):
+    rule: str
+    severity: Literal["warning", "blocked"]
+    message: str
+    original_value: Any = None
+    clamped_value: Any = None
+
+class ValidationResult(BaseModel):
+    valid: bool
+    action: ProposedAction
+    violations: list[Violation]
+    clamped_patches: Optional[list[JsonPatch]] = None
+
+class BrandWarning(BaseModel):
+    rule_id: str
+    field: str
+    severity: Literal["info", "warning"]
+    message: str               # Qwen's own words
+    proposed_value: Any
+
+
+# ─── 15. Onboarding API shapes ────────────────────────────────────────────────
+
+class STSTokenResponse(BaseModel):
+    access_key_id: str
+    access_key_secret: str
+    security_token: str
+    expiration: str
+    bucket: str
+    region: str
+    object_key: str
+
+class OnboardingStartRequest(BaseModel):
+    store_name: str
+    category: StoreCategory
+    description: str
+    logo_oss_url: str
+
+class BrandReadyEvent(BaseModel):
+    event: str = "brand_ready"
+    merchant_id: str
+    brand_package: BrandPackage
+    store_shell_url: str
+
+class ProductCSVRow(BaseModel):
+    name: str
+    price: float
+    stock: int
+    image_url: str = ""
+    category: str = ""
+
+class BatchDescriptionRequest(BaseModel):
+    merchant_id: str
+    products: list[ProductCSVRow]
+    brand_voice_profile: str
+
+class BatchDescriptionResponse(BaseModel):
+    descriptions: dict[str, str]   # product name → description
+
+class DeltaExecution(BaseModel):
+    action_id: str
+    patches: list[JsonPatch]
+    executed_at: int
+    executed_by: Literal["merchant", "auto"]
+    rollback_available: bool = True

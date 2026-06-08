@@ -1,0 +1,73 @@
+services:
+
+  # ── FastAPI Backend ────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./analytics-brain
+      dockerfile: Dockerfile.dev
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./analytics-brain:/app    # hot reload — code changes reflect instantly
+    environment:
+      - APP_ENV=development
+    env_file:
+      - ./analytics-brain/.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 9000 --reload
+
+  # ── Next.js Frontend ───────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./storefront-ui
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./storefront-ui:/app
+      - /app/node_modules          # preserve container node_modules
+      - /app/.next                 # preserve Next.js build cache
+    env_file:
+      - ./storefront-ui/.env.local
+    depends_on:
+      - api
+    command: npm run dev
+
+  # ── Redis (mirrors Alibaba Cloud Tair) ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── PostgreSQL (mirrors Alibaba Cloud RDS) ─────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: elevate
+      POSTGRES_PASSWORD: elevate_dev
+      POSTGRES_DB: elevate
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elevate"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
+  pg_data:
