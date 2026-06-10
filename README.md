@@ -35,7 +35,7 @@ Just your store working with you.
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/elevate
+git clone https://github.com/Alpha-dev-001/elevate
 cd elevate
 
 # Backend
