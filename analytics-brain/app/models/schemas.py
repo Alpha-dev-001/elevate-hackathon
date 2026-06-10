@@ -147,14 +147,18 @@ class MerchantBase(BaseModel):
     store_name: str
 
 class MerchantCreate(MerchantBase):
-    password: str
+    password: str = Field(min_length=8, max_length=72)  # 72 = bcrypt input limit
     category: StoreCategory = StoreCategory.OTHER
     description: str = ""
+
+class MerchantLogin(BaseModel):
+    email: EmailStr
+    password: str
 
 class Merchant(MerchantBase):
     id: str
     slug: str
-    logo_url: str
+    logo_url: str = ""  # empty until the logo upload step
     category: StoreCategory
     brand_package: Optional[BrandPackage] = None
     onboarding_status: OnboardingStatus = OnboardingStatus.STORE_INFO
@@ -186,11 +190,16 @@ class Product(ProductBase):
 
 # ─── 7. Slug Generator ────────────────────────────────────────────────────────
 
-def generate_slug(store_name: str) -> str:
-    """Auto-generate collision-free slug from store name."""
-    slug = re.sub(r'[^a-z0-9]+', '-', store_name.lower()).strip('-')
-    suffix = secrets.token_hex(2)
-    return f"{slug}-{suffix}"
+def generate_slug(store_name: str, *, suffix: bool = False) -> str:
+    """Slug from store name — clean by default, collision suffix on demand.
+
+    "Emma Fashion" → "emma-fashion", or "emma-fashion-a3f2" when suffix=True.
+    Caller checks the DB for collisions and retries with suffix=True.
+    """
+    slug = re.sub(r'[^a-z0-9]+', '-', store_name.lower()).strip('-') or "store"
+    if suffix:
+        return f"{slug}-{secrets.token_hex(2)}"
+    return slug
 
 
 # ─── 8. Telemetry ─────────────────────────────────────────────────────────────

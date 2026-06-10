@@ -71,13 +71,26 @@ export const MerchantSchema = z.object({
   email: z.string().email(),
   store_name: z.string(),
   slug: z.string(),
-  logo_url: z.string().url(),
+  logo_url: z.string(),  // empty string until the logo upload step
   category: z.string(),
   brand_package: BrandPackageSchema.nullable(),
   onboarding_status: z.enum([
     'store_info', 'logo_upload', 'brand_review', 'products', 'live'
   ]),
   is_live: z.boolean(),
+})
+
+export const MerchantCreateSchema = z.object({
+  email: z.string().email(),
+  store_name: z.string().min(1),
+  password: z.string().min(8).max(72),  // 72 = bcrypt input limit
+  category: z.string().default('other'),
+  description: z.string().default(''),
+})
+
+export const MerchantLoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
 })
 
 // ─── 6. Product ───────────────────────────────────────────────────────────────
@@ -152,6 +165,8 @@ export type BrandGuardRule = z.infer<typeof BrandGuardRuleSchema>
 export type BrandGuardRules = z.infer<typeof BrandGuardRulesSchema>
 export type BrandPackage = z.infer<typeof BrandPackageSchema>
 export type Merchant = z.infer<typeof MerchantSchema>
+export type MerchantCreate = z.infer<typeof MerchantCreateSchema>
+export type MerchantLogin = z.infer<typeof MerchantLoginSchema>
 export type Product = z.infer<typeof ProductSchema>
 export type SystemState = z.infer<typeof SystemStateSchema>
 export type BrandWarning = z.infer<typeof BrandWarningSchema>

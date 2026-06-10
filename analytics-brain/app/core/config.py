@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     qwen_api_key: str
     qwen_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen-max"
+    qwen_vl_model: str = "qwen-vl-max"
 
     # ── Alibaba Cloud Redis (Tair) ────────────────────────
     redis_host: str = "localhost"
@@ -19,6 +20,14 @@ class Settings(BaseSettings):
     oss_access_key_id: str = ""
     oss_access_key_secret: str = ""
     oss_bucket: str = "elevate-assets"
+
+    # ── Database (Alibaba Cloud RDS PostgreSQL) ───────────
+    database_url: str = "postgresql+asyncpg://elevate:elevate_dev@localhost:5432/elevate"
+
+    # ── Auth ──────────────────────────────────────────────
+    jwt_secret: str  # required — startup fails if missing from .env
+    jwt_algorithm: str = "HS256"
+    jwt_expires_minutes: int = 60 * 24 * 7  # 7 days — hackathon-friendly session
 
     # ── App ───────────────────────────────────────────────
     app_env: str = "development"
@@ -34,6 +43,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-
-    # ── Database (Alibaba Cloud RDS PostgreSQL) ────────────────────────────
-    database_url: str = "postgresql+asyncpg://localhost/elevate"

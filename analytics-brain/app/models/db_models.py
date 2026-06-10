@@ -12,11 +12,15 @@ class MerchantDB(Base):
     __tablename__ = "merchants"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     store_name: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String, default="other")
+    description: Mapped[str] = mapped_column(Text, default="")
     logo_url: Mapped[str | None] = mapped_column(String)
     onboarding_status: Mapped[str] = mapped_column(String, default="store_info")
+    is_live: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time() * 1000))
 
     products: Mapped[list["ProductDB"]] = relationship(back_populates="merchant")

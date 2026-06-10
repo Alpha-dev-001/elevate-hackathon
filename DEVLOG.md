@@ -76,3 +76,63 @@ backend levels (all excluded).
 httpOnly cookie) in analytics-brain.
 
 ---
+
+### Merchant Auth — June 10, 2026
+
+**Approach:** Email + password auth with bcrypt hashes and a JWT carried in an
+httpOnly cookie (`elevate_session`) — never localStorage, so XSS can't lift the
+token. Four routes: `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`,
+`GET /auth/me`. Onboarding state lives directly on the merchant row
+(`onboarding_status`) — no separate session model. Signup collects store info,
+so the status advances straight to `logo_upload`.
+
+Slug generation follows the spec: "Emma Fashion" → `emma-fashion`, and only on
+a DB collision does it retry with a random suffix (`emma-fashion-f66d`). Guard
+rails: symbol-only or non-ASCII store names fall back to `store` + suffix
+rather than producing an empty slug.
+
+Supporting fixes along the way:
+- `config.py` had `database_url` declared *after* the return statement in
+  `get_settings()` — unreachable code, the DB engine would have crashed on
+  first use. Moved into Settings properly, added `jwt_secret` (required —
+  startup fails loudly if missing) and token expiry settings.
+- `MerchantDB` gained `slug` (unique, indexed), `category`, `description`,
+  `is_live` to match the Pydantic `Merchant` schema.
+- Two stale scaffold routers (`onboarding`, `api`) import schema classes that
+  no longer exist — they're excluded from `main.py` with explicit notes until
+  their rewrite steps, so the app boots clean instead of dying on import.
+- Dev convenience: `create_all` on startup in development only; production
+  uses Alembic against RDS. A DB outage at startup logs loudly but doesn't
+  prevent the API from serving.
+- Zod mirror updated in the same task: `MerchantSchema.logo_url` accepts the
+  pre-upload empty string; added `MerchantCreateSchema` / `MerchantLoginSchema`
+  for frontend form validation.
+
+**Qwen calls:** none — auth is deterministic infrastructure.
+
+**Problems:**
+1. The venv had no pip (uv-managed) and zero packages installed.
+2. `greenlet==3.5.1` (SQLAlchemy async dependency) ships a broken wheel for
+   this Windows/py3.10 combo — `DLL load failed importing _greenlet`.
+3. The integration test deadlocked silently: an in-memory SQLite engine's
+   pooled connection stayed bound to the `asyncio.run()` event loop while
+   FastAPI's TestClient ran its own loop.
+
+**Solutions:**
+1. Installed everything via `uv pip install -r requirements.txt`.
+2. Pinned `greenlet==3.1.1` in requirements.txt with a do-not-unpin comment.
+3. Switched the test DB to a file-backed temp SQLite with `NullPool` — every
+   connection is fresh, nothing crosses event loops.
+
+**Edge cases tested (10-check integration suite, full HTTP layer):**
+duplicate email → 409; slug collision → suffixed; wrong password vs unknown
+email → byte-identical 401s (no account enumeration); logout kills session;
+missing cookie → 401; tampered JWT → 401; expired JWT → 401; short password
+and malformed email → 422; bcrypt handles malformed stored hashes without a
+500; response bodies never contain password material.
+
+**Next:** STS token endpoint for direct OSS upload (build order step 2),
+then qwen-vl-max logo analysis. Postgres smoke test of auth once Docker
+Desktop is running.
+
+---

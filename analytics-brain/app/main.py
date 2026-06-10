@@ -1,8 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
-from app.routers import ws, api, onboarding, upload
+from app.core.database import get_engine, Base
+from app.models import db_models  # noqa: F401 — registers tables on Base.metadata
+from app.routers import ws, upload, auth
 import logging
+
+# Stale scaffold routers — excluded until rewritten against current schemas.py:
+#   app.routers.onboarding — imports removed OnboardingSession; rewrite at the
+#                            brand-generation step of the Sprint 1 build order
+#   app.routers.api        — imports removed QRGenerateRequest/Response; rewrite
+#                            at the QR/health step
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,10 +33,9 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-app.include_router(ws.router)            # WebSocket connections
-app.include_router(upload.router)        # STS tokens for direct OSS upload
-app.include_router(onboarding.router)    # Onboarding + brand generation
-app.include_router(api.router)           # QR, health, decision trigger
+app.include_router(ws.router)        # WebSocket connections
+app.include_router(upload.router)    # STS tokens for direct OSS upload
+app.include_router(auth.router)      # merchant signup / login / session
 
 
 @app.on_event("startup")
@@ -36,6 +43,23 @@ async def startup():
     logger.info("Elevate API starting up")
     logger.info(f"Frontend: {settings.frontend_url}")
     logger.info(f"Qwen model: {settings.qwen_model}")
+
+    if settings.app_env == "development":
+        # Dev convenience: sync tables to models. Production uses Alembic
+        # migrations against RDS — create_all never runs there.
+        try:
+            async with get_engine().begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database tables synced")
+        except Exception as e:
+            logger.error(
+                f"Database unreachable — auth and persistence will fail: {e}"
+            )
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.get("/")
