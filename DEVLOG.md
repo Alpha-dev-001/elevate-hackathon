@@ -136,3 +136,32 @@ then qwen-vl-max logo analysis. Postgres smoke test of auth once Docker
 Desktop is running.
 
 ---
+
+### Postgres Smoke Test — int32 Timestamp Overflow — June 10, 2026
+
+**Approach:** With Docker up, ran the live auth flow (health → signup → me →
+wrong/right login → logout) against real Postgres via docker-compose instead
+of the SQLite test override.
+
+**Problems:** Signup 500'd on Postgres despite the full SQLite suite passing.
+Every timestamp column in db_models stores a millisecond epoch
+(`int(time.time() * 1000)` ≈ 1.78 trillion) in a SQLAlchemy `Integer` column —
+int4 in Postgres, max ~2.1 billion. SQLite's dynamic typing masked the
+overflow completely; asyncpg rejected it with "value out of int32 range".
+
+**Solutions:** Switched all six ms-epoch columns (`created_at` ×4,
+`updated_at`, `executed_at`) to `BigInteger`, reset the dev schema, reran the
+flow — all green: clean slug, cookie session resolves, wrong password 401,
+correct login 200, logout kills the session.
+
+**Edge cases tested:** the full smoke sequence above, against the same
+Postgres 16 image the docker-compose dev environment uses.
+
+**Lesson recorded:** SQLite-backed tests validate logic, not column types.
+Anything type-sensitive must also run against Postgres before it counts as
+done. The dialect differences are exactly where silent demo-day failures live.
+
+**Next:** STS token endpoint for direct OSS upload — needs OSS bucket + RAM
+credentials provisioned in the Alibaba Cloud console.
+
+---
