@@ -154,6 +154,27 @@ export const WSMessageSchema = z.object({
   timestamp: z.number(),
 })
 
+// ─── 9. Onboarding API shapes ─────────────────────────────────────────────────
+
+// POST /onboarding/start — the authenticated merchant hands us the OSS URL of
+// their uploaded logo. Store info already lives on the merchant from signup.
+export const LogoSubmitRequestSchema = z.object({
+  logo_oss_url: z.string().url(),
+})
+
+// Payload of the `brand_ready` WS event (and GET /onboarding/brand body).
+// Either the finished package, or an error if generation failed — the
+// incubation screen branches on which is present.
+export const BrandReadyPayloadSchema = z.union([
+  z.object({
+    brand_package: BrandPackageSchema,
+    store_shell_url: z.string(),
+  }),
+  z.object({
+    error: z.string(),
+  }),
+])
+
 // ─── Inferred Types ───────────────────────────────────────────────────────────
 
 export type LogoAnalysis = z.infer<typeof LogoAnalysisSchema>
@@ -171,3 +192,5 @@ export type Product = z.infer<typeof ProductSchema>
 export type SystemState = z.infer<typeof SystemStateSchema>
 export type BrandWarning = z.infer<typeof BrandWarningSchema>
 export type WSMessage = z.infer<typeof WSMessageSchema>
+export type LogoSubmitRequest = z.infer<typeof LogoSubmitRequestSchema>
+export type BrandReadyPayload = z.infer<typeof BrandReadyPayloadSchema>

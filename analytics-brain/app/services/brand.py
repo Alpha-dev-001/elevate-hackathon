@@ -90,10 +90,6 @@ Schema (every field required):
     "body_font":    "a real Google Font name for body text"
   },
   "brand_voice_profile": "2-3 sentences describing the tone of voice for this store's copy — used later to write product descriptions. Be specific to THIS brand.",
-  "icons": {
-    "logo_mark":  "<svg ...>...</svg> — a SIMPLE geometric logo mark, viewBox 0 0 64 64, using palette colors, no text, no external refs, under 600 chars",
-    "store_icon": "<svg ...>...</svg> — a SIMPLE favicon, viewBox 0 0 32 32, single shape, palette colors, under 400 chars"
-  },
   "layout_variant": "standard | promo_heavy | minimal",
   "suggested_categories": ["2 to 4 product category names that fit this store"],
   "guards": {
@@ -118,11 +114,33 @@ Rules for the guards block — this is the brand's immune system:
 - Author one rule per protected field you care about (accent, primary, background, layout_variant). 1 to 4 rules.
 - Each warning_message is written in YOUR voice, references the real hex values,
   and explains the consequence of breaking it for THIS specific logo and mood.
-- The SVG icons must be minimal geometric marks. Simple paths, rects, circles.
-  No <script>, no <image>, no external href. Inline fills only.
 
 Make every word specific to the logo analysis and store details you were given.
 Pure JSON. Nothing else."""
+
+
+# Icons are generated in a SEPARATE call (see generate_icons) so the brand
+# reveal isn't blocked on token-heavy SVG markup. The merchant sees the brand
+# in ~10s; real icons morph in a beat later.
+ICON_GENERATION_PROMPT = """You design minimal, modern SVG brand marks.
+
+Return ONLY a JSON object — no prose, no markdown:
+
+{
+  "logo_mark":  "<svg viewBox=\\"0 0 64 64\\" xmlns=\\"http://www.w3.org/2000/svg\\">...</svg>",
+  "store_icon": "<svg viewBox=\\"0 0 32 32\\" xmlns=\\"http://www.w3.org/2000/svg\\">...</svg>"
+}
+
+Constraints — follow exactly:
+- Simple geometric shapes only: rect, circle, ellipse, path, polygon. No text
+  unless a single brand initial.
+- Use ONLY the provided palette hex colors as inline fills.
+- logo_mark under 600 characters, store_icon under 400 characters.
+- NO <script>, NO <image>, NO external href or xlink. Self-contained markup.
+- The two marks should feel like the same family — the store_icon is the
+  logo_mark distilled to its simplest form.
+
+Match the brand's style and mood. Pure JSON. Nothing else."""
 
 
 # ─── HTTP plumbing ──────────────────────────────────────────────────────────────
@@ -321,7 +339,7 @@ async def analyze_logo(logo_url: str) -> LogoAnalysis:
         ],
         max_tokens=512,
         temperature=0.1,  # near-deterministic — we want stable color extraction
-        timeout=30.0,
+        timeout=45.0,
     )
 
     data = _extract_json(raw)
@@ -359,9 +377,13 @@ async def generate_brand(
             {"role": "system", "content": BRAND_GENERATION_PROMPT},
             {"role": "user", "content": context},
         ],
-        max_tokens=3000,  # SVG markup is token-heavy
+        max_tokens=2500,
         temperature=0.4,
-        timeout=45.0,
+        # qwen-max on the intl endpoint measures ~35-45s for this; give real
+        # headroom so a slow-but-valid call never trips a timeout->retry (which
+        # would double the perceived latency). The reveal is masked by the
+        # incubation loading state, so a longer ceiling is the safe tradeoff.
+        timeout=75.0,
     )
 
     data = _extract_json(raw)
@@ -537,6 +559,44 @@ def _default_accent_rule(palette: BrandPalette) -> BrandGuardRule:
     )
 
 
+# ─── SVG icons — separate call, off the critical reveal path ─────────────────────
+
+async def generate_icons(
+    store_name: str,
+    palette: BrandPalette,
+    analysis: LogoAnalysis,
+) -> BrandIconSet:
+    """qwen-max draws the brand's SVG marks in a dedicated call.
+
+    Deliberately decoupled from generate_brand so the brand reveal isn't held
+    hostage to token-heavy SVG. Always returns a valid BrandIconSet — if the
+    model flakes, the deterministic palette mark stands in.
+    """
+    context = json.dumps(
+        {
+            "store_name": store_name,
+            "palette": palette.model_dump(),
+            "style": analysis.style,
+            "mood": analysis.mood,
+            "geometry_notes": analysis.geometry_notes,
+        }
+    )
+
+    raw = await _qwen_chat(
+        model=get_settings().qwen_model,
+        messages=[
+            {"role": "system", "content": ICON_GENERATION_PROMPT},
+            {"role": "user", "content": context},
+        ],
+        max_tokens=1500,
+        temperature=0.5,
+        timeout=60.0,
+    )
+
+    data = _extract_json(raw)
+    return _safe_icons(data, store_name, palette)
+
+
 # ─── Orchestrator ───────────────────────────────────────────────────────────────
 
 async def build_brand_package(
@@ -545,10 +605,12 @@ async def build_brand_package(
     category: str,
     description: str,
 ) -> BrandPackage:
-    """Full pipeline: logo URL -> LogoAnalysis -> BrandPackage.
+    """Fast path: logo URL -> LogoAnalysis -> brand + guards.
 
-    Sequential by necessity — the brain needs the eyes' output. Caching the
-    result in Redis is the caller's responsibility.
+    Icons come back as deterministic palette marks here (generate_brand fills
+    them) — the caller upgrades them via generate_icons in the background so
+    the reveal stays quick. Sequential by necessity: the brain needs the eyes.
+    Redis caching is the caller's responsibility.
     """
     analysis = await analyze_logo(logo_url)
     brand, guards = await generate_brand(analysis, store_name, category, description)
@@ -594,7 +656,7 @@ Products:
         messages=[{"role": "user", "content": prompt}],
         max_tokens=min(3500, 220 * len(products) + 300),
         temperature=0.6,
-        timeout=45.0,
+        timeout=60.0,
     )
 
     data = _extract_json(raw)

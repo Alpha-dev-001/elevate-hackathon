@@ -368,6 +368,13 @@ class STSTokenResponse(BaseModel):
     region: str
     object_key: str
 
+class LogoSubmitRequest(BaseModel):
+    """Step 2 -> 3: the authenticated merchant hands us the OSS URL of their
+    uploaded logo. Store info already lives on the merchant from signup, so the
+    URL is all we need to kick off brand generation."""
+    logo_oss_url: str
+
+
 class OnboardingStartRequest(BaseModel):
     store_name: str
     category: StoreCategory

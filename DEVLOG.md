@@ -236,3 +236,75 @@ descriptions, all on-voice.
 and caches the package in Redis.
 
 ---
+
+### Onboarding Router + brand_ready WebSocket Push — June 14, 2026
+
+**Approach:** Rewrote `routers/onboarding.py` to wire the brand engine into a
+real flow and re-enabled it in `main.py` (it had been excluded — the old file
+imported the removed `OnboardingSession`, handled file bytes, and read a dozen
+dead schema fields). The new flow is authenticated via the session cookie, so a
+merchant can only ever trigger their own brand generation — no `merchant_id` in
+the URL to spoof. Three routes: `POST /onboarding/start` (submit the logo's OSS
+URL, kick off generation), `GET /onboarding/brand` (the finished package),
+`POST /onboarding/publish` (go live at `/s/{slug}`).
+
+The reveal is event-driven, not blocking. `start` stores the URL, launches the
+brand pipeline as a background task, and returns 202 immediately; the frontend
+waits on the terminal WebSocket for `brand_ready`. The pipeline pushes twice —
+once with the brand + guards (fast, deterministic icon marks), then again a beat
+later with real qwen-max SVG icons morphed in. This is the agreed split: the
+token-heavy SVG never sits on the critical reveal path.
+
+Two-layer persistence per the data rule: the package is written to Postgres
+(`BrandProfileDB`, source of truth) and cached in Redis. `GET /onboarding/brand`
+reads Redis-first, Postgres-fallback — which doubles as the recovery path if the
+client connected to the socket too late and missed the push.
+
+**Qwen calls:** unchanged from the brand-engine task — qwen-vl-max (logo) ->
+qwen-max (brand+guards), plus the separate qwen-max icon call in the background.
+Validated live end-to-end (real Postgres + Redis + Qwen + a real WS client).
+
+**Problems:**
+1. `.env` had `REDIS_HOST=your_redis_host_here` — a placeholder never pointed at
+   the local container. The brand pipeline's Redis writes are wrapped and
+   degraded gracefully (the brand still persisted to Postgres and the reveal
+   worked), but `publish` -> `save_state` wasn't wrapped and surfaced a raw 500.
+2. A scaffold bug: the `brand` / `profile` / `onboarding` Redis key builders
+   were defined on the `TTL` class instead of `Keys`, so the old code's
+   `Keys.brand(...)` would have `AttributeError`'d.
+3. Measured brand reveal latency on the intl endpoint is ~40s (logo + brand),
+   with the icon upgrade another ~30s — far slower than the 15-20s seen on
+   direct calls earlier. No retries in the logs, so it's genuine API latency.
+   My `generate_brand` timeout was 45s — dangerously close to the ~41s real
+   latency, where one slow call would trip a timeout->retry and double the wait.
+
+**Solutions:**
+1. Pointed `REDIS_HOST`/`REDIS_PASSWORD` at the local container, and hardened
+   `publish` to raise a clean 503 ("state service unavailable") instead of a
+   500 when the state layer is genuinely unreachable — the store can't go live
+   without Redis, so an honest error beats a stack trace.
+2. Moved the three key builders onto `Keys` where they belong.
+3. Widened the Qwen timeouts to sit well above measured latency (brand 45->75s,
+   logo 30->45s, icons 30->60s, descriptions 45->60s) so a slow-but-valid call
+   never spuriously retries. The reveal is masked by the incubation loading
+   state, so a higher ceiling is the right tradeoff. The ~40s reveal remains an
+   open demo-day risk worth re-measuring — flagged, not yet optimised away.
+
+**Edge cases tested (live, full stack):** brand requested before generation ->
+409 with phase; WS connected before start so no race; `brand_ready` carried
+Qwen's own brand-specific warning words; durable `GET /onboarding/brand` -> 200
+after the event; publish -> live at `/s/{slug}`; `/auth/me` reflects
+`is_live=true` + `onboarding_status=live`. Redis-down path proven by accident
+when the placeholder host degraded the cache writes without losing the brand.
+Background-task failures push an error payload on `brand_ready` rather than
+hanging the incubation screen.
+
+**Zod mirror:** added `LogoSubmitRequestSchema` and a `BrandReadyPayloadSchema`
+(success-or-error union) to `types/schemas.ts` so the frontend WS handler has a
+typed contract to validate against.
+
+**Next:** product management (single add + CSV batch) feeding the batched
+description call, then the storefront pages at `/s/{slug}`. STS upload still
+parked on OSS credentials.
+
+---

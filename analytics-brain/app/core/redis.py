@@ -54,15 +54,6 @@ class Keys:
     def qr_campaign(merchant_id: str, campaign_id: str) -> str:
         return f"elevate:{merchant_id}:qr:{campaign_id}"
 
-
-# ─── TTLs (seconds) ───────────────────────────────────────────────────────────
-
-class TTL:
-    SNAPSHOT = 300          # 5 min
-    SESSION = 1800          # 30 min
-    PENDING_ACTIONS = 3600  # 1 hour
-    DELTA_LOG = 86400 * 7   # 7 days
-
     @staticmethod
     def brand(merchant_id: str) -> str:
         return f"elevate:{merchant_id}:brand"
@@ -74,3 +65,12 @@ class TTL:
     @staticmethod
     def onboarding(merchant_id: str) -> str:
         return f"elevate:{merchant_id}:onboarding"
+
+
+# ─── TTLs (seconds) ───────────────────────────────────────────────────────────
+
+class TTL:
+    SNAPSHOT = 300          # 5 min
+    SESSION = 1800          # 30 min
+    PENDING_ACTIONS = 3600  # 1 hour
+    DELTA_LOG = 86400 * 7   # 7 days

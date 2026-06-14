@@ -3,14 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.database import get_engine, Base
 from app.models import db_models  # noqa: F401 — registers tables on Base.metadata
-from app.routers import ws, upload, auth
+from app.routers import ws, upload, auth, onboarding
 import logging
 
-# Stale scaffold routers — excluded until rewritten against current schemas.py:
-#   app.routers.onboarding — imports removed OnboardingSession; rewrite at the
-#                            brand-generation step of the Sprint 1 build order
-#   app.routers.api        — imports removed QRGenerateRequest/Response; rewrite
-#                            at the QR/health step
+# Stale scaffold router still excluded until rewritten against current schemas.py:
+#   app.routers.api — imports removed QRGenerateRequest/Response; rewrite at the
+#                     QR/health step of the build order
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,9 +31,10 @@ app.add_middleware(
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-app.include_router(ws.router)        # WebSocket connections
-app.include_router(upload.router)    # STS tokens for direct OSS upload
-app.include_router(auth.router)      # merchant signup / login / session
+app.include_router(ws.router)          # WebSocket connections
+app.include_router(upload.router)      # STS tokens for direct OSS upload
+app.include_router(auth.router)        # merchant signup / login / session
+app.include_router(onboarding.router)  # logo -> brand -> publish
 
 
 @app.on_event("startup")
