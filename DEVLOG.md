@@ -165,3 +165,74 @@ done. The dialect differences are exactly where silent demo-day failures live.
 credentials provisioned in the Alibaba Cloud console.
 
 ---
+
+### The Brand Engine — qwen-vl-max + qwen-max — June 14, 2026
+
+**Approach:** Rewrote `services/brand.py` from scratch — the scaffold imported
+five enums (`ColorCombo`, `FontPairing`, `LogoStyle`, `ColorTemp`,
+`FontPersonality`) that no longer exist and couldn't even be imported. Two
+Qwen calls in sequence: qwen-vl-max reads the logo and returns a `LogoAnalysis`;
+qwen-max turns that into a full `BrandPackage` — palette, typography, brand
+voice, SVG icons, and the self-authored `BrandGuardRules` that fire later with
+zero round-trip. One orchestrator (`build_brand_package`) chains them; the brand
+call does maximum work in a single request per the token-efficiency rules.
+
+A deliberate architecture fix: the scaffold read the logo as base64 bytes.
+CLAUDE.md is explicit that FastAPI never touches file bytes — so `analyze_logo`
+now takes the OSS **URL** and qwen-vl-max fetches the image itself. Confirmed
+against the docs that the VL model accepts public image URLs in `image_url`.
+
+Product descriptions are one batched call for the whole catalogue
+(`generate_descriptions`), never a per-product loop.
+
+**Qwen calls:** qwen-vl-max (logo, ~512 tok out, temp 0.1 for stable color
+extraction); qwen-max (brand+guards+SVG, ~1.5k tok out, temp 0.4); qwen-max
+(batched descriptions, ~220 tok/product, temp 0.6). JSON mode on all three.
+Redis caching of the finished package is deferred to the onboarding router,
+which owns merchant_id — keeps the engine pure and testable with Redis down.
+
+**Problems:**
+1. Every Qwen call 401'd. The account's Model Studio key is an **International**
+   key (`sk-ws-...`) — it is rejected by the mainland `dashscope.aliyuncs.com`
+   host and only authenticates against `dashscope-intl.aliyuncs.com`. Config and
+   .env both pointed at the mainland endpoint.
+2. The signature feature — Qwen's first-person brand-defense warning — was
+   silently falling back to a generic hardcoded line. qwen-max returned the
+   `rules` array as a flat list of `"key: value"` *strings* rather than objects,
+   so it failed `BrandGuardRules` validation and the good content was discarded.
+3. The SVG sanitizer accepted an empty `<svg></svg>` shell (left behind after
+   stripping a `<script>`) as "usable" — would render an invisible icon.
+4. Full pipeline runs ~15–20s, well over the <5s aspiration.
+
+**Solutions:**
+1. Switched the default and .env `QWEN_API_BASE` to the `-intl` endpoint;
+   verified the same key 401s on mainland and 200s on intl. Documented the
+   region rule in config so a China-region key can override it back.
+2. Added a deterministic repair shim (`_parse_flat_rules` / `_normalize_rules`)
+   that reassembles the flattened strings into rule objects, splitting on each
+   `rule_id` boundary and using `partition(":")` so hex values and colons inside
+   the warning sentence survive intact. Qwen's real words are now preserved;
+   the generic line is a true last resort only. Hardened the prompt to ask for
+   an array of objects as defense-in-depth. Also coerce dict-shaped
+   `forbidden_combinations` into sentences.
+3. `_is_usable_svg` now requires an actual drawing element
+   (rect/circle/path/text/…) inside, not just well-formed tags; falls back to a
+   deterministic palette-based letter mark otherwise.
+4. Flagged as a CONCERN, not silently optimized — proposed moving SVG
+   generation out of the critical brand call (deterministic marks for the
+   reveal, real icons filled in by a background call) pending a decision.
+
+**Edge cases tested:** markdown-fenced JSON recovered; `<script>`/`onload`/
+external-href stripped from SVG; empty-shell SVG rejected; missing palette slots
+backfilled from the logo colors; missing/empty guards block yields a valid
+non-empty fallback; the exact flattened-string `rules` payload Qwen produced
+repaired with words preserved; dict-shaped `forbidden_combinations` stringified;
+message-less rule dropped. Then live end-to-end against the intl endpoint: logo
+→ analysis → brand → guards (Qwen's own warning survived) → 3 batched
+descriptions, all on-voice.
+
+**Next:** STS upload endpoint (blocked on OSS credentials), then the WebSocket
+`brand_ready` push and the onboarding router rewrite that wires this engine in
+and caches the package in Redis.
+
+---

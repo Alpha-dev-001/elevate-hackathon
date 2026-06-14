@@ -5,7 +5,9 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # ── Qwen Cloud ────────────────────────────────────────
     qwen_api_key: str
-    qwen_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    # International Model Studio keys (sk-ws-...) MUST use the -intl endpoint;
+    # the mainland host 401s them. Override in .env if using a China-region key.
+    qwen_api_base: str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen-max"
     qwen_vl_model: str = "qwen-vl-max"
 
