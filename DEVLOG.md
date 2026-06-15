@@ -415,3 +415,42 @@ then the storefront at `/s/{slug}` that renders SystemState. Swap the logo
 stand-in for real OSS drag-and-drop once credentials land.
 
 ---
+
+### Logo Analysis — URL Download Failures, base64 Fallback — June 15, 2026
+
+**Approach:** qwen-vl-max takes an image either as a URL it fetches itself or as
+an inline base64 data URL (confirmed in the Model Studio docs: `data:image/...;
+base64,<data>`, 10 MB cap after encoding). We pass the URL by default — that's
+zero bytes through the backend and works for OSS-hosted logos (the docs' own
+example image is an OSS URL). But a pasted third-party URL often can't be
+fetched by the model's servers, returning `<400> InternalError.Algo.
+InvalidParameter: Failed to download multimodal content`.
+
+`analyze_logo` now self-heals: try the URL; on a download failure, fetch the
+bytes server-side (browser UA + image Accept header, 10 MB guard) and retry as
+a base64 data URL. `_qwen_chat` raises a distinct `LogoFetchError` for that
+specific 400 so only the logo path triggers the fallback. The OSS *upload* path
+still never routes bytes through FastAPI — this only touches an already-hosted
+small image transiently to feed the model.
+
+**Qwen calls:** qwen-vl-max, unchanged count (one pass; a second only on
+fallback). Verified the base64 path end to end (~6s, colors extracted).
+
+**Problems:** the URL-only approach broke the dev paste-URL flow for hosts the
+model can't reach. Some hosts (e.g. Wikimedia thumbnails) also block
+server-side fetchers outright, so even the backend fetch 400s for those —
+unavoidable from our side; normal direct image links, CDNs, GitHub raw, etc.
+fetch fine.
+
+**Solutions:** (above). For bot-hostile hosts the real fix is the OSS upload
+path — once the logo lives on the merchant's public-read OSS object, qwen-vl
+fetches it directly with no fallback needed.
+
+**Edge cases tested:** base64 data-URL path succeeds against qwen-vl;
+backend fetch returns 200 + correct content-type for picsum and GitHub-raw;
+non-image URL and oversized image raise clean, legible errors.
+
+**Next:** wire the real OSS presigned-upload now that credentials are in place
+(makes the paste-URL stand-in obsolete), then the products UI + storefront.
+
+---

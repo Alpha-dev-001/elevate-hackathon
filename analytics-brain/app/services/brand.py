@@ -20,6 +20,7 @@ merchant_id) — this module stays pure and independently testable, so the
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 import html
@@ -45,6 +46,24 @@ class BrandGenerationError(Exception):
     The router catches this and surfaces a real error to the merchant —
     a half-built brand is worse than an honest failure.
     """
+
+
+class LogoFetchError(BrandGenerationError):
+    """qwen-vl-max couldn't download the image from the URL we gave it.
+
+    Signals analyze_logo to retry by fetching the bytes server-side and
+    sending them inline as base64 (works for any URL the backend can reach,
+    even hosts that block the model's fetcher).
+    """
+
+
+# qwen-vl image limit: a single image must be <= 10 MB *after* base64 encoding.
+_MAX_B64_BYTES = 10 * 1024 * 1024
+# Browser-ish UA so hosts that 403 default fetchers still serve us the bytes.
+_FETCH_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 
 # ─── Prompts ──────────────────────────────────────────────────────────────────
@@ -195,8 +214,12 @@ async def _qwen_chat(
                         ) from e
                 # Permanent client errors: surface immediately, do not retry.
                 if resp.status_code not in _RETRYABLE_STATUS:
+                    body = resp.text
+                    # qwen-vl couldn't fetch the image — distinct, recoverable.
+                    if resp.status_code == 400 and "download" in body.lower() and "multimodal" in body.lower():
+                        raise LogoFetchError(body[:300])
                     raise BrandGenerationError(
-                        f"{model} call failed [{resp.status_code}]: {resp.text[:300]}"
+                        f"{model} call failed [{resp.status_code}]: {body[:300]}"
                     )
                 last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
 
@@ -318,21 +341,15 @@ def _safe_icons(raw_icons: object, store_name: str, palette: BrandPalette) -> Br
 
 # ─── 1. The eyes — qwen-vl-max ──────────────────────────────────────────────────
 
-async def analyze_logo(logo_url: str) -> LogoAnalysis:
-    """qwen-vl-max reads the logo straight from its OSS URL.
-
-    No bytes pass through FastAPI — the model fetches the public image itself.
-    """
-    if not logo_url or not logo_url.strip():
-        raise BrandGenerationError("analyze_logo called without a logo URL")
-
+async def _run_vl(image_ref: str) -> LogoAnalysis:
+    """One qwen-vl-max pass over image_ref (a public URL or a data: URL)."""
     raw = await _qwen_chat(
         model=get_settings().qwen_vl_model,
         messages=[
             {
                 "role": "user",
                 "content": [
-                    {"type": "image_url", "image_url": {"url": logo_url}},
+                    {"type": "image_url", "image_url": {"url": image_ref}},
                     {"type": "text", "text": LOGO_ANALYSIS_PROMPT},
                 ],
             }
@@ -341,12 +358,62 @@ async def analyze_logo(logo_url: str) -> LogoAnalysis:
         temperature=0.1,  # near-deterministic — we want stable color extraction
         timeout=45.0,
     )
-
     data = _extract_json(raw)
     try:
         return LogoAnalysis.model_validate(data)
     except ValueError as e:
         raise BrandGenerationError(f"Logo analysis failed schema validation: {e!s}") from e
+
+
+async def _fetch_as_data_url(logo_url: str) -> str:
+    """Fetch the image ourselves and inline it as a base64 data URL.
+
+    Fallback for when qwen-vl-max can't reach the URL (hosts that block its
+    fetcher). The backend only touches these bytes transiently in memory — the
+    OSS *upload* path still never routes bytes through FastAPI.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            resp = await client.get(
+                logo_url,
+                headers={"User-Agent": _FETCH_UA, "Accept": "image/*,*/*;q=0.8"},
+            )
+    except httpx.HTTPError as e:
+        raise BrandGenerationError(f"Couldn't fetch the logo at {logo_url}: {e!s}") from e
+
+    if resp.status_code != 200:
+        raise BrandGenerationError(
+            f"Couldn't fetch the logo at {logo_url} [HTTP {resp.status_code}]"
+        )
+
+    content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
+    if not content_type.startswith("image/"):
+        raise BrandGenerationError(
+            f"That URL isn't an image (got '{content_type or 'unknown'}'). "
+            "Paste a direct link to a PNG/JPG/WebP."
+        )
+
+    b64 = base64.b64encode(resp.content).decode()
+    if len(b64) > _MAX_B64_BYTES:
+        raise BrandGenerationError("Logo is too large — keep it under ~7 MB.")
+    return f"data:{content_type};base64,{b64}"
+
+
+async def analyze_logo(logo_url: str) -> LogoAnalysis:
+    """qwen-vl-max reads the logo. Tries the URL directly first (production
+    logos live on OSS, which the model fetches itself — no bytes through
+    FastAPI). If the model can't download it, we fetch the bytes server-side
+    and retry inline as base64 — so any reachable URL works.
+    """
+    if not logo_url or not logo_url.strip():
+        raise BrandGenerationError("analyze_logo called without a logo URL")
+    logo_url = logo_url.strip()
+
+    try:
+        return await _run_vl(logo_url)
+    except LogoFetchError:
+        data_url = await _fetch_as_data_url(logo_url)
+        return await _run_vl(data_url)
 
 
 # ─── 2. The brain — qwen-max ────────────────────────────────────────────────────
