@@ -12,7 +12,25 @@ import type {
   MerchantLogin,
   BrandPackage,
   PresignedUploadResponse,
+  Product,
 } from '@/types/schemas'
+
+export interface ProductCreateInput {
+  name: string
+  price: number
+  stock: number
+  cost_price: number
+  category?: string
+  image_url?: string
+}
+
+export interface ProductCSVRowInput {
+  name: string
+  price: number
+  stock: number
+  image_url?: string
+  category?: string
+}
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:9000'
@@ -85,6 +103,16 @@ export const api = {
       '/onboarding/publish',
       { method: 'POST' },
     ),
+
+  // ── Products ────────────────────────────────────────────────────────────
+  addProduct: (body: ProductCreateInput) =>
+    req<Product>('/products', { method: 'POST', body: JSON.stringify(body) }),
+  addProductsBatch: (products: ProductCSVRowInput[]) =>
+    req<Product[]>('/products/batch', {
+      method: 'POST',
+      body: JSON.stringify({ products }),
+    }),
+  listProducts: () => req<Product[]>('/products'),
 }
 
 export const WS_BASE =

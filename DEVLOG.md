@@ -493,3 +493,35 @@ non-image content types (400). Frontend routes recompile clean.
 storefront at `/s/{slug}`.
 
 ---
+
+### Products UI — June 15, 2026
+
+**Approach:** Added the inventory step between brand review and publish, so the
+onboarding flow is now clickable end to end. New `/products` page: a single-add
+form, a CSV drop zone, the product list, and the publish button. Brand review
+now flows into it ("Add products →") instead of publishing directly; publish
+moved onto the products page.
+
+Single add posts one product and the qwen-max description comes back inline;
+the CSV drop parses client-side (`lib/csv.ts`, columns name/price/stock/
+image_url/category, bad rows skipped not fatal) and posts the batch — one
+qwen-max call for the lot. Each product card flows in with the Qwen easing and
+carries a small "qwen" tag when the copy was model-written. Zero products is a
+valid publish (the store opens in its "preparing the shelves" state).
+
+**Qwen calls:** none new in the UI — it drives the already-built products API
+(`POST /products`, `/products/batch`, `GET /products`).
+
+**Problems / Solutions:** none of note — the backend was already proven; this is
+the UI over it. CSV parser handles quoted fields and skips malformed rows with a
+visible "added N, skipped M" note.
+
+**Edge cases tested:** all onboarding routes compile 200 with no error overlay;
+frontend typechecks clean (only the known next-env false positives). The full
+path now works in the browser: signup → drag-drop logo → OSS → incubation →
+brand reveal → add products (descriptions stream in) → publish → live URL.
+
+**Next:** the storefront at `/s/{slug}` — render SystemState (brand, products,
+layout) for customers. That closes the Sprint 1 loop.
+
+---
