@@ -525,3 +525,44 @@ brand reveal → add products (descriptions stream in) → publish → live URL.
 layout) for customers. That closes the Sprint 1 loop.
 
 ---
+
+### The Storefront at /s/{slug} — June 15, 2026
+
+**Approach:** The public customer-facing store — the thing "publish" finally
+leads to. Backend `GET /api/store/{slug}` (no auth): finds the merchant by slug,
+404s unless live, then assembles a `PublicStore` from the brand (palette,
+typography, icons, tagline) + SystemState (products, promos, layout). A
+deliberate security choice: the public payload uses a trimmed `PublicProduct`
+that **omits cost_price and exact stock** — customers see price and an
+`available` boolean only. Margins never reach the browser.
+
+Frontend `/s/[slug]` is a thin Next-15 server wrapper (awaits the params
+Promise) around a themed client `Storefront`. The store renders in the
+merchant's **own** brand, not the Elevate admin theme: the palette becomes CSS
+vars (`--s-bg/text/accent/primary`), the two brand fonts load from Google Fonts
+at runtime, and the logo mark renders inline. `ProductGrid` is mobile-first
+(1→2→3 cols) and falls back to a branded "preparing the shelves" state — the
+store's own logo mark breathing over its palette — when there are no products,
+so an empty store looks intentional.
+
+**Qwen calls:** none — pure rendering of already-generated brand + products.
+
+**Problems / Solutions:** none of note. Used `color-mix()` for card
+borders/surfaces so the theming holds up across both light and dark brand
+palettes without hard-coding a second set of colors.
+
+**Edge cases tested (live, full flow):** provisioned a real store (brand ->
+3 products, one out of stock -> publish) and hit `GET /api/store/{slug}`:
+payload carries palette/type/icons, all 3 products, **no cost_price leak**, the
+out-of-stock item flagged `available:false`; 404 before publish and for unknown
+slugs. Frontend route compiles 200 and typechecks clean.
+
+**Sprint 1 loop is closed:** signup → drag-drop logo → OSS → incubation → brand
+reveal → products (Qwen descriptions) → publish → **live themed storefront at
+/s/{slug}**.
+
+**Next (Sprint 2 territory):** the realtime layer — customer telemetry over WS,
+the anomaly trigger, Qwen decision cycles, the terminal's option cards, and the
+storefront hot-reloading on `state_updated`.
+
+---

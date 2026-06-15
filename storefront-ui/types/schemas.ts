@@ -187,6 +187,30 @@ export const BrandReadyPayloadSchema = z.union([
   }),
 ])
 
+// ─── 10. Public storefront payload ────────────────────────────────────────────
+
+export const PublicProductSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  price: z.number(),
+  description: z.string().nullable().optional(),
+  image_url: z.string().nullable().optional(),
+  category: z.string().nullable().optional(),
+  available: z.boolean(),
+})
+
+export const PublicStoreSchema = z.object({
+  store_name: z.string(),
+  slug: z.string(),
+  tagline: z.string(),
+  palette: BrandPaletteSchema,
+  typography: BrandTypographySchema,
+  icons: BrandIconSetSchema,
+  layout: LayoutConfigSchema,
+  products: z.array(PublicProductSchema),
+  promos: z.array(PromoSchema).default([]),
+})
+
 // ─── Inferred Types ───────────────────────────────────────────────────────────
 
 export type LogoAnalysis = z.infer<typeof LogoAnalysisSchema>
@@ -208,3 +232,5 @@ export type LogoSubmitRequest = z.infer<typeof LogoSubmitRequestSchema>
 export type BrandReadyPayload = z.infer<typeof BrandReadyPayloadSchema>
 export type PresignedUploadRequest = z.infer<typeof PresignedUploadRequestSchema>
 export type PresignedUploadResponse = z.infer<typeof PresignedUploadResponseSchema>
+export type PublicProduct = z.infer<typeof PublicProductSchema>
+export type PublicStore = z.infer<typeof PublicStoreSchema>

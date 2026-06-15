@@ -425,3 +425,27 @@ class DeltaExecution(BaseModel):
     executed_at: int
     executed_by: Literal["merchant", "auto"]
     rollback_available: bool = True
+
+
+# ─── 16. Public storefront payload ────────────────────────────────────────────
+# Customer-facing — deliberately omits cost_price/margin and any internal fields.
+
+class PublicProduct(BaseModel):
+    id: str
+    name: str
+    price: float
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    category: Optional[str] = None
+    available: bool   # stock > 0 — never expose exact stock or cost
+
+class PublicStore(BaseModel):
+    store_name: str
+    slug: str
+    tagline: str
+    palette: BrandPalette
+    typography: BrandTypography
+    icons: BrandIconSet
+    layout: LayoutConfig
+    products: list[PublicProduct]
+    promos: list[Promo] = Field(default_factory=list)

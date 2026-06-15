@@ -13,6 +13,7 @@ import type {
   BrandPackage,
   PresignedUploadResponse,
   Product,
+  PublicStore,
 } from '@/types/schemas'
 
 export interface ProductCreateInput {
@@ -113,6 +114,9 @@ export const api = {
       body: JSON.stringify({ products }),
     }),
   listProducts: () => req<Product[]>('/products'),
+
+  // ── Public storefront ───────────────────────────────────────────────────
+  getStore: (slug: string) => req<PublicStore>(`/api/store/${encodeURIComponent(slug)}`),
 }
 
 export const WS_BASE =
