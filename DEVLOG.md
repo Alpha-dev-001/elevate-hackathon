@@ -599,3 +599,32 @@ fix (e.g. Haree's 96).
 **Next (Sprint 2):** the realtime layer.
 
 ---
+
+### Storefront Readability — Contrast-Safe Accent — June 15, 2026
+
+**Approach:** Pulled the live stores' palettes and computed real WCAG contrast.
+Body text was fine (10–19:1), but the **accent** — used for taglines and prices —
+failed badly on half the stores (Crest `#B7B7B7` on `#F9F9F9` = 1.9:1; Haree
+`#F5F5F5` on `#E6E6E6` = 1.14:1), so prices were nearly invisible. Root of the
+"text is hard to read" feedback.
+
+`lib/color.ts` adds `contrastRatio` + `readableOn(fg, bg, min=4.5)`: returns the
+accent if it already clears AA, else blends it toward black/white just until it
+passes, preserving hue. The storefront keeps the raw accent for *fills* (promo
+banner background) and uses the derived `--s-accent-text` for accent *text*.
+Banner text gets the same treatment.
+
+**Qwen calls:** none — pure rendering fix.
+
+**Edge cases tested:** Crest `#B7B7B7`→`#656565` (5.54), Haree `#F5F5F5`→`#626262`
+(4.89) both now pass AA; Lumen's already-good `#4A2C2C` left untouched. Route
+compiles 200, typechecks clean.
+
+**Note:** the deeper fix (Qwen picking vivid, usable accents at generation time)
+is logged in UPGRADES.md under brand-system quality.
+
+**Also:** started `UPGRADES.md` — a living, append-only product backlog breaking
+each shipped sprint into upgrade areas, framed for a business owner. Records the
+decided principle that customers always see the *store's* brand, never Elevate.
+
+---

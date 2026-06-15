@@ -50,7 +50,7 @@ export function ProductCard({ product, index }: { product: PublicProduct; index:
           <h3 className="font-semibold leading-tight" style={{ fontFamily: 'var(--s-display)' }}>
             {product.name}
           </h3>
-          <span className="font-semibold shrink-0" style={{ color: 'var(--s-accent)' }}>
+          <span className="font-semibold shrink-0" style={{ color: 'var(--s-accent-text)' }}>
             ${product.price}
           </span>
         </div>

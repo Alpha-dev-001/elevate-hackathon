@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
 import type { PublicStore } from '@/types/schemas'
+import { readableOn } from '@/lib/color'
 import { ProductGrid } from './ProductGrid'
 
 /**
@@ -51,10 +52,14 @@ export function Storefront({ slug }: { slug: string }) {
   }
 
   const { palette, typography } = store
+  // Raw accent stays for fills; a contrast-safe variant is used for accent text
+  // (taglines, prices) so they're never washed out on the brand background.
+  const accentText = readableOn(palette.accent, palette.background)
   const themeVars = {
     '--s-bg': palette.background,
     '--s-text': palette.text,
     '--s-accent': palette.accent,
+    '--s-accent-text': accentText,
     '--s-primary': palette.primary,
     '--s-secondary': palette.secondary,
     '--s-display': `'${typography.display_font}', sans-serif`,
@@ -71,7 +76,7 @@ export function Storefront({ slug }: { slug: string }) {
       {hasPromo && (
         <div
           className="w-full text-center py-2.5 text-sm font-medium"
-          style={{ background: palette.accent, color: palette.background }}
+          style={{ background: palette.accent, color: readableOn(palette.background, palette.accent) }}
         >
           {store.promos[0].label}
         </div>
@@ -94,7 +99,7 @@ export function Storefront({ slug }: { slug: string }) {
           >
             {store.store_name}
           </h1>
-          <p className="text-base" style={{ color: palette.accent }}>
+          <p className="text-base" style={{ color: accentText }}>
             {store.tagline}
           </p>
         </motion.header>
