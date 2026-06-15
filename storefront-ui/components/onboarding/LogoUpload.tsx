@@ -1,20 +1,54 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { motion } from 'framer-motion'
+import { uploadLogo, ApiError } from '@/lib/api'
 
 /**
- * Step 1 (logo half). The real flow uploads the logo straight to OSS via an
- * STS token and hands the backend the resulting URL. OSS credentials aren't
- * wired yet, so for now this takes a pasted image URL — same contract from the
- * backend's view (it only ever sees a URL string). Swaps to drag-and-drop the
- * moment the STS endpoint is live.
+ * Step 1 (logo half). Real direct-to-OSS upload: the file goes straight to OSS
+ * via a presigned PUT, and we hand the resulting public URL upward — qwen-vl
+ * fetches it from there. A "paste a URL" escape hatch stays for resilience
+ * (that path uses the backend's base64 fallback).
  */
 export function LogoUpload({ onSubmit }: { onSubmit: (logoUrl: string) => void }) {
-  const [url, setUrl] = useState('')
-  const [touched, setTouched] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const looksValid = /^https?:\/\/.+/i.test(url.trim())
+  const [mode, setMode] = useState<'file' | 'url'>('file')
+  const [url, setUrl] = useState('')
+  const urlValid = /^https?:\/\/.+/i.test(url.trim())
+
+  const takeFile = (f: File | undefined) => {
+    setError(null)
+    if (!f) return
+    if (!f.type.startsWith('image/')) {
+      setError('That’s not an image — use PNG, JPG, WebP, or SVG.')
+      return
+    }
+    setFile(f)
+    setPreview(URL.createObjectURL(f))
+  }
+
+  const generate = async () => {
+    setError(null)
+    if (mode === 'url') {
+      if (urlValid) onSubmit(url.trim())
+      return
+    }
+    if (!file) return
+    setBusy(true)
+    try {
+      const publicUrl = await uploadLogo(file)
+      onSubmit(publicUrl)
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Upload failed')
+      setBusy(false)
+    }
+  }
 
   return (
     <motion.div
@@ -37,51 +71,78 @@ export function LogoUpload({ onSubmit }: { onSubmit: (logoUrl: string) => void }
         rules that protect it.
       </p>
 
-      {url.trim() && looksValid && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="mb-6 flex justify-center"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={url.trim()}
-            alt="logo preview"
-            className="max-h-32 rounded-lg border border-border object-contain bg-surface-2 p-2"
-            onError={() => setTouched(true)}
+      {mode === 'file' ? (
+        <>
+          <div
+            onClick={() => fileInput.current?.click()}
+            onDragOver={(e) => {
+              e.preventDefault()
+              setDragOver(true)
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOver(false)
+              takeFile(e.dataTransfer.files?.[0])
+            }}
+            className={`cursor-pointer rounded-lg border-2 border-dashed p-8 transition-colors
+              ${dragOver ? 'border-accent bg-accent-dim/30' : 'border-border hover:border-accent'}`}
+          >
+            {preview ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={preview}
+                alt="logo preview"
+                className="max-h-32 mx-auto rounded-lg object-contain bg-surface-2 p-2"
+              />
+            ) : (
+              <div className="py-6">
+                <p className="text-text text-sm mb-1">Drag your logo here</p>
+                <p className="text-muted text-xs font-mono">or click to choose a file</p>
+              </div>
+            )}
+          </div>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+            className="hidden"
+            onChange={(e) => takeFile(e.target.files?.[0])}
           />
-        </motion.div>
+          {file && (
+            <p className="text-muted text-xs font-mono mt-2 truncate">{file.name}</p>
+          )}
+        </>
+      ) : (
+        <input
+          className="w-full bg-bg border border-border rounded-md px-3 py-3 text-text text-sm
+                     outline-none focus:border-accent transition-colors placeholder:text-muted text-center"
+          placeholder="Paste a logo image URL  (https://…)"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
       )}
 
-      <input
-        className="w-full bg-bg border border-border rounded-md px-3 py-3 text-text text-sm
-                   outline-none focus:border-accent transition-colors placeholder:text-muted text-center"
-        placeholder="Paste a logo image URL  (https://…)"
-        value={url}
-        onChange={(e) => {
-          setUrl(e.target.value)
-          setTouched(true)
-        }}
-      />
-
-      {touched && url.trim() && !looksValid && (
-        <p className="text-warning text-xs font-mono mt-2">
-          That doesn’t look like an image URL.
-        </p>
-      )}
+      {error && <p className="text-danger text-xs font-mono mt-3">{error}</p>}
 
       <button
-        disabled={!looksValid}
-        onClick={() => onSubmit(url.trim())}
+        disabled={busy || (mode === 'file' ? !file : !urlValid)}
+        onClick={generate}
         className="mt-6 w-full bg-accent text-bg font-semibold rounded-md py-3 text-sm
                    hover:opacity-90 disabled:opacity-40 transition-opacity"
       >
-        Generate my brand →
+        {busy ? 'Uploading…' : 'Generate my brand →'}
       </button>
 
-      <p className="text-muted text-[11px] font-mono mt-4">
-        Dev mode: paste-a-URL stands in for OSS upload until credentials are wired.
-      </p>
+      <button
+        onClick={() => {
+          setMode(mode === 'file' ? 'url' : 'file')
+          setError(null)
+        }}
+        className="mt-4 text-muted text-[11px] font-mono hover:text-accent transition-colors"
+      >
+        {mode === 'file' ? 'or paste an image URL instead' : '← upload a file instead'}
+      </button>
     </motion.div>
   )
 }

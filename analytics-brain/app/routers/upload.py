@@ -1,70 +1,90 @@
 """
-OSS direct upload via STS tokens.
-FastAPI never handles file bytes — only generates temporary credentials.
-Frontend uploads directly to OSS bucket.
-"""
-import uuid
-import time
-from fastapi import APIRouter, HTTPException
-from app.core.config import get_settings
-from app.models.schemas import STSTokenResponse
+Direct-to-OSS logo upload via presigned PUT URLs.
 
+FastAPI never handles the file bytes — it signs a one-shot, 15-minute PUT URL
+scoped to a single object key, and the browser uploads straight to OSS. The
+signed URL forces `x-oss-object-acl: public-read` so the uploaded object is
+publicly readable (qwen-vl can fetch it, the storefront can serve it) while the
+bucket itself stays private.
+"""
+import time
+import uuid
+import logging
+
+import oss2
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.config import get_settings
+from app.core.security import get_current_merchant
+from app.models.db_models import MerchantDB
+from app.models.schemas import PresignedUploadRequest, PresignedUploadResponse
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
+# content-type -> extension for the object key
+_EXT = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/webp": "webp",
+    "image/gif": "gif",
+    "image/svg+xml": "svg",
+}
 
-@router.post("/token", response_model=STSTokenResponse)
-async def get_oss_upload_token(merchant_id: str):
-    """
-    Generate temporary STS credentials for direct OSS upload.
-    Frontend uses these to upload logo directly — never through FastAPI.
-    Credentials expire in 15 minutes.
-    """
-    settings = get_settings()
+_UPLOAD_TTL = 900  # 15 minutes
 
-    # Object key pre-assigned — frontend uploads to this exact path
-    object_key = f"logos/{merchant_id}/logo_{int(time.time())}.png"
 
-    try:
-        # TODO: Wire up real Alibaba Cloud STS SDK
-        # import sts20150401.models as sts_models
-        # from alibabacloud_sts20150401.client import Client
-        # Real implementation goes here when credentials are available
-
-        # For development: return mock credentials that work with local MinIO
-        # or a development OSS bucket
-        if settings.app_env == "development":
-            return STSTokenResponse(
-                access_key_id="dev_key",
-                access_key_secret="dev_secret",
-                security_token="dev_token",
-                expiration=str(int(time.time()) + 900),
-                bucket=settings.oss_bucket,
-                region=settings.oss_region,
-                object_key=object_key,
-            )
-
-        # Production: real STS call
-        # Placeholder raises until real SDK is wired
+def _bucket():
+    """Build an OSS bucket client (V4 signing). 503 if OSS isn't configured."""
+    s = get_settings()
+    if not (s.oss_access_key_id and s.oss_access_key_secret and s.oss_bucket and s.oss_region):
         raise HTTPException(
-            status_code=501,
-            detail="STS credentials not configured — add Alibaba Cloud STS SDK"
+            status_code=503,
+            detail="Logo upload isn't configured yet (OSS credentials missing).",
+        )
+    endpoint = f"https://oss-{s.oss_region}.aliyuncs.com"
+    auth = oss2.AuthV4(s.oss_access_key_id, s.oss_access_key_secret)
+    # No network call here — just builds the client; signing is local crypto.
+    return oss2.Bucket(auth, endpoint, s.oss_bucket, region=s.oss_region), s
+
+
+@router.post("/logo-url", response_model=PresignedUploadResponse)
+async def presign_logo_upload(
+    payload: PresignedUploadRequest,
+    merchant: MerchantDB = Depends(get_current_merchant),
+):
+    content_type = payload.content_type.lower().strip()
+    if content_type not in _EXT:
+        raise HTTPException(
+            status_code=400,
+            detail="Logo must be PNG, JPG, WebP, GIF, or SVG.",
         )
 
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"STS token generation failed: {e}")
-
-
-@router.get("/confirm")
-async def confirm_upload(object_key: str, merchant_id: str):
-    """
-    Frontend calls this after successful OSS upload to confirm.
-    Returns the public OSS URL for use in onboarding.
-    """
-    settings = get_settings()
-    oss_url = (
-        f"https://{settings.oss_bucket}.oss-{settings.oss_region}"
-        f".aliyuncs.com/{object_key}"
+    bucket, s = _bucket()
+    object_key = (
+        f"logos/{merchant.id}/logo_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+        f".{_EXT[content_type]}"
     )
-    return {"oss_url": oss_url, "object_key": object_key}
+    # These headers are bound into the signature — the browser MUST send the
+    # same ones on the PUT or OSS rejects it with SignatureNotMatch.
+    required_headers = {
+        "Content-Type": content_type,
+        "x-oss-object-acl": "public-read",
+    }
+
+    try:
+        upload_url = bucket.sign_url(
+            "PUT", object_key, _UPLOAD_TTL, slash_safe=True, headers=required_headers
+        )
+    except Exception as e:
+        logger.error(f"[upload] failed to sign URL for {merchant.id}: {e}")
+        raise HTTPException(status_code=502, detail="Could not create an upload URL.")
+
+    public_url = f"https://{s.oss_bucket}.oss-{s.oss_region}.aliyuncs.com/{object_key}"
+    return PresignedUploadResponse(
+        upload_url=upload_url,
+        public_url=public_url,
+        object_key=object_key,
+        required_headers=required_headers,
+    )

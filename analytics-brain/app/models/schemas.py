@@ -368,6 +368,18 @@ class STSTokenResponse(BaseModel):
     region: str
     object_key: str
 
+class PresignedUploadRequest(BaseModel):
+    """Frontend asks for a one-shot upload URL for a logo of this content type."""
+    content_type: str
+
+class PresignedUploadResponse(BaseModel):
+    """A presigned PUT URL the browser uploads straight to. `required_headers`
+    MUST be sent verbatim on the PUT or OSS returns SignatureNotMatch."""
+    upload_url: str
+    public_url: str
+    object_key: str
+    required_headers: dict[str, str]
+
 class LogoSubmitRequest(BaseModel):
     """Step 2 -> 3: the authenticated merchant hands us the OSS URL of their
     uploaded logo. Store info already lives on the merchant from signup, so the

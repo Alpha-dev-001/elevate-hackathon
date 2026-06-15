@@ -162,6 +162,18 @@ export const LogoSubmitRequestSchema = z.object({
   logo_oss_url: z.string().url(),
 })
 
+// POST /api/upload/logo-url — presigned direct-to-OSS upload.
+export const PresignedUploadRequestSchema = z.object({
+  content_type: z.string(),
+})
+
+export const PresignedUploadResponseSchema = z.object({
+  upload_url: z.string(),
+  public_url: z.string(),
+  object_key: z.string(),
+  required_headers: z.record(z.string()),
+})
+
 // Payload of the `brand_ready` WS event (and GET /onboarding/brand body).
 // Either the finished package, or an error if generation failed — the
 // incubation screen branches on which is present.
@@ -194,3 +206,5 @@ export type BrandWarning = z.infer<typeof BrandWarningSchema>
 export type WSMessage = z.infer<typeof WSMessageSchema>
 export type LogoSubmitRequest = z.infer<typeof LogoSubmitRequestSchema>
 export type BrandReadyPayload = z.infer<typeof BrandReadyPayloadSchema>
+export type PresignedUploadRequest = z.infer<typeof PresignedUploadRequestSchema>
+export type PresignedUploadResponse = z.infer<typeof PresignedUploadResponseSchema>

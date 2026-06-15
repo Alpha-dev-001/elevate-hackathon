@@ -454,3 +454,42 @@ non-image URL and oversized image raise clean, legible errors.
 (makes the paste-URL stand-in obsolete), then the products UI + storefront.
 
 ---
+
+### Real OSS Logo Upload — Presigned PUT — June 15, 2026
+
+**Approach:** Replaced the mock STS endpoint with the presigned-PUT flow chosen
+in OSS_SETUP.md (simpler than AssumeRole/STS, same "no bytes through the
+backend" guarantee). `POST /api/upload/logo-url` (authenticated) signs a 15-min
+PUT URL with `oss2.AuthV4` (V4 signing requires the region), scoped to one
+object key `logos/{merchant_id}/...`, and binds `x-oss-object-acl: public-read`
++ `Content-Type` into the signature. The browser PUTs the file straight to OSS
+with those exact headers (a mismatch would be `SignatureNotMatch`), so the
+object lands public-read while the **bucket stays private** — no scary
+bucket-wide exposure. The backend only ever touches the URL string.
+
+Frontend: `LogoUpload` is now a real drag-and-drop / file-picker. `uploadLogo()`
+presigns, PUTs the file directly to OSS (no cookies — it's cross-origin to
+aliyuncs.com), and hands the public URL to `onboardingStart`. A "paste a URL"
+escape hatch stays for resilience (that path rides the base64 fallback).
+
+**Qwen calls:** none here; this just lands the asset. Confirmed qwen-vl fetches
+the resulting OSS URL **directly** (3.9s, no base64 fallback) — OSS is exactly
+the kind of host the model reaches reliably, which is the whole point of moving
+off arbitrary paste-URLs.
+
+**Problems:** my smoke test tried to `list_objects` to find the uploaded key and
+got `AccessDenied` — correct least-privilege: the RAM user policy grants only
+`oss:PutObject`/`PutObjectAcl`, not list. Used the known key instead.
+
+**Solutions:** (above) — and verified the least-privilege policy is doing its
+job rather than loosening it.
+
+**Edge cases tested (live, real credentials):** signed PUT -> 200 with ETag;
+public GET -> 200 image/png (object public, bucket private); qwen-vl reads the
+OSS URL directly; presign endpoint requires auth (401 without cookie); rejects
+non-image content types (400). Frontend routes recompile clean.
+
+**Next:** the products UI step in onboarding (single add + CSV drop), then the
+storefront at `/s/{slug}`.
+
+---

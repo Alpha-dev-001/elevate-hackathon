@@ -11,6 +11,7 @@ import type {
   MerchantCreate,
   MerchantLogin,
   BrandPackage,
+  PresignedUploadResponse,
 } from '@/types/schemas'
 
 const API_BASE =
@@ -65,6 +66,13 @@ export const api = {
   logout: () => req<{ status: string }>('/auth/logout', { method: 'POST' }),
   me: () => req<Merchant>('/auth/me'),
 
+  // ── Upload ──────────────────────────────────────────────────────────────
+  presignLogoUpload: (content_type: string) =>
+    req<PresignedUploadResponse>('/api/upload/logo-url', {
+      method: 'POST',
+      body: JSON.stringify({ content_type }),
+    }),
+
   // ── Onboarding ──────────────────────────────────────────────────────────
   onboardingStart: (logo_oss_url: string) =>
     req<{ status: string; merchant_id: string }>('/onboarding/start', {
@@ -81,3 +89,29 @@ export const api = {
 
 export const WS_BASE =
   process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:9000/ws'
+
+/**
+ * Upload a logo straight to OSS: ask the backend for a presigned PUT URL, then
+ * PUT the file directly (the signed headers must be sent verbatim, and no
+ * cookies — it's a cross-origin request to OSS, not our backend). Returns the
+ * public URL to hand to onboardingStart.
+ */
+export async function uploadLogo(file: File): Promise<string> {
+  const { upload_url, public_url, required_headers } = await api.presignLogoUpload(
+    file.type || 'image/png',
+  )
+  let res: Response
+  try {
+    res = await fetch(upload_url, {
+      method: 'PUT',
+      body: file,
+      headers: required_headers, // Content-Type + x-oss-object-acl, exactly as signed
+    })
+  } catch (e) {
+    throw new ApiError(0, 'Could not reach OSS to upload the logo', String(e))
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, 'OSS rejected the upload', await res.text())
+  }
+  return public_url
+}
