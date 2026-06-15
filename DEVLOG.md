@@ -372,3 +372,46 @@ storefront at `/s/{slug}`. Swap the logo stand-in for real OSS drag-and-drop
 once credentials land.
 
 ---
+
+### Product Management + Batched Descriptions — June 15, 2026
+
+**Approach:** Built the products backend (`routers/products.py` + a small
+`services/products.py` for persistence helpers shared with publish). Three
+routes, all authenticated: `POST /products` (single add), `POST /products/batch`
+(CSV drop), `GET /products` (list). Both add paths run descriptions through a
+single batched qwen-max call — never a per-product loop, per the token rules.
+Single add wraps its one row in the same batch path so there's one code path.
+
+Products persist to Postgres (`ProductDB`). If the store is already live, the
+add reflects straight into Redis `SystemState.products` and pushes
+`state_updated` to the storefront over the socket — so a live store hot-reloads
+when inventory changes. If the store isn't published yet, products just sit in
+Postgres and `publish` now seeds `SystemState` from them (it used to hard-code
+an empty product map).
+
+CSV rows carry no cost price (columns are name/price/stock/image_url/category),
+so the batch path derives `cost_price = price * 0.6` (≈40% margin) to give the
+interceptor's margin math something real; the merchant can correct it later.
+
+**Qwen calls:** one batched qwen-max description call per add request (single or
+batch alike). Uses the merchant's `brand_voice_profile` so copy stays on-brand;
+falls back to a neutral voice if no brand exists yet. A Qwen outage degrades to
+plain `"{name}."` copy with `qwen_generated=false` rather than blocking the add.
+
+**Problems:** `ProductBatchCreate` referenced `ProductCSVRow`, which is defined
+later in `schemas.py`; rather than lean on forward-ref resolution under
+`from __future__ import annotations`, I placed it after the class it depends on.
+
+**Solutions:** (above) — plus wrapped the live-state sync so a Redis blip can't
+fail a product creation that already committed to Postgres.
+
+**Edge cases tested (live, full stack):** single add returns a real description
+and preserves cost/price/image; CSV batch of 3 produces 3 on-topic descriptions
+from ONE call with cost derived at 60%; list returns all four; negative price ->
+422 before touching the DB; unauthenticated list -> 401.
+
+**Next:** the products UI step in onboarding (between brand review and publish),
+then the storefront at `/s/{slug}` that renders SystemState. Swap the logo
+stand-in for real OSS drag-and-drop once credentials land.
+
+---

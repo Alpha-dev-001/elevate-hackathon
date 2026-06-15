@@ -394,6 +394,11 @@ class ProductCSVRow(BaseModel):
     image_url: str = ""
     category: str = ""
 
+class ProductBatchCreate(BaseModel):
+    """CSV drop — rows carry no cost_price, so the router derives a default
+    margin. One qwen-max call writes every description."""
+    products: list[ProductCSVRow]
+
 class BatchDescriptionRequest(BaseModel):
     merchant_id: str
     products: list[ProductCSVRow]

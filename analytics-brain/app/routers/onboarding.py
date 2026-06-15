@@ -297,10 +297,14 @@ async def publish_store(
     if pkg is None:
         raise HTTPException(status_code=409, detail="Generate your brand before publishing")
 
+    # Seed with whatever products were added during onboarding (may be none —
+    # a zero-product store publishes fine into the "preparing the shelves" state).
+    from app.services.products import products_state_map
+
     initial_state = SystemState(
         version=1,
         last_updated=_now(),
-        products={},
+        products=await products_state_map(db, merchant.id),
         active_promos={},
         layout_config=LayoutConfig(
             banner_text=pkg.brand.tagline,
