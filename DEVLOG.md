@@ -566,3 +566,36 @@ the anomaly trigger, Qwen decision cycles, the terminal's option cards, and the
 storefront hot-reloading on `state_updated`.
 
 ---
+
+### Description Batching — Chunked + Parallel (96-product bug) — June 15, 2026
+
+**Approach:** A merchant imported 96 products and every description came back as
+the plain `"{name}."` fallback; a 91-product import worked. Root cause: all
+descriptions were generated in a *single* qwen-max call capped at 3,500 output
+tokens. ~91 products squeezed under the cap; ~96 overflowed, the JSON truncated,
+the parser couldn't recover, and the whole batch fell back — all-or-nothing.
+
+`generate_descriptions` now splits the catalog into ~20-product chunks and runs
+them with `asyncio.gather`. Each chunk sits comfortably under the token ceiling,
+chunks run in parallel (a 55-product import is ~3 chunks, not 55 calls and not
+one fragile call), and a failed chunk degrades only its own ~20 products. The
+function returns `({name: description}, fallback_names)` so the router marks
+`qwen_generated` **per product** instead of one bool for the whole batch.
+
+**Qwen calls:** qwen-max, ceil(N/20) per import instead of 1 — still never
+per-product. Parallel, so wall-clock stays close to a single call.
+
+**Edge cases tested (live):** 55-product batch -> 55/55 real Qwen descriptions,
+0 fallbacks, ~36s. Confirmed against the data that exposed it (Haree: 96/96
+fallback under the old path; Crest: 91 barely succeeded).
+
+**Also:** wrote `QWEN_USAGE.md` — the full call map, what we do and don't send
+to Qwen (no PII, no full catalog dumps, no telemetry-in-full), per-store token
+estimates, and the cost framing (cents per fully-built store).
+
+**Follow-up:** a "regenerate descriptions" action for stores imported before the
+fix (e.g. Haree's 96).
+
+**Next (Sprint 2):** the realtime layer.
+
+---

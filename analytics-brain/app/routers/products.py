@@ -67,14 +67,15 @@ async def _brand_voice(merchant_id: str, db: AsyncSession) -> str:
     return _NEUTRAL_VOICE
 
 
-async def _describe(rows: list[ProductCSVRow], voice: str) -> tuple[dict[str, str], bool]:
-    """Batched descriptions. Returns ({name: description}, qwen_generated).
-    A Qwen outage falls back to neutral copy rather than blocking the add."""
+async def _describe(rows: list[ProductCSVRow], voice: str) -> tuple[dict[str, str], set[str]]:
+    """Chunked, parallel descriptions. Returns ({name: description},
+    fallback_names) — fallback_names didn't get real Qwen copy. Never raises;
+    a Qwen outage degrades a chunk to neutral copy rather than blocking adds."""
     try:
-        return await brand_svc.generate_descriptions(rows, voice), True
+        return await brand_svc.generate_descriptions(rows, voice)
     except BrandGenerationError as e:
         logger.warning(f"[products] description generation failed, using fallback: {e}")
-        return ({r.name: f"{r.name}." for r in rows}, False)
+        return ({r.name: f"{r.name}." for r in rows}, {r.name for r in rows})
 
 
 async def _sync_state_if_live(db: AsyncSession, merchant_id: str) -> None:
@@ -121,19 +122,19 @@ async def add_product(
         image_url=payload.image_url or "",
         category=payload.category or "",
     )
-    descs, qwen_generated = await _describe([row_in], voice)
+    descs, fallbacks = await _describe([row_in], voice)
 
     product = ProductDB(
         id=f"prod_{uuid.uuid4().hex[:12]}",
         merchant_id=merchant.id,
         name=payload.name,
-        description=descs.get(payload.name, ""),
+        description=descs.get(payload.name, f"{payload.name}."),
         price=payload.price,
         cost_price=payload.cost_price,
         stock=payload.stock,
         category=payload.category or "",
         image_urls=[payload.image_url] if payload.image_url else [],
-        qwen_generated_description=qwen_generated,
+        qwen_generated_description=payload.name not in fallbacks,
     )
     db.add(product)
     await _advance_to_products(merchant)
@@ -156,7 +157,7 @@ async def add_products_batch(
         raise HTTPException(status_code=400, detail="Batch capped at 200 products")
 
     voice = await _brand_voice(merchant.id, db)
-    descs, qwen_generated = await _describe(rows, voice)  # ONE call for all rows
+    descs, fallbacks = await _describe(rows, voice)  # chunked, parallel
 
     created: list[ProductDB] = []
     for r in rows:
@@ -170,7 +171,7 @@ async def add_products_batch(
             stock=r.stock,
             category=r.category or "",
             image_urls=[r.image_url] if r.image_url else [],
-            qwen_generated_description=qwen_generated,
+            qwen_generated_description=r.name not in fallbacks,
         )
         db.add(product)
         created.append(product)

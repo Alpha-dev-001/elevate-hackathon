@@ -24,8 +24,11 @@ import base64
 import json
 import re
 import html
+import logging
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
 from app.models.schemas import (
@@ -686,24 +689,21 @@ async def build_brand_package(
 
 # ─── Product descriptions — one batched call, never a loop ───────────────────────
 
-async def generate_descriptions(
-    products: list[ProductCSVRow],
-    brand_voice_profile: str,
+# Chunk size for batched descriptions. Small enough that the output never
+# bumps the token ceiling (the ~96-product all-or-nothing truncation bug), and
+# chunks run in parallel so a big catalog is still fast.
+_DESC_CHUNK_SIZE = 20
+
+
+async def _describe_chunk(
+    products: list[ProductCSVRow], brand_voice_profile: str
 ) -> dict[str, str]:
-    """Write all product descriptions in ONE qwen-max call.
-
-    CLAUDE.md is explicit: never loop Qwen per product. Returns a
-    {product_name: description} map. Any product the model misses is filled
-    with a safe brand-neutral line so no product ships description-less.
-    """
-    if not products:
-        return {}
-
+    """One qwen-max call for up to _DESC_CHUNK_SIZE products. Missing names come
+    back as "" so the caller can mark them as fallbacks."""
     catalogue = [
         {"name": p.name, "category": p.category or "general", "price": p.price}
         for p in products
     ]
-
     prompt = f"""You are writing product descriptions for an online store.
 
 Brand voice to match exactly:
@@ -721,18 +721,54 @@ Products:
     raw = await _qwen_chat(
         model=get_settings().qwen_model,
         messages=[{"role": "user", "content": prompt}],
-        max_tokens=min(3500, 220 * len(products) + 300),
+        # generous per-chunk ceiling; ~20 products never approach it
+        max_tokens=min(4000, 120 * len(products) + 400),
         temperature=0.6,
         timeout=60.0,
     )
-
     data = _extract_json(raw)
-    result: dict[str, str] = {}
+    out: dict[str, str] = {}
     for p in products:
         desc = data.get(p.name)
-        if isinstance(desc, str) and desc.strip():
-            result[p.name] = desc.strip()
-        else:
-            # No silent gap — every product gets a usable line.
-            result[p.name] = f"{p.name} — a considered addition to the collection."
-    return result
+        out[p.name] = desc.strip() if isinstance(desc, str) and desc.strip() else ""
+    return out
+
+
+async def generate_descriptions(
+    products: list[ProductCSVRow],
+    brand_voice_profile: str,
+) -> tuple[dict[str, str], set[str]]:
+    """Write descriptions for a catalog, chunked and run in parallel.
+
+    Never loops Qwen *per product* (CLAUDE.md), but does split large catalogs
+    into ~20-product chunks so the output never overflows and one bad chunk
+    can't sink the whole import. Returns ({name: description}, fallback_names)
+    where fallback_names are products that didn't get real Qwen copy.
+    """
+    if not products:
+        return {}, set()
+
+    chunks = [
+        products[i : i + _DESC_CHUNK_SIZE]
+        for i in range(0, len(products), _DESC_CHUNK_SIZE)
+    ]
+
+    async def run(chunk: list[ProductCSVRow]) -> dict[str, str]:
+        try:
+            return await _describe_chunk(chunk, brand_voice_profile)
+        except BrandGenerationError as e:
+            logger.warning(f"[brand] description chunk failed ({len(chunk)} items): {e}")
+            return {p.name: "" for p in chunk}
+
+    parts = await asyncio.gather(*[run(c) for c in chunks])
+
+    descriptions: dict[str, str] = {}
+    fallbacks: set[str] = set()
+    for part in parts:
+        for name, text in part.items():
+            if text:
+                descriptions[name] = text
+            else:
+                descriptions[name] = f"{name} — a considered addition to the collection."
+                fallbacks.add(name)
+    return descriptions, fallbacks
