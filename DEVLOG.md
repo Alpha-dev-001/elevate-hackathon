@@ -308,3 +308,67 @@ description call, then the storefront pages at `/s/{slug}`. STS upload still
 parked on OSS credentials.
 
 ---
+
+### Frontend Onboarding Flow — June 15, 2026
+
+**Approach:** Built the first real UI — until now `storefront-ui` was a bare
+Next.js scaffold with a placeholder landing page linking to routes that didn't
+exist. Built the onboarding spine that makes the backend demoable: auth -> logo
+-> incubation -> brand reveal -> publish, all against the live backend.
+
+Foundation in `lib/` (built fresh per the architecture notes): `api.ts` (typed
+fetch client, every call credentialed so the httpOnly session cookie rides
+along; `ApiError` carries the backend's `detail`, which may be the 409 phase
+object), `ws.ts` (terminal socket client with backoff reconnect, validates the
+`brand_ready` payload against the Zod union before dispatching), and `store.ts`
+(Zustand: merchant + onboarding phase as one source of truth).
+
+The flow is one page (`/setup`) driven by auth state + phase: `AuthCard`
+(signup collects store essentials so the slug/brand context exist before the
+logo), `LogoUpload`, then `Incubation`. The incubation screen is the demo's
+"magic loading state" — it opens the WebSocket FIRST, fires the pipeline on
+`onOpen` so the push can't race ahead, breathes ambient text through the ~40s
+wait, and routes to `/brand-review` on `brand_ready`. `BrandPreview` surfaces
+everything Qwen authored — palette, typography, voice, the SVG logo mark, and
+the guard-rule warnings in Qwen's own words — with a staggered "rising water"
+reveal. Publish flips the store live and shows the `/s/{slug}` URL.
+
+A deliberate stand-in: OSS upload is blocked on credentials, so the logo step
+takes a pasted image URL for now (the backend only ever sees a URL string, so
+the contract is identical). Clearly marked "dev mode"; swaps to drag-and-drop
+drop-zone the moment the STS endpoint is wired.
+
+**Qwen calls:** none directly — the UI consumes the backend's brand pipeline
+over REST + WebSocket. Animations follow the two-visual-languages rule: Qwen
+content flows in (Framer Motion, the documented `cubic-bezier(0.4,0,0.2,1)`
+easing); the breathing incubation orb gives the wait a living quality.
+
+**Problems:**
+1. `npm run dev` failed — `'next' is not recognized`; the `.bin` PATH shim
+   didn't resolve under the shell. 2. Port 9000 was held by a stale backend
+   from an earlier session. 3. `.next/` build cache wasn't gitignored (no
+   frontend `.gitignore` existed), so it showed up as untracked.
+
+**Solutions:**
+1. Ran Next via the binary directly (`node node_modules/next/dist/bin/next dev`).
+2. Freed the port and restarted the backend on the latest code.
+3. Added a standard Next `.gitignore` (`.next/`, `out/`, `next-env.d.ts`, etc.)
+   and verified nothing junk was staged.
+
+**Edge cases tested:** all three routes compile and return 200 with no error
+overlay; CORS preflight from `http://localhost:3000` returns
+`allow-origin` + `allow-credentials: true`; a credentialed signup from that
+origin sets the session cookie — so the browser cookie flow is sound. WS client
+re-fires the pipeline only once across reconnects (guarded). Brand-review
+rehydrates from the durable GET on a hard refresh, and redirects to `/setup`
+if the brand isn't generated yet (409).
+
+**Also:** wrote `OSS_SETUP.md` — region recommendation (`cn-hongkong`), the
+bucket/RAM/role/STS walkthrough, and exactly which five values go in
+`analytics-brain/.env` to unblock real logo upload.
+
+**Next:** product management + batched descriptions (non-blocked), then the
+storefront at `/s/{slug}`. Swap the logo stand-in for real OSS drag-and-drop
+once credentials land.
+
+---

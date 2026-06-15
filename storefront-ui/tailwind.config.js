@@ -17,6 +17,7 @@ module.exports = {
         danger: 'var(--color-danger)',
         warning: 'var(--color-warning)',
         muted: 'var(--color-text-muted)',
+        text: 'var(--color-text)',
       },
       fontFamily: {
         display: ['Syne', 'sans-serif'],
