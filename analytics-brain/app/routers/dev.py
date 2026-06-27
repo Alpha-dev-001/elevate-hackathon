@@ -37,7 +37,7 @@ async def regenerate_brand(slug: str, db: AsyncSession = Depends(get_db)):
     logger.info(f"[dev] Regenerating BrandToken for {slug}")
 
     analysis = await analyze_logo(merchant.logo_url)
-    brand_token = await generate_brand_token(analysis, merchant.store_name, merchant.category)
+    brand_token = await generate_brand_token(analysis, merchant.store_name, merchant.category or "other")
 
     brand_profile.brand_tokens = brand_token.model_dump()
     await db.commit()

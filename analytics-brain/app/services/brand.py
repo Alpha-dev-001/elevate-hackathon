@@ -239,6 +239,30 @@ Match the brand's style and mood. Pure JSON. Nothing else."""
 # retrying just burns the demo clock.
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
+# Layout style coercion map — Qwen sometimes returns mood words or hyphen variants
+# instead of the four valid BrandLayoutToken style tokens. Module-level so any
+# caller can introspect without instantiating the function.
+_STYLE_COERCE: dict[str, str] = {
+    "minimal-premium": "minimal-dark",
+    "minimal_premium": "minimal-dark",
+    "minimal premium": "minimal-dark",
+    "minimal": "minimal-dark",
+    "dark": "minimal-dark",
+    "luxury": "editorial",
+    "luxury-heritage": "editorial",
+    "heritage": "editorial",
+    "bold": "bold-grid",
+    "bold-playful": "bold-grid",
+    "playful": "bold-grid",
+    "organic": "warm-craft",
+    "organic-craft": "warm-craft",
+    "craft": "warm-craft",
+    "earthy": "warm-craft",
+    "tech": "minimal-dark",
+    "tech-forward": "minimal-dark",
+}
+_VALID_STYLES: frozenset[str] = frozenset({"editorial", "bold-grid", "minimal-dark", "warm-craft"})
+
 
 async def _qwen_chat(
     *,
@@ -771,30 +795,18 @@ async def generate_brand_token(
     data["store_name"] = store_name  # never let Qwen rename
 
     # Coerce layout.style — Qwen sometimes returns mood words instead of style tokens.
-    _STYLE_COERCE: dict[str, str] = {
-        "minimal-premium": "minimal-dark",
-        "minimal_premium": "minimal-dark",
-        "minimal premium": "minimal-dark",
-        "minimal": "minimal-dark",
-        "dark": "minimal-dark",
-        "luxury": "editorial",
-        "luxury-heritage": "editorial",
-        "heritage": "editorial",
-        "bold": "bold-grid",
-        "bold-playful": "bold-grid",
-        "playful": "bold-grid",
-        "organic": "warm-craft",
-        "organic-craft": "warm-craft",
-        "craft": "warm-craft",
-        "earthy": "warm-craft",
-        "tech": "minimal-dark",
-        "tech-forward": "minimal-dark",
-    }
-    _VALID_STYLES = {"editorial", "bold-grid", "minimal-dark", "warm-craft"}
     if isinstance(data.get("layout"), dict):
         raw_style = str(data["layout"].get("style", "")).lower().strip()
         if raw_style not in _VALID_STYLES:
-            data["layout"]["style"] = _STYLE_COERCE.get(raw_style, "editorial")
+            coerced = _STYLE_COERCE.get(raw_style)
+            if coerced:
+                logger.info(f"[brand] coerced layout.style '{raw_style}' → '{coerced}'")
+                data["layout"]["style"] = coerced
+            else:
+                logger.warning(
+                    f"[brand] unrecognized layout.style '{raw_style}', defaulting to 'editorial'"
+                )
+                data["layout"]["style"] = "editorial"
 
     try:
         return BrandToken.model_validate(data)
