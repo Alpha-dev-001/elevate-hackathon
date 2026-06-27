@@ -54,6 +54,7 @@ class BrandProfileDB(Base):
     )
     logo_analysis: Mapped[dict] = mapped_column(JSON, nullable=False)
     generated_brand: Mapped[dict] = mapped_column(JSON, nullable=False)
+    brand_tokens: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # brand_guard_rules live inside generated_brand JSON
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
     updated_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
@@ -63,15 +64,45 @@ class OrderDB(Base):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), nullable=False)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(String, nullable=False)
     items: Mapped[list] = mapped_column(JSON, nullable=False)
+    subtotal: Mapped[float] = mapped_column(Float, default=0.0)
     total: Mapped[float] = mapped_column(Float, nullable=False)
     status: Mapped[str] = mapped_column(String, default="pending")
+    customer_name: Mapped[str] = mapped_column(String, default="")
+    customer_email: Mapped[str] = mapped_column(String, default="")
     promo_applied: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
+    updated_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
     merchant: Mapped["MerchantDB"] = relationship(back_populates="orders")
+
+
+class PromoDB(Base):
+    """Durable promo. SystemState.active_promos (Redis) is the hot-reload copy;
+    this is what survives a Redis flush so the merchant's promos persist."""
+    __tablename__ = "promos"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    product_id: Mapped[str] = mapped_column(String, nullable=False)
+    discount_percent: Mapped[float] = mapped_column(Float, nullable=False)
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    expires_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    triggered_by: Mapped[str] = mapped_column(String, default="merchant")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
+
+
+class BusinessProfileDB(Base):
+    """Durable interceptor constraints (margin floor / discount ceiling / per-
+    product min price). Cached in Redis at Keys.profile for fast reads."""
+    __tablename__ = "business_profiles"
+
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), primary_key=True)
+    constraints: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
 
 class DeltaLogDB(Base):
@@ -87,3 +118,27 @@ class DeltaLogDB(Base):
     patches: Mapped[list] = mapped_column(JSON, nullable=False)
     executed_by: Mapped[str] = mapped_column(String, nullable=False)
     executed_at: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+
+
+class AgentActionDB(Base):
+    __tablename__ = "agent_actions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(
+        ForeignKey("merchants.id"), nullable=False, index=True
+    )
+    promo_id: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    action_type: Mapped[str] = mapped_column(String, nullable=False)
+    trigger: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(String, nullable=False)
+    estimated_gmv: Mapped[float] = mapped_column(Float, nullable=False)
+    estimated_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    brand_check: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    created_at: Mapped[int] = mapped_column(
+        BigInteger, default=lambda: int(time.time() * 1000)
+    )
+    approved_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    executed_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

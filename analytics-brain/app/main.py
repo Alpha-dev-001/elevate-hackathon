@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.database import get_engine, Base
 from app.models import db_models  # noqa: F401 — registers tables on Base.metadata
-from app.routers import ws, upload, auth, onboarding, products, store
+from app.routers import ws, upload, auth, onboarding, products, store, shop, merchant
 import logging
 
 # Stale scaffold router still excluded until rewritten against current schemas.py:
@@ -35,8 +35,10 @@ app.include_router(ws.router)          # WebSocket connections
 app.include_router(upload.router)      # STS tokens for direct OSS upload
 app.include_router(auth.router)        # merchant signup / login / session
 app.include_router(onboarding.router)  # logo -> brand -> publish
-app.include_router(products.router)    # single add + CSV batch + list
+app.include_router(products.router)    # single add + CSV batch + list + CRUD
 app.include_router(store.router)       # public storefront data by slug
+app.include_router(shop.router)        # public cart + checkout + order lookup
+app.include_router(merchant.router)    # orders, promos, constraints, catalog review
 
 
 @app.on_event("startup")
@@ -48,9 +50,23 @@ async def startup():
     if settings.app_env == "development":
         # Dev convenience: sync tables to models. Production uses Alembic
         # migrations against RDS — create_all never runs there.
+        from sqlalchemy import text
+
+        # create_all only creates missing TABLES, not missing COLUMNS. The
+        # Sprint 2 additions to the existing `orders` table need an explicit,
+        # idempotent ALTER so an already-seeded dev DB picks them up.
+        _SCHEMA_PATCHES = [
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal DOUBLE PRECISION DEFAULT 0",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR DEFAULT ''",
+            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0",
+            "ALTER TABLE brand_profiles ADD COLUMN IF NOT EXISTS brand_tokens JSONB",
+        ]
         try:
             async with get_engine().begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                for stmt in _SCHEMA_PATCHES:
+                    await conn.execute(text(stmt))
             logger.info("Database tables synced")
         except Exception as e:
             logger.error(
