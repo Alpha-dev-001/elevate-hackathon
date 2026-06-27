@@ -1,6 +1,6 @@
 'use client'
 
-import { motion } from 'framer-motion'
+import { motion, useReducedMotion } from 'framer-motion'
 import type { DashboardData } from '@/lib/api'
 
 interface AttributionDashboardProps {
@@ -122,6 +122,7 @@ interface MetricCardProps {
 }
 
 function MetricCard({ label, value, loading, accent }: MetricCardProps) {
+  const prefersReduced = useReducedMotion()
   return (
     <div
       className="rounded-xl p-4"
@@ -138,8 +139,8 @@ function MetricCard({ label, value, loading, accent }: MetricCardProps) {
       </p>
       {loading ? (
         <motion.div
-          animate={{ opacity: [0.3, 0.7, 0.3] }}
-          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+          animate={{ opacity: prefersReduced ? 0.5 : [0.3, 0.7, 0.3] }}
+          transition={{ duration: 1.5, repeat: prefersReduced ? 0 : Infinity, ease: 'easeInOut' }}
           className="h-6 w-28 rounded"
           style={{ background: 'var(--color-surface-2)' }}
         />
