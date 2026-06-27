@@ -187,12 +187,54 @@ export const BrandReadyPayloadSchema = z.union([
   }),
 ])
 
+// ─── BrandToken (spec-aligned layout DNA) ─────────────────────────────────
+
+export const BrandColorsSchema = z.object({
+  primary: z.string(),
+  accent: z.string(),
+  background: z.string(),
+  surface: z.string(),
+  text: z.string(),
+  text_muted: z.string(),
+})
+
+export const BrandTypographyTokenSchema = z.object({
+  display_font: z.string(),
+  body_font: z.string(),
+  scale: z.enum(['compact', 'balanced', 'editorial']).default('balanced'),
+  letter_spacing: z.enum(['tight', 'normal', 'wide']).default('normal'),
+  weight: z.enum(['light', 'regular', 'medium', 'bold']).default('regular'),
+})
+
+export const BrandLayoutTokenSchema = z.object({
+  style: z.enum(['editorial', 'bold-grid', 'minimal-dark', 'warm-craft']),
+  hero_type: z.enum(['full-bleed', 'text-forward', 'split', 'texture-bg']),
+  product_grid: z.enum(['2col-featured', '3col-equal', 'masonry']),
+  card_style: z.enum(['borderless', 'outlined', 'elevated', 'colored-bg']),
+  border_radius: z.enum(['2px', '8px', '16px', '24px']),
+  spacing: z.enum(['compact', 'balanced', 'generous']),
+  category_style: z.enum(['pill', 'underline-tab', 'minimal-text']),
+})
+
+export const BrandTokenSchema = z.object({
+  store_name: z.string(),
+  tagline: z.string(),
+  colors: BrandColorsSchema,
+  typography: BrandTypographyTokenSchema,
+  layout: BrandLayoutTokenSchema,
+  mood: z.string(),
+  industry_hint: z.string(),
+  brand_voice: z.string(),
+})
+
 // ─── 10. Public storefront payload ────────────────────────────────────────────
 
 export const PublicProductSchema = z.object({
   id: z.string(),
+  price: z.number(),                               // effective price (after promo)
   name: z.string(),
-  price: z.number(),
+  compare_at_price: z.number().nullable().optional(),  // original price when discounted
+  promo_label: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   image_url: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
@@ -209,6 +251,128 @@ export const PublicStoreSchema = z.object({
   layout: LayoutConfigSchema,
   products: z.array(PublicProductSchema),
   promos: z.array(PromoSchema).default([]),
+  categories: z.array(z.string()).default([]),
+  brand_token: BrandTokenSchema.nullable().optional(),
+})
+
+// ─── 11. Sprint 2 — Commerce: cart, checkout, orders ──────────────────────────
+
+export const OrderStatusSchema = z.enum([
+  'pending', 'paid', 'shipped', 'delivered', 'cancelled',
+])
+
+export const CartItemSchema = z.object({
+  product_id: z.string(),
+  name: z.string(),
+  unit_price: z.number(),     // snapshot taken at add-time
+  qty: z.number().int().positive(),
+  image_url: z.string().nullable().optional(),
+  line_total: z.number(),
+})
+
+export const CartSchema = z.object({
+  session_id: z.string(),
+  merchant_id: z.string(),
+  items: z.array(CartItemSchema).default([]),
+  subtotal: z.number().default(0),
+  item_count: z.number().int().default(0),
+  updated_at: z.number(),
+})
+
+export const OrderItemSchema = z.object({
+  product_id: z.string(),
+  name: z.string(),
+  unit_price: z.number(),
+  qty: z.number().int().positive(),
+  line_total: z.number(),
+})
+
+export const OrderCustomerSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email(),
+  note: z.string().default(''),
+})
+
+export const OrderSchema = z.object({
+  id: z.string(),
+  merchant_id: z.string(),
+  session_id: z.string(),
+  items: z.array(OrderItemSchema),
+  subtotal: z.number(),
+  total: z.number(),
+  status: OrderStatusSchema,
+  customer_name: z.string(),
+  customer_email: z.string(),
+  promo_applied: z.string().nullable().optional(),
+  created_at: z.number(),
+})
+
+// ─── 12. Sprint 2 — Merchant pricing controls + catalog review ────────────────
+
+export const PromoCreateSchema = z.object({
+  product_id: z.string(),
+  discount_percent: z.number().positive().max(100),
+  label: z.string().min(1).max(80),
+  duration_minutes: z.number().int().positive().max(43200).default(1440),
+})
+
+export const ConstraintsSchema = z.object({
+  min_profit_margin_percent: z.number().min(0).max(100).optional(),
+  max_discount_percent: z.number().min(0).max(100).optional(),
+  min_price: z.record(z.number()).optional(),
+  accessibility_level: z.enum(['AA', 'AAA']).optional(),
+})
+
+export const PricingFlagSchema = z.object({
+  product_id: z.string(),
+  name: z.string(),
+  severity: z.enum(['low', 'medium', 'high']),
+  issue: z.string(),
+  suggestion: z.string(),
+})
+
+export const CatalogReviewSchema = z.object({
+  flags: z.array(PricingFlagSchema).default([]),
+  summary: z.string(),
+  reviewed_count: z.number().int(),
+  generated_at: z.number(),
+})
+
+// A single violation surfaced when the interceptor clamps/blocks a merchant action.
+export const ViolationSchema = z.object({
+  rule: z.string(),
+  severity: z.enum(['warning', 'blocked']),
+  message: z.string(),
+  original_value: z.any().nullable().optional(),
+  clamped_value: z.any().nullable().optional(),
+})
+
+// ─── AgentAction ─────────────────────────────────────────────────────────────
+
+export const AgentActionTypeSchema = z.enum([
+  'flash_sale', 'layout_morph', 'scarcity_price', 'recovery_offer', 'copy_rewrite',
+])
+
+export const AgentActionStatusSchema = z.enum([
+  'pending', 'approved', 'dismissed', 'executed',
+])
+
+export const AgentActionSchema = z.object({
+  id: z.string(),
+  merchant_id: z.string(),
+  promo_id: z.string(),
+  action_type: AgentActionTypeSchema,
+  trigger: z.string(),
+  title: z.string(),
+  description: z.string(),
+  estimated_gmv: z.number(),
+  estimated_confidence: z.number(),
+  payload: z.record(z.any()),
+  brand_check: z.string(),
+  status: AgentActionStatusSchema,
+  created_at: z.number(),
+  approved_at: z.number().nullable().optional(),
+  executed_at: z.number().nullable().optional(),
 })
 
 // ─── Inferred Types ───────────────────────────────────────────────────────────
@@ -226,6 +390,7 @@ export type MerchantCreate = z.infer<typeof MerchantCreateSchema>
 export type MerchantLogin = z.infer<typeof MerchantLoginSchema>
 export type Product = z.infer<typeof ProductSchema>
 export type SystemState = z.infer<typeof SystemStateSchema>
+export type Promo = z.infer<typeof PromoSchema>
 export type BrandWarning = z.infer<typeof BrandWarningSchema>
 export type WSMessage = z.infer<typeof WSMessageSchema>
 export type LogoSubmitRequest = z.infer<typeof LogoSubmitRequestSchema>
@@ -234,3 +399,21 @@ export type PresignedUploadRequest = z.infer<typeof PresignedUploadRequestSchema
 export type PresignedUploadResponse = z.infer<typeof PresignedUploadResponseSchema>
 export type PublicProduct = z.infer<typeof PublicProductSchema>
 export type PublicStore = z.infer<typeof PublicStoreSchema>
+export type OrderStatus = z.infer<typeof OrderStatusSchema>
+export type CartItem = z.infer<typeof CartItemSchema>
+export type Cart = z.infer<typeof CartSchema>
+export type OrderItem = z.infer<typeof OrderItemSchema>
+export type OrderCustomer = z.infer<typeof OrderCustomerSchema>
+export type Order = z.infer<typeof OrderSchema>
+export type PromoCreate = z.infer<typeof PromoCreateSchema>
+export type Constraints = z.infer<typeof ConstraintsSchema>
+export type PricingFlag = z.infer<typeof PricingFlagSchema>
+export type CatalogReview = z.infer<typeof CatalogReviewSchema>
+export type Violation = z.infer<typeof ViolationSchema>
+export type BrandColors = z.infer<typeof BrandColorsSchema>
+export type BrandTypographyToken = z.infer<typeof BrandTypographyTokenSchema>
+export type BrandLayoutToken = z.infer<typeof BrandLayoutTokenSchema>
+export type BrandToken = z.infer<typeof BrandTokenSchema>
+export type AgentActionType = z.infer<typeof AgentActionTypeSchema>
+export type AgentActionStatus = z.infer<typeof AgentActionStatusSchema>
+export type AgentAction = z.infer<typeof AgentActionSchema>

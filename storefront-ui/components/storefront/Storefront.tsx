@@ -1,20 +1,28 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
 import type { PublicStore } from '@/types/schemas'
-import { readableOn } from '@/lib/color'
-import { ProductGrid } from './ProductGrid'
+import { useCart } from '@/lib/cart'
+import { LayoutRouter } from './LayoutRouter'
 
 /**
- * The live customer-facing store. Themed entirely by the merchant's generated
- * brand — palette becomes CSS vars, the two brand fonts load from Google Fonts,
- * the logo mark renders inline. Nothing here uses the Elevate admin theme.
+ * The live customer-facing store. Handles three responsibilities then
+ * delegates all layout rendering to LayoutRouter:
+ *
+ *   1. Fetch the store payload from the backend
+ *   2. Load the brand's Google Fonts (preferred from brand_token if present)
+ *   3. Initialise the guest cart for this slug
+ *   4. Show loading / error / not-found states
+ *   5. Render <LayoutRouter> which picks the right layout variant
+ *
+ * Layout decisions, CSS vars, filter state, and cart UI all live in LayoutRouter.
  */
 export function Storefront({ slug }: { slug: string }) {
   const [store, setStore] = useState<PublicStore | null>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading')
+
+  const initCart = useCart((s) => s.init)
 
   useEffect(() => {
     api
@@ -26,12 +34,22 @@ export function Storefront({ slug }: { slug: string }) {
       .catch((e) => setStatus(e instanceof ApiError && e.status === 404 ? 'notfound' : 'error'))
   }, [slug])
 
-  // Load the brand's Google Fonts for this store.
+  // Initialise the guest cart for this store
+  useEffect(() => {
+    initCart(slug)
+  }, [slug, initCart])
+
+  // Load the brand's Google Fonts. Prefer brand_token fonts when present —
+  // they may differ from the legacy typography object.
   useEffect(() => {
     if (!store) return
-    const fams = [store.typography.display_font, store.typography.body_font]
+    const bt = store.brand_token
+    const fonts = bt
+      ? [bt.typography.display_font, bt.typography.body_font]
+      : [store.typography.display_font, store.typography.body_font]
+    const fams = fonts
       .filter(Boolean)
-      .map((f) => `family=${f.trim().replace(/\s+/g, '+')}:wght@400;500;600;700`)
+      .map((f) => `family=${f.trim().replace(/\s+/g, '+')}:wght@300;400;500;600;700`)
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = `https://fonts.googleapis.com/css2?${fams.join('&')}&display=swap`
@@ -45,73 +63,13 @@ export function Storefront({ slug }: { slug: string }) {
     return <Center><p className="text-muted font-mono text-sm">Opening the store…</p></Center>
   }
   if (status === 'notfound') {
-    return <Center><p className="text-muted font-mono text-sm">This store isn’t live yet.</p></Center>
+    return <Center><p className="text-muted font-mono text-sm">This store isn't live yet.</p></Center>
   }
   if (status === 'error' || !store) {
-    return <Center><p className="text-danger font-mono text-sm">Couldn’t load this store.</p></Center>
+    return <Center><p className="text-danger font-mono text-sm">Couldn't load this store.</p></Center>
   }
 
-  const { palette, typography } = store
-  // Raw accent stays for fills; a contrast-safe variant is used for accent text
-  // (taglines, prices) so they're never washed out on the brand background.
-  const accentText = readableOn(palette.accent, palette.background)
-  const themeVars = {
-    '--s-bg': palette.background,
-    '--s-text': palette.text,
-    '--s-accent': palette.accent,
-    '--s-accent-text': accentText,
-    '--s-primary': palette.primary,
-    '--s-secondary': palette.secondary,
-    '--s-display': `'${typography.display_font}', sans-serif`,
-    background: palette.background,
-    color: palette.text,
-    fontFamily: `'${typography.body_font}', sans-serif`,
-    minHeight: '100vh',
-  } as React.CSSProperties
-
-  const hasPromo = store.promos.length > 0
-
-  return (
-    <main style={themeVars}>
-      {hasPromo && (
-        <div
-          className="w-full text-center py-2.5 text-sm font-medium"
-          style={{ background: palette.accent, color: readableOn(palette.background, palette.accent) }}
-        >
-          {store.promos[0].label}
-        </div>
-      )}
-
-      <div className="max-w-5xl mx-auto px-5 py-12">
-        <motion.header
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
-          className="flex flex-col items-center text-center gap-3 mb-12"
-        >
-          <div
-            className="w-16 h-16 [&>svg]:w-full [&>svg]:h-full"
-            dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }}
-          />
-          <h1
-            className="text-4xl sm:text-5xl font-bold tracking-tight"
-            style={{ fontFamily: 'var(--s-display)' }}
-          >
-            {store.store_name}
-          </h1>
-          <p className="text-base" style={{ color: accentText }}>
-            {store.tagline}
-          </p>
-        </motion.header>
-
-        <ProductGrid products={store.products} logoMark={store.icons.logo_mark} />
-
-        <footer className="text-center mt-16 text-xs font-mono" style={{ opacity: 0.4 }}>
-          Powered by Elevate
-        </footer>
-      </div>
-    </main>
-  )
+  return <LayoutRouter store={store} slug={slug} />
 }
 
 function Center({ children }: { children: React.ReactNode }) {

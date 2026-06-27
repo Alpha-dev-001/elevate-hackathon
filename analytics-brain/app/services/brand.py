@@ -141,6 +141,74 @@ Make every word specific to the logo analysis and store details you were given.
 Pure JSON. Nothing else."""
 
 
+BRAND_TOKEN_PROMPT = """You are a world-class brand strategist and creative director.
+You receive a logo analysis and store details. Return ONLY a valid JSON object — no prose, no markdown.
+
+{
+  "store_name": "<unchanged from input>",
+  "tagline": "<short, punchy — under 8 words>",
+  "colors": {
+    "primary": "<dominant brand color hex>",
+    "accent": "<secondary/highlight hex>",
+    "background": "<ideal store background hex>",
+    "surface": "<card/panel background hex>",
+    "text": "<primary text hex>",
+    "text_muted": "<muted secondary text hex>"
+  },
+  "typography": {
+    "display_font": "<Google Font name for headings>",
+    "body_font": "<Google Font name for body>",
+    "scale": "<compact|balanced|editorial>",
+    "letter_spacing": "<tight|normal|wide>",
+    "weight": "<light|regular|medium|bold>"
+  },
+  "layout": {
+    "style": "<editorial|bold-grid|minimal-dark|warm-craft>",
+    "hero_type": "<full-bleed|text-forward|split|texture-bg>",
+    "product_grid": "<2col-featured|3col-equal|masonry>",
+    "card_style": "<borderless|outlined|elevated|colored-bg>",
+    "border_radius": "<2px|8px|16px|24px>",
+    "spacing": "<compact|balanced|generous>",
+    "category_style": "<pill|underline-tab|minimal-text>"
+  },
+  "mood": "<luxury-heritage|bold-playful|minimal-premium|organic-craft|tech-forward>",
+  "industry_hint": "<fashion|beauty|food|tech|home|sport|other>",
+  "brand_voice": "<3-6 word tone description e.g. refined, unhurried, quietly confident>"
+}
+
+Layout style guide — pick the ONE that matches this logo's visual DNA:
+- editorial: serif font, muted luxury palette → Vogue/Net-a-Porter feel
+- bold-grid: bright accent, sans-serif, playful logo → Glossier/Fenty feel
+- minimal-dark: dark/monochrome logo, tech premium → SSENSE/Rick Owens feel
+- warm-craft: earthy tones, organic elements → Aesop/Graza feel
+
+Be opinionated. Make this store unmistakable. Pure JSON. Nothing else."""
+
+
+SEED_PRODUCTS_PROMPT = """You are generating realistic seed products for a new store.
+
+Store: {store_name}
+Industry: {industry_hint}
+Brand voice: {brand_voice}
+
+Generate exactly 6 products that would fit this store naturally. Return ONLY JSON:
+
+[
+  {{
+    "name": "<product name>",
+    "price": <realistic price as number>,
+    "stock": <50-200>,
+    "category": "<category>",
+    "description": "<2-3 sentences in the brand voice>",
+    "image_url": ""
+  }}
+]
+
+Prices should reflect the brand's price point (luxury = higher, craft = mid, bold = accessible).
+All 6 must be realistic products this specific store would actually sell.
+Pure JSON array. Nothing else."""
+
+
 # Icons are generated in a SEPARATE call (see generate_icons) so the brand
 # reveal isn't blocked on token-heavy SVG markup. The merchant sees the brand
 # in ~10s; real icons morph in a beat later.
@@ -170,6 +238,30 @@ Match the brand's style and mood. Pure JSON. Nothing else."""
 # Retry only on transient failures. A 4xx (bad request, bad key) is permanent —
 # retrying just burns the demo clock.
 _RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+# Layout style coercion map — Qwen sometimes returns mood words or hyphen variants
+# instead of the four valid BrandLayoutToken style tokens. Module-level so any
+# caller can introspect without instantiating the function.
+_STYLE_COERCE: dict[str, str] = {
+    "minimal-premium": "minimal-dark",
+    "minimal_premium": "minimal-dark",
+    "minimal premium": "minimal-dark",
+    "minimal": "minimal-dark",
+    "dark": "minimal-dark",
+    "luxury": "editorial",
+    "luxury-heritage": "editorial",
+    "heritage": "editorial",
+    "bold": "bold-grid",
+    "bold-playful": "bold-grid",
+    "playful": "bold-grid",
+    "organic": "warm-craft",
+    "organic-craft": "warm-craft",
+    "craft": "warm-craft",
+    "earthy": "warm-craft",
+    "tech": "minimal-dark",
+    "tech-forward": "minimal-dark",
+}
+_VALID_STYLES: frozenset[str] = frozenset({"editorial", "bold-grid", "minimal-dark", "warm-craft"})
 
 
 async def _qwen_chat(
@@ -665,6 +757,100 @@ async def generate_icons(
 
     data = _extract_json(raw)
     return _safe_icons(data, store_name, palette)
+
+
+# ─── BrandToken — layout DNA, typography, colors ────────────────────────────────
+
+async def generate_brand_token(
+    analysis: LogoAnalysis,
+    store_name: str,
+    category: str,
+) -> "BrandToken":
+    """qwen-max produces the full BrandToken — layout DNA, typography, colors.
+
+    Separate from generate_brand() so both can run from the onboarding flow
+    without needing to change the existing GeneratedBrand path (keeps the
+    interceptor and guard system working unchanged).
+    """
+    from app.models.schemas import BrandToken  # avoid circular at module load
+
+    context = json.dumps({
+        "store_name": store_name,
+        "category": category,
+        "logo_analysis": analysis.model_dump(),
+    })
+
+    raw = await _qwen_chat(
+        model=get_settings().qwen_model,
+        messages=[
+            {"role": "system", "content": BRAND_TOKEN_PROMPT},
+            {"role": "user", "content": context},
+        ],
+        max_tokens=1500,
+        temperature=0.4,
+        timeout=75.0,
+    )
+
+    data = _extract_json(raw)
+    data["store_name"] = store_name  # never let Qwen rename
+
+    # Coerce layout.style — Qwen sometimes returns mood words instead of style tokens.
+    if isinstance(data.get("layout"), dict):
+        raw_style = str(data["layout"].get("style", "")).lower().strip()
+        if raw_style not in _VALID_STYLES:
+            coerced = _STYLE_COERCE.get(raw_style)
+            if coerced:
+                logger.info(f"[brand] coerced layout.style '{raw_style}' → '{coerced}'")
+                data["layout"]["style"] = coerced
+            else:
+                logger.warning(
+                    f"[brand] unrecognized layout.style '{raw_style}', defaulting to 'editorial'"
+                )
+                data["layout"]["style"] = "editorial"
+
+    try:
+        return BrandToken.model_validate(data)
+    except ValueError as e:
+        raise BrandGenerationError(f"BrandToken failed schema validation: {e!s}") from e
+
+
+async def generate_seed_products(
+    store_name: str,
+    brand_voice: str,
+    industry_hint: str,
+) -> list[dict]:
+    """qwen-max generates 6 industry-appropriate seed products for the demo.
+
+    Returns raw dicts (name, price, stock, category, description, image_url)
+    ready to insert as ProductDB rows. Falls back to empty list on failure so
+    it never blocks the onboarding flow.
+    """
+    prompt = SEED_PRODUCTS_PROMPT.format(
+        store_name=store_name,
+        industry_hint=industry_hint,
+        brand_voice=brand_voice,
+    )
+
+    try:
+        raw = await _qwen_chat(
+            model=get_settings().qwen_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
+            temperature=0.6,
+            timeout=60.0,
+        )
+        # Seed products come back as a JSON array, not an object
+        text = raw.strip()
+        # Strip markdown fences
+        text = _FENCE_RE.sub("", text)
+        start, end = text.find("["), text.rfind("]")
+        if start != -1 and end > start:
+            products = json.loads(text[start:end + 1])
+            if isinstance(products, list):
+                return products[:6]
+    except Exception as e:
+        logger.warning(f"[brand] seed products generation failed: {e}")
+    return []
 
 
 # ─── Orchestrator ───────────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ from app.models.db_models import MerchantDB, ProductDB, BrandProfileDB
 from app.models.schemas import (
     Product,
     ProductCreate,
+    ProductUpdate,
     ProductCSVRow,
     ProductBatchCreate,
     OnboardingStatus,
@@ -31,7 +32,9 @@ from app.models.schemas import (
 from app.services import brand as brand_svc
 from app.services.brand import BrandGenerationError
 from app.services import delta as delta_svc
+from app.services import interceptor
 from app.services.products import db_to_product, products_state_map, DEFAULT_COST_RATIO
+from app.services.profile import load_constraints
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/products", tags=["products"])
@@ -192,3 +195,72 @@ async def list_products(
 
     rows = await load_products(db, merchant.id)
     return [db_to_product(r) for r in rows]
+
+
+async def _owned_product(db: AsyncSession, merchant_id: str, product_id: str) -> ProductDB:
+    p = await db.get(ProductDB, product_id)
+    if p is None or p.merchant_id != merchant_id:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return p
+
+
+@router.patch("/{product_id}")
+async def update_product(
+    product_id: str,
+    payload: ProductUpdate,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Partial edit. A price change runs through the interceptor: below cost is
+    blocked (409), below the margin floor is clamped with a warning the merchant
+    sees in `violations`. Stock/category/name/image/active update directly."""
+    product = await _owned_product(db, merchant.id, product_id)
+    data = payload.model_dump(exclude_unset=True)
+    violations: list = []
+
+    # Cost first — it's the basis for the margin check on any new price.
+    if "cost_price" in data and data["cost_price"] is not None:
+        product.cost_price = data["cost_price"]
+
+    if "price" in data and data["price"] is not None:
+        constraints = await load_constraints(db, merchant.id)
+        final, vs = interceptor.enforce_price(
+            cost_price=product.cost_price,
+            proposed_price=float(data["price"]),
+            constraints=constraints,
+            product_id=product.id,
+        )
+        violations = [v.model_dump() for v in vs]
+        if interceptor.blocked(vs):
+            msg = next((v.message for v in vs if v.severity == "blocked"), "Price blocked.")
+            raise HTTPException(status_code=409, detail=msg)
+        product.price = final
+
+    if "name" in data and data["name"] is not None:
+        product.name = data["name"]
+    if "stock" in data and data["stock"] is not None:
+        product.stock = data["stock"]
+    if "category" in data and data["category"] is not None:
+        product.category = data["category"]
+    if "image_url" in data and data["image_url"] is not None:
+        product.image_urls = [data["image_url"]] if data["image_url"] else []
+    if "is_active" in data and data["is_active"] is not None:
+        product.is_active = data["is_active"]
+
+    await db.flush()
+    await _sync_state_if_live(db, merchant.id)
+    return {"product": db_to_product(product).model_dump(), "violations": violations}
+
+
+@router.delete("/{product_id}", status_code=204)
+async def delete_product(
+    product_id: str,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft delete — keeps order history intact, removes the product from the
+    live store."""
+    product = await _owned_product(db, merchant.id, product_id)
+    product.is_active = False
+    await db.flush()
+    await _sync_state_if_live(db, merchant.id)
