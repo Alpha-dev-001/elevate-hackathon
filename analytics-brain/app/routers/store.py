@@ -28,6 +28,7 @@ from app.models.schemas import (
     PublicStore,
 )
 from app.services import delta as delta_svc
+from app.services.pricing import best_active_promo, effective_price, now_ms
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/store", tags=["storefront"])
@@ -71,28 +72,49 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
     state = await delta_svc.load_state(merchant.id)
     products: list[PublicProduct] = []
     promos = []
+    categories: list[str] = []
     layout = LayoutConfig(
         color_accent=pkg.brand.palette.accent,
         layout_variant=pkg.brand.layout_variant,
         banner_text=pkg.brand.tagline,
     )
     if state is not None:
+        now = now_ms()
         layout = state.layout_config
-        promos = list(state.active_promos.values())
+        # Only surface promos that are still live — never an expired banner.
+        promos = [p for p in state.active_promos.values() if p.expires_at > now]
+        seen_categories: list[str] = []
         for p in state.products.values():
             if not p.qwen_generated and p.description is None and p.price <= 0:
                 continue  # skip anything malformed
+            promo = best_active_promo(p.id, state.active_promos, now)
+            price, compare_at, promo_label = effective_price(p.price, promo)
+            if p.category and p.category not in seen_categories:
+                seen_categories.append(p.category)
             products.append(
                 PublicProduct(
                     id=p.id,
                     name=p.name,
-                    price=p.price,
+                    price=price,
+                    compare_at_price=compare_at,
+                    promo_label=promo_label,
                     description=p.description,
                     image_url=p.image_url,
                     category=p.category,
                     available=p.stock > 0,
                 )
             )
+        categories = seen_categories
+
+    # Load BrandToken from brand_profile if available (Task 2 addition).
+    brand_token_data = None
+    brand_profile_row = await db.get(BrandProfileDB, merchant.id)
+    if brand_profile_row and brand_profile_row.brand_tokens:
+        try:
+            from app.models.schemas import BrandToken
+            brand_token_data = BrandToken.model_validate(brand_profile_row.brand_tokens)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"[store] invalid brand_tokens for {merchant.id}: {e}")
 
     return PublicStore(
         store_name=merchant.store_name,
@@ -104,4 +126,6 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
         layout=layout,
         products=products,
         promos=promos,
+        categories=categories,
+        brand_token=brand_token_data,
     )

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.database import get_engine, Base
 from app.models import db_models  # noqa: F401 — registers tables on Base.metadata
-from app.routers import ws, upload, auth, onboarding, products, store, shop, merchant
+from app.routers import ws, upload, auth, onboarding, products, store, shop, merchant, dev
 import logging
 
 # Stale scaffold router still excluded until rewritten against current schemas.py:
@@ -39,6 +39,9 @@ app.include_router(products.router)    # single add + CSV batch + list + CRUD
 app.include_router(store.router)       # public storefront data by slug
 app.include_router(shop.router)        # public cart + checkout + order lookup
 app.include_router(merchant.router)    # orders, promos, constraints, catalog review
+
+if settings.app_env == "development":
+    app.include_router(dev.router)     # dev-only: brand regeneration for existing stores
 
 
 @app.on_event("startup")
