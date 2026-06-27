@@ -1,8 +1,24 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { AgentAction } from '@/types/schemas'
 import { OptionCard } from './OptionCard'
+
+// ── Reduced-motion hook ──────────────────────────────────────────────────────
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    setReduced(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return reduced
+}
 
 interface DecisionFeedProps {
   actions: AgentAction[]
@@ -12,6 +28,8 @@ interface DecisionFeedProps {
 }
 
 export function DecisionFeed({ actions, onApproveAction, onDismissAction }: DecisionFeedProps) {
+  const prefersReduced = useReducedMotion()
+
   return (
     <section>
       {/* Section header */}
@@ -46,8 +64,8 @@ export function DecisionFeed({ actions, onApproveAction, onDismissAction }: Deci
           >
             {/* Breathing pulse */}
             <motion.p
-              animate={{ opacity: [0.3, 0.8, 0.3] }}
-              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+              animate={{ opacity: prefersReduced ? 0.5 : [0.3, 0.8, 0.3] }}
+              transition={{ duration: 3, repeat: prefersReduced ? 0 : Infinity, ease: 'easeInOut' }}
               className="text-base font-mono mb-3"
               style={{ color: 'var(--color-text-muted)' }}
             >
@@ -56,13 +74,13 @@ export function DecisionFeed({ actions, onApproveAction, onDismissAction }: Deci
 
             {/* Ambient dot */}
             <motion.div
-              animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0.9, 0.4] }}
-              transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+              animate={{ scale: prefersReduced ? 1 : [1, 1.3, 1], opacity: prefersReduced ? 0.5 : [0.4, 0.9, 0.4] }}
+              transition={{ duration: 3, repeat: prefersReduced ? 0 : Infinity, ease: 'easeInOut' }}
               className="w-1.5 h-1.5 rounded-full mb-4"
               style={{ background: 'var(--color-accent)' }}
             />
 
-            <p className="text-xs font-mono" style={{ color: 'var(--color-text-muted)', opacity: 0.6 }}>
+            <p className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
               No suggestions yet. Simulate activity to generate one.
             </p>
           </motion.div>

@@ -1,8 +1,24 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
 import type { Merchant } from '@/types/schemas'
+
+// ── Reduced-motion hook ──────────────────────────────────────────────────────
+
+function useReducedMotion() {
+  const [reduced, setReduced] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
+    setReduced(mq.matches)
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return reduced
+}
 
 interface StoreSnapshotProps {
   merchant: Merchant
@@ -12,6 +28,8 @@ interface StoreSnapshotProps {
 }
 
 export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: StoreSnapshotProps) {
+  const prefersReduced = useReducedMotion()
+
   return (
     <section className="flex flex-col gap-4">
       {/* Section header */}
@@ -89,7 +107,7 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: Sto
         {simulateState === 'idle' && '▶ Simulate Activity'}
         {simulateState === 'sending' && (
           <span className="flex items-center justify-center gap-2">
-            <SpinnerIcon />
+            <SpinnerIcon prefersReduced={prefersReduced} />
             Sending events…
           </span>
         )}
@@ -122,7 +140,7 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: Sto
   )
 }
 
-function SpinnerIcon() {
+function SpinnerIcon({ prefersReduced }: { prefersReduced: boolean }) {
   return (
     <motion.svg
       width="14"
@@ -132,8 +150,8 @@ function SpinnerIcon() {
       stroke="currentColor"
       strokeWidth="2"
       strokeLinecap="round"
-      animate={{ rotate: 360 }}
-      transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+      animate={{ rotate: prefersReduced ? 0 : 360 }}
+      transition={{ duration: 1, repeat: prefersReduced ? 0 : Infinity, ease: 'linear' }}
     >
       <path d="M21 12a9 9 0 11-6.219-8.56" />
     </motion.svg>
