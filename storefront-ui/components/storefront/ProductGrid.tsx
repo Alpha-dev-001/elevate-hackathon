@@ -29,7 +29,7 @@ export function ProductGrid({
 }: {
   products: PublicProduct[]
   logoMark: string
-  slug: string
+  slug?: string
   emptyLabel?: string
   emptySub?: string
   gridVariant?: '2col-featured' | '3col-equal' | 'masonry'

@@ -32,7 +32,7 @@ export function ProductCard({
   product: PublicProduct
   index?: number
   logoMark?: string
-  slug: string
+  slug?: string
   cardStyle?: 'borderless' | 'outlined' | 'elevated' | 'colored-bg'
   featured?: boolean
   brandToken?: BrandToken | null
