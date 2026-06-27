@@ -29,6 +29,13 @@ interface MinimalDarkLayoutProps {
   setActiveCategory: React.Dispatch<React.SetStateAction<string | null>>
 }
 
+// Minimal-dark always forces a dark canvas regardless of brand palette.
+// Brand accent + primary still show through as highlight colors.
+const MD_BG      = '#0D0D0F'
+const MD_SURFACE = '#18181B'
+const MD_TEXT    = '#F0EFE8'
+const MD_MUTED   = '#7A7A82'
+
 export function MinimalDarkLayout({
   store,
   slug,
@@ -40,12 +47,22 @@ export function MinimalDarkLayout({
 }: MinimalDarkLayoutProps) {
   const bt = store.brand_token!
 
+  // Override the CSS vars StoreShell set from brand colors — dark is the identity here.
+  const darkVars = {
+    '--s-bg':         MD_BG,
+    '--s-surface':    MD_SURFACE,
+    '--s-text':       MD_TEXT,
+    '--s-text-muted': MD_MUTED,
+    background:       MD_BG,
+    color:            MD_TEXT,
+  } as React.CSSProperties
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" style={darkVars}>
       {/* Minimal top bar */}
       <header
         className="w-full px-8 py-5 flex items-center justify-between"
-        style={{ borderBottom: `1px solid ${bt.colors.text}10` }}
+        style={{ borderBottom: `1px solid ${MD_TEXT}18` }}
       >
         <div className="flex items-center gap-3">
           {store.icons.logo_mark && (
@@ -57,14 +74,14 @@ export function MinimalDarkLayout({
           )}
           <span
             className="text-[11px] font-mono uppercase tracking-[0.3em]"
-            style={{ color: bt.colors.text_muted }}
+            style={{ color: MD_MUTED }}
           >
             {store.store_name}
           </span>
         </div>
         <span
           className="text-[10px] font-mono uppercase tracking-[0.15em]"
-          style={{ color: bt.colors.text_muted }}
+          style={{ color: MD_MUTED }}
         >
           {store.tagline}
         </span>
@@ -88,11 +105,11 @@ export function MinimalDarkLayout({
         {store.products.length > 0 && (
           <div
             className="flex items-center gap-3 mb-12 pb-3"
-            style={{ borderBottom: `1px solid ${bt.colors.text}0C` }}
+            style={{ borderBottom: `1px solid ${MD_TEXT}18` }}
           >
             <span
               className="text-[10px] font-mono uppercase tracking-[0.2em]"
-              style={{ color: bt.colors.text_muted }}
+              style={{ color: MD_MUTED }}
             >
               Search
             </span>
@@ -102,7 +119,7 @@ export function MinimalDarkLayout({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="…"
               className="flex-1 bg-transparent text-sm outline-none"
-              style={{ color: bt.colors.text }}
+              style={{ color: MD_TEXT }}
             />
           </div>
         )}
@@ -128,7 +145,7 @@ export function MinimalDarkLayout({
 
       <footer
         className="text-center py-8 text-[10px] font-mono tracking-widest uppercase"
-        style={{ color: `${bt.colors.text_muted}66` }}
+        style={{ color: `${MD_MUTED}88` }}
       >
         Powered by Elevate
       </footer>
