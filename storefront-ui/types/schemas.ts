@@ -187,6 +187,46 @@ export const BrandReadyPayloadSchema = z.union([
   }),
 ])
 
+// ─── BrandToken (spec-aligned layout DNA) ─────────────────────────────────
+
+export const BrandColorsSchema = z.object({
+  primary: z.string(),
+  accent: z.string(),
+  background: z.string(),
+  surface: z.string(),
+  text: z.string(),
+  text_muted: z.string(),
+})
+
+export const BrandTypographyTokenSchema = z.object({
+  display_font: z.string(),
+  body_font: z.string(),
+  scale: z.enum(['compact', 'balanced', 'editorial']).default('balanced'),
+  letter_spacing: z.enum(['tight', 'normal', 'wide']).default('normal'),
+  weight: z.enum(['light', 'regular', 'medium', 'bold']).default('regular'),
+})
+
+export const BrandLayoutTokenSchema = z.object({
+  style: z.enum(['editorial', 'bold-grid', 'minimal-dark', 'warm-craft']),
+  hero_type: z.enum(['full-bleed', 'text-forward', 'split', 'texture-bg']),
+  product_grid: z.enum(['2col-featured', '3col-equal', 'masonry']),
+  card_style: z.enum(['borderless', 'outlined', 'elevated', 'colored-bg']),
+  border_radius: z.enum(['2px', '8px', '16px', '24px']),
+  spacing: z.enum(['compact', 'balanced', 'generous']),
+  category_style: z.enum(['pill', 'underline-tab', 'minimal-text']),
+})
+
+export const BrandTokenSchema = z.object({
+  store_name: z.string(),
+  tagline: z.string(),
+  colors: BrandColorsSchema,
+  typography: BrandTypographyTokenSchema,
+  layout: BrandLayoutTokenSchema,
+  mood: z.string(),
+  industry_hint: z.string(),
+  brand_voice: z.string(),
+})
+
 // ─── 10. Public storefront payload ────────────────────────────────────────────
 
 export const PublicProductSchema = z.object({
@@ -277,10 +317,10 @@ export const PromoCreateSchema = z.object({
 })
 
 export const ConstraintsSchema = z.object({
-  min_profit_margin_percent: z.number().min(0).max(100),
-  max_discount_percent: z.number().min(0).max(100),
-  min_price: z.record(z.number()).default({}),
-  accessibility_level: z.enum(['AA', 'AAA']),
+  min_profit_margin_percent: z.number().min(0).max(100).optional(),
+  max_discount_percent: z.number().min(0).max(100).optional(),
+  min_price: z.record(z.number()).optional(),
+  accessibility_level: z.enum(['AA', 'AAA']).optional(),
 })
 
 export const PricingFlagSchema = z.object({
@@ -305,46 +345,6 @@ export const ViolationSchema = z.object({
   message: z.string(),
   original_value: z.any().nullable().optional(),
   clamped_value: z.any().nullable().optional(),
-})
-
-// ─── BrandToken (spec-aligned layout DNA) ─────────────────────────────────
-
-export const BrandColorsSchema = z.object({
-  primary: z.string(),
-  accent: z.string(),
-  background: z.string(),
-  surface: z.string(),
-  text: z.string(),
-  text_muted: z.string(),
-})
-
-export const BrandTypographyTokenSchema = z.object({
-  display_font: z.string(),
-  body_font: z.string(),
-  scale: z.enum(['compact', 'balanced', 'editorial']).default('balanced'),
-  letter_spacing: z.enum(['tight', 'normal', 'wide']).default('normal'),
-  weight: z.enum(['light', 'regular', 'medium', 'bold']).default('regular'),
-})
-
-export const BrandLayoutTokenSchema = z.object({
-  style: z.enum(['editorial', 'bold-grid', 'minimal-dark', 'warm-craft']),
-  hero_type: z.enum(['full-bleed', 'text-forward', 'split', 'texture-bg']),
-  product_grid: z.enum(['2col-featured', '3col-equal', 'masonry']),
-  card_style: z.enum(['borderless', 'outlined', 'elevated', 'colored-bg']),
-  border_radius: z.enum(['2px', '8px', '16px', '24px']),
-  spacing: z.enum(['compact', 'balanced', 'generous']),
-  category_style: z.enum(['pill', 'underline-tab', 'minimal-text']),
-})
-
-export const BrandTokenSchema = z.object({
-  store_name: z.string(),
-  tagline: z.string(),
-  colors: BrandColorsSchema,
-  typography: BrandTypographyTokenSchema,
-  layout: BrandLayoutTokenSchema,
-  mood: z.string(),
-  industry_hint: z.string(),
-  brand_voice: z.string(),
 })
 
 // ─── AgentAction ─────────────────────────────────────────────────────────────
