@@ -103,7 +103,12 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
         expires_at = int(time.time() * 1000) + duration * 60 * 1000
 
         state = await delta_svc.load_state(row.merchant_id)
-        if state:
+        if not state:
+            logger.warning(
+                "[agent] flash_sale: state not found for merchant %s — promo not applied",
+                row.merchant_id,
+            )
+        else:
             promo = Promo(
                 id=row.promo_id,
                 product_id=list(state.products.keys())[0] if state.products else "all",
