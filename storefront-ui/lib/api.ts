@@ -14,7 +14,35 @@ import type {
   PresignedUploadResponse,
   Product,
   PublicStore,
+  Cart,
+  Order,
+  OrderCustomer,
+  OrderStatus,
+  Promo,
+  PromoCreate,
+  Constraints,
+  CatalogReview,
+  Violation,
+  AgentAction,
 } from '@/types/schemas'
+
+export interface DashboardData {
+  store_name: string
+  total_gmv: number
+  elevate_attributed_gmv: number
+  elevate_fee: number
+  actions: Array<{
+    promo_id: string
+    action_type: string
+    title: string
+    trigger: string
+    estimated_gmv: number
+    executed_at: number | null
+    attributed_orders: number
+    attributed_gmv: number
+    fee: number
+  }>
+}
 
 export interface ProductCreateInput {
   name: string
@@ -32,6 +60,25 @@ export interface ProductCSVRowInput {
   image_url?: string
   category?: string
 }
+
+export interface ProductUpdateInput {
+  name?: string
+  price?: number
+  cost_price?: number
+  stock?: number
+  category?: string
+  image_url?: string
+  is_active?: boolean
+}
+
+export interface ConstraintsUpdateInput {
+  min_profit_margin_percent?: number
+  max_discount_percent?: number
+  min_price?: Record<string, number>
+  accessibility_level?: 'AA' | 'AAA'
+}
+
+const enc = encodeURIComponent
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:9000'
@@ -114,9 +161,93 @@ export const api = {
       body: JSON.stringify({ products }),
     }),
   listProducts: () => req<Product[]>('/products'),
+  updateProduct: (id: string, body: ProductUpdateInput) =>
+    req<{ product: Product; violations: Violation[] }>(`/products/${enc(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteProduct: (id: string) =>
+    req<null>(`/products/${enc(id)}`, { method: 'DELETE' }),
 
   // ── Public storefront ───────────────────────────────────────────────────
-  getStore: (slug: string) => req<PublicStore>(`/api/store/${encodeURIComponent(slug)}`),
+  getStore: (slug: string) => req<PublicStore>(`/api/store/${enc(slug)}`),
+
+  // ── Public commerce: cart, checkout, order lookup (guest, slug-scoped) ────
+  getCart: (slug: string, sessionId: string) =>
+    req<Cart>(`/api/store/${enc(slug)}/cart?session_id=${enc(sessionId)}`),
+  addToCart: (slug: string, sessionId: string, productId: string, qty = 1) =>
+    req<Cart>(`/api/store/${enc(slug)}/cart/items`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, product_id: productId, qty }),
+    }),
+  setCartItem: (slug: string, sessionId: string, productId: string, qty: number) =>
+    req<Cart>(`/api/store/${enc(slug)}/cart/items`, {
+      method: 'PATCH',
+      body: JSON.stringify({ session_id: sessionId, product_id: productId, qty }),
+    }),
+  clearCart: (slug: string, sessionId: string) =>
+    req<Cart>(`/api/store/${enc(slug)}/cart?session_id=${enc(sessionId)}`, {
+      method: 'DELETE',
+    }),
+  checkout: (slug: string, sessionId: string, customer: OrderCustomer) =>
+    req<Order>(`/api/store/${enc(slug)}/checkout`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, customer }),
+    }),
+  getOrder: (slug: string, orderId: string, email: string) =>
+    req<Order>(`/api/store/${enc(slug)}/order/${enc(orderId)}?email=${enc(email)}`),
+
+  // ── Merchant ops: orders, promos, constraints, catalog review ─────────────
+  merchantOrders: () => req<Order[]>('/merchant/orders'),
+  updateOrderStatus: (id: string, status: OrderStatus) =>
+    req<Order>(`/merchant/orders/${enc(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
+  listPromos: () => req<Promo[]>('/merchant/promos'),
+  createPromo: (body: PromoCreate) =>
+    req<{ promo: Promo; violations: Violation[] }>('/merchant/promos', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deletePromo: (id: string) =>
+    req<null>(`/merchant/promos/${enc(id)}`, { method: 'DELETE' }),
+  getConstraints: () => req<Constraints>('/merchant/constraints'),
+  updateConstraints: (body: ConstraintsUpdateInput) =>
+    req<Constraints>('/merchant/constraints', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  getCatalogReview: () => req<CatalogReview | null>('/merchant/catalog-review'),
+  runCatalogReview: () =>
+    req<CatalogReview>('/merchant/catalog-review', { method: 'POST' }),
+
+  // ── Behavior events ─────────────────────────────────────────────────────
+  ingestEvent: (slug: string, body: { event_type: string; product_id?: string; session_id: string; timestamp?: number }) =>
+    req<{ ok: boolean }>(`/api/behavior/event/${enc(slug)}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  simulateActivity: (slug: string) =>
+    req<{ ok: boolean; scenario: string; events: number }>(`/api/behavior/simulate/${enc(slug)}`, {
+      method: 'POST',
+    }),
+
+  // ── Agent actions ────────────────────────────────────────────────────────
+  getPendingActions: (slug: string) =>
+    req<{ actions: AgentAction[] }>(`/api/agent/actions/${enc(slug)}/pending`),
+  approveAction: (actionId: string) =>
+    req<{ action: AgentAction }>(`/api/agent/actions/${enc(actionId)}/approve`, {
+      method: 'POST',
+    }),
+  dismissAction: (actionId: string) =>
+    req<{ action: AgentAction }>(`/api/agent/actions/${enc(actionId)}/dismiss`, {
+      method: 'POST',
+    }),
+
+  // ── Dashboard ────────────────────────────────────────────────────────────
+  getDashboard: (slug: string) =>
+    req<DashboardData>(`/api/dashboard/${enc(slug)}`),
 }
 
 export const WS_BASE =

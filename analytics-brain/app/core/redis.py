@@ -66,6 +66,18 @@ class Keys:
     def onboarding(merchant_id: str) -> str:
         return f"elevate:{merchant_id}:onboarding"
 
+    @staticmethod
+    def cart(merchant_id: str, session_id: str) -> str:
+        return f"elevate:{merchant_id}:cart:{session_id}"
+
+    @staticmethod
+    def catalog_review(merchant_id: str) -> str:
+        return f"elevate:{merchant_id}:catalog_review"
+
+    @staticmethod
+    def events(merchant_id: str) -> str:
+        return f"elevate:{merchant_id}:events"
+
 
 # ─── TTLs (seconds) ───────────────────────────────────────────────────────────
 
@@ -74,3 +86,6 @@ class TTL:
     SESSION = 1800          # 30 min
     PENDING_ACTIONS = 3600  # 1 hour
     DELTA_LOG = 86400 * 7   # 7 days
+    CART = 86400 * 2        # 2 days — outlives a browse session but stays ephemeral
+    CATALOG_REVIEW = 86400  # 1 day — cached Qwen observation, re-run on demand
+    EVENTS = 3600           # 1 hour — behavior events; only need last N for decision cycle
