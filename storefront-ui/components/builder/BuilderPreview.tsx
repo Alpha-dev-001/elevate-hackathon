@@ -22,7 +22,11 @@ export function BuilderPreview({ store }: { store: PublicStore }) {
   )
 
   return (
-    <div className="flex-1 h-full overflow-y-auto relative">
+    // `transform` establishes a containing block so the storefront's
+    // position:fixed elements (e.g. the sidebar-text nav) resolve to THIS pane
+    // instead of the viewport — otherwise they escape and cover the builder's
+    // left control panel.
+    <div className="flex-1 h-full overflow-y-auto relative" style={{ transform: 'translateZ(0)' }}>
       <div className="sticky top-0 z-10 px-4 py-2 text-[11px] uppercase tracking-widest text-neutral-400"
            style={{ background: 'rgba(10,10,11,0.8)', backdropFilter: 'blur(8px)' }}>
         You are previewing
