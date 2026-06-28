@@ -3,7 +3,7 @@
  * the SECTION/CARD/NAV registries. DSLRenderer and tests import it once so the
  * registries are filled before any lookup. Each family task appends here.
  */
-import { SECTION_REGISTRY, CARD_REGISTRY } from '@/lib/dslRegistry'
+import { SECTION_REGISTRY, CARD_REGISTRY, NAV_REGISTRY } from '@/lib/dslRegistry'
 
 // ─── Hero family (Task 10) ──────────────────────────────────────────────────
 import { EditorialStackedHero } from '@/components/storefront/sections/hero/EditorialStackedHero'
@@ -59,3 +59,16 @@ import { QuoteCalloutStory } from '@/components/storefront/sections/story/QuoteC
 SECTION_REGISTRY.story['full-bleed-text'] = FullBleedTextStory
 SECTION_REGISTRY.story['split-image-story'] = SplitImageStory
 SECTION_REGISTRY.story['quote-callout'] = QuoteCalloutStory
+
+// ─── Nav family (Task 14) ───────────────────────────────────────────────────
+import { UnderlineTabsNav } from '@/components/storefront/nav/UnderlineTabsNav'
+import { PillNav } from '@/components/storefront/nav/PillNav'
+import { SidebarTextNav } from '@/components/storefront/nav/SidebarTextNav'
+import { StickyTabsNav } from '@/components/storefront/nav/StickyTabsNav'
+import { MinimalTextNav } from '@/components/storefront/nav/MinimalTextNav'
+
+NAV_REGISTRY['underline-tabs'] = UnderlineTabsNav
+NAV_REGISTRY['pill-nav'] = PillNav
+NAV_REGISTRY['sidebar-text'] = SidebarTextNav
+NAV_REGISTRY['sticky-tabs'] = StickyTabsNav
+NAV_REGISTRY['minimal-text'] = MinimalTextNav
