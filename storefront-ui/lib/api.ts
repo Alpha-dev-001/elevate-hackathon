@@ -24,6 +24,7 @@ import type {
   CatalogReview,
   Violation,
   AgentAction,
+  LayoutDSL,
 } from '@/types/schemas'
 
 export interface DashboardData {
@@ -171,6 +172,12 @@ export const api = {
 
   // ── Public storefront ───────────────────────────────────────────────────
   getStore: (slug: string) => req<PublicStore>(`/api/store/${enc(slug)}`),
+
+  // ── Sprint 3: LayoutDSL save / regenerate ─────────────────────────────────
+  saveDsl: (slug: string, dsl: LayoutDSL) =>
+    req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'PUT', body: JSON.stringify(dsl) }),
+  regenerateDsl: (slug: string) =>
+    req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'POST' }),
 
   // ── Public commerce: cart, checkout, order lookup (guest, slug-scoped) ────
   getCart: (slug: string, sessionId: string) =>

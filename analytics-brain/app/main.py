@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.database import get_engine, Base
 from app.models import db_models  # noqa: F401 — registers tables on Base.metadata
-from app.routers import ws, upload, auth, onboarding, products, store, shop, merchant, dev, behavior, agent, dashboard
+from app.routers import ws, upload, auth, onboarding, products, store, shop, merchant, dev, behavior, agent, dashboard, brand
 import logging
 
 # Stale scaffold router still excluded until rewritten against current schemas.py:
@@ -42,6 +42,7 @@ app.include_router(merchant.router)    # orders, promos, constraints, catalog re
 app.include_router(behavior.router)    # behavior event ingest + simulation
 app.include_router(agent.router)       # pending actions, approve, dismiss
 app.include_router(dashboard.router)   # attribution dashboard
+app.include_router(brand.router)       # sprint-3: layout DSL save/regenerate + StoreBirth SSE
 
 if settings.app_env == "development":
     app.include_router(dev.router)     # dev-only: brand regeneration for existing stores
