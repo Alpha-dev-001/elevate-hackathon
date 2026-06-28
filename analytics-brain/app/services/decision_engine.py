@@ -29,7 +29,7 @@ Brand rules (never violate): {brand_rules_summary}
 
 Current products: {products_summary}
 Behavior anomaly: {anomaly_description}
-
+{memory_block}
 Decide ONE action. Return ONLY this JSON:
 {{
   "action_type": "<flash_sale|layout_morph|scarcity_price|recovery_offer|copy_rewrite>",
@@ -58,6 +58,33 @@ Decide ONE action. Return ONLY this JSON:
 
 The merchant approves before execution. Make it compelling.
 Return ONLY JSON."""
+
+
+def compose_decision_prompt(
+    *,
+    store_name: str,
+    mood: str,
+    brand_voice: str,
+    brand_rules_summary: str,
+    products_summary: str,
+    anomaly_description: str,
+    memory_context: str = "",
+) -> str:
+    """Build the decision prompt, injecting prior-outcome memory when present.
+
+    Extracted (and pure) so the memory-injection behavior is unit-testable
+    without a DB, Redis, or a live Qwen call.
+    """
+    memory_block = f"\nPrior outcomes for this store (learn from them):\n{memory_context}\n" if memory_context else ""
+    return DECISION_PROMPT.format(
+        store_name=store_name,
+        mood=mood,
+        brand_voice=brand_voice,
+        brand_rules_summary=brand_rules_summary,
+        products_summary=products_summary,
+        anomaly_description=anomaly_description,
+        memory_block=memory_block,
+    )
 
 
 async def run_decision_cycle(
@@ -111,14 +138,25 @@ async def run_decision_cycle(
         f"{p.name} (${p.price}, stock: {p.stock})" for p in products
     ) or "no products yet"
 
-    prompt = DECISION_PROMPT.format(
+    # Pull prior-outcome memory and inject it — the cognitive loop closes here.
+    from app.services.memory import get_memory, build_memory_context
+    try:
+        entries = await get_memory(merchant_id, db, redis)
+    except Exception as e:  # noqa: BLE001 — memory must never block a decision
+        logger.warning("[decision] memory read failed for %s: %s", merchant_id, e)
+        entries = []
+    memory_context = build_memory_context(entries)
+
+    prompt = compose_decision_prompt(
         store_name=merchant.store_name,
         mood=mood,
         brand_voice=brand_voice,
         brand_rules_summary=brand_rules_summary,
         products_summary=products_summary,
         anomaly_description=anomaly_desc,
+        memory_context=memory_context,
     )
+    estimated_tokens = len(prompt) // 4  # rough char/4 heuristic for the terminal badge
 
     try:
         raw = await _qwen_chat(
@@ -158,6 +196,7 @@ async def run_decision_cycle(
         brand_check=str(data.get("brand_check", ""))[:500],
         status="pending",
         created_at=now,
+        trigger_description=anomaly_desc[:1000],
     )
     db.add(action_db)
     await db.commit()
@@ -185,7 +224,11 @@ async def run_decision_cycle(
         merchant_id,
         WSMessage(
             event=WSEventType.AGENT_ACTION,
-            payload={"action": action.model_dump()},
+            payload={
+                "action": action.model_dump(),
+                "estimated_tokens": estimated_tokens,
+                "memory_count": len(entries),
+            },
             merchant_id=merchant_id,
             timestamp=now,
         ),
