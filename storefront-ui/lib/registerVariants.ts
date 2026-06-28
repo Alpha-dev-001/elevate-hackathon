@@ -41,3 +41,21 @@ CARD_REGISTRY['editorial-horizontal'] = EditorialHorizontalCard
 CARD_REGISTRY['borderless-floating'] = BorderlessFloatingCard
 CARD_REGISTRY['polaroid-card'] = PolaroidCard
 CARD_REGISTRY['image-below-text'] = ImageBelowTextCard
+
+// ─── Banner family (Task 13) ────────────────────────────────────────────────
+import { ScrollTickerBanner } from '@/components/storefront/sections/banner/ScrollTickerBanner'
+import { StaticStripBanner } from '@/components/storefront/sections/banner/StaticStripBanner'
+import { AnnouncementBarBanner } from '@/components/storefront/sections/banner/AnnouncementBarBanner'
+
+SECTION_REGISTRY.banner['scroll-ticker'] = ScrollTickerBanner
+SECTION_REGISTRY.banner['static-strip'] = StaticStripBanner
+SECTION_REGISTRY.banner['announcement-bar'] = AnnouncementBarBanner
+
+// ─── Story family (Task 13) ─────────────────────────────────────────────────
+import { FullBleedTextStory } from '@/components/storefront/sections/story/FullBleedTextStory'
+import { SplitImageStory } from '@/components/storefront/sections/story/SplitImageStory'
+import { QuoteCalloutStory } from '@/components/storefront/sections/story/QuoteCalloutStory'
+
+SECTION_REGISTRY.story['full-bleed-text'] = FullBleedTextStory
+SECTION_REGISTRY.story['split-image-story'] = SplitImageStory
+SECTION_REGISTRY.story['quote-callout'] = QuoteCalloutStory
