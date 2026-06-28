@@ -9,6 +9,7 @@ import { DSLSection } from './DSLSection'
 import { DSLNav } from './DSLNav'
 import { DSLFooter } from './DSLFooter'
 import { FallbackStorefront } from './FallbackStorefront'
+import { CustomCSSInjector } from './CustomCSSInjector'
 import { Cart } from './Cart'
 import { ProductDrawer } from './ProductDrawer'
 import { useCart } from '@/lib/cart'
@@ -87,6 +88,7 @@ export function DSLRenderer({
         </>
       )}
       <div data-store={slug}>
+        <CustomCSSInjector css={parsed.custom_css} slug={slug} />
         {!hasAnnounce && <DSLNav store={store} navStyle={parsed.global_config.nav_style} />}
         {parsed.sections.map((section, i) => (
           <DSLSection
