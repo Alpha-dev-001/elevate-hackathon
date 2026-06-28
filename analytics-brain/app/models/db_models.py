@@ -22,6 +22,8 @@ class MerchantDB(Base):
     onboarding_status: Mapped[str] = mapped_column(String, default="store_info")
     is_live: Mapped[bool] = mapped_column(Boolean, default=False)
     qwen_memory: Mapped[dict] = mapped_column(JSON, default=lambda: {"entries": []})
+    # Unmet point-and-edit intents → Qwen proposes new config when one recurs.
+    capability_requests: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
     products: Mapped[list["ProductDB"]] = relationship(back_populates="merchant")

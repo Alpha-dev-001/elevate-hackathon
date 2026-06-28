@@ -104,15 +104,19 @@ class EditIntentRequest(BaseModel):
 
 
 EDIT_INTENT_PROMPT = """You are an expert store designer. The merchant clicked a part of
-their store and described what they want. Pick the SINGLE best option from the allowed
-list that satisfies their intent. Return ONLY json.
+their store and described what they want. Decide whether ANY allowed option can
+reasonably satisfy their intent. Return ONLY json.
 
 Region: {region}
 Current value: {current}
-Allowed options (pick exactly one): {options}
+Allowed options (you may pick exactly one of these): {options}
 Merchant intent: "{intent}"
 
-Return json: {{"choice": "<one allowed option>", "explanation": "<one first-person sentence on why this fits their intent>"}}
+If one of the allowed options satisfies the intent:
+  json: {{"satisfiable": true, "choice": "<one allowed option>", "explanation": "<one first-person sentence>"}}
+If the intent needs something NONE of the allowed options provide (a capability the
+store does not yet have):
+  json: {{"satisfiable": false, "capability": "<2-4 word snake_case name of what they actually want>", "explanation": "<one sentence acknowledging the gap>"}}
 Pure json."""
 
 
@@ -154,28 +158,58 @@ async def edit_intent(
 
     from app.services.brand import _qwen_chat, _extract_json
     from app.core.config import get_settings
+    satisfiable, choice, capability, explanation = True, "", "", ""
     try:
         raw = await _qwen_chat(
             model=get_settings().qwen_model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=200, temperature=0.3, timeout=30.0,
+            max_tokens=220, temperature=0.3, timeout=30.0,
         )
         data = _extract_json(raw)
+        satisfiable = bool(data.get("satisfiable", True))
         choice = str(data.get("choice", "")).strip()
-        explanation = str(data.get("explanation", "")).strip() or "This fits what you asked for."
+        capability = str(data.get("capability", "")).strip()
+        explanation = str(data.get("explanation", "")).strip()
     except Exception as e:  # noqa: BLE001 — fall back to a deterministic pick
         logger.warning("[edit-intent] qwen failed for %s: %s", slug, e)
-        choice, explanation = "", "Qwen was unavailable — picked the closest match."
+        satisfiable, explanation = True, "Qwen was unavailable — picked the closest match."
+
+    # Intent the store can't satisfy yet → record it; Qwen proposes a new config
+    # dimension once the same gap recurs (self-extending config surface).
+    if not satisfiable:
+        from app.services.capability_tracker import record_unmet
+        rec = await record_unmet(merchant.id, capability or body.intent, body.intent, db)
+        return {
+            "patch": None,
+            "satisfiable": False,
+            "capability": rec["label"],
+            "proposed": rec["proposed"],
+            "request_count": rec["count"],
+            "explanation": explanation or "That needs a capability your store doesn't have yet.",
+        }
 
     # Validate Qwen's choice against the allowed options (never trust it raw).
     if kind == "section":
-        variant = coerce_variant(st, choice)
-        patch = {"kind": "section", "index": idx, "variant": variant}
+        patch = {"kind": "section", "index": idx, "variant": coerce_variant(st, choice)}
     else:
         value = choice if choice in options else (current if current in options else options[0])
         patch = {"kind": "global", "field": field, "value": value}
 
-    return {"patch": patch, "explanation": explanation}
+    return {"patch": patch, "satisfiable": True, "explanation": explanation or "This fits what you asked for."}
+
+
+@router.get("/capabilities/{slug}")
+async def list_capability_requests(
+    slug: str,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Capability gaps Qwen has noticed for this store (point-and-edit requests it
+    couldn't satisfy). Powers the 'Qwen proposes new capabilities' surface."""
+    if merchant.slug != slug:
+        raise HTTPException(status_code=403, detail="Not your store")
+    from app.services.capability_tracker import list_capabilities
+    return {"capabilities": await list_capabilities(merchant.id, db)}
 
 
 # ─── StoreBirth SSE — make the Qwen pipeline visible during generation ───────────

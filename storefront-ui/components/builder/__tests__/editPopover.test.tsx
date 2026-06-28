@@ -33,4 +33,17 @@ describe('EditPopover (point-and-edit)', () => {
     await userEvent.click(screen.getByText('✦ Ask Qwen'))
     expect(ask).toHaveBeenCalledWith('make it minimal')
   })
+
+  it('shows a capability proposal once an unmet intent recurs', () => {
+    render(<EditPopover target={{ kind: 'global', field: 'nav_style' }} onClose={() => {}} onAskQwen={() => {}}
+                        qwenSuggestion={{ explanation: 'No nav option does that.', proposal: { capability: 'mega-menu', proposed: true, count: 2 } }} />)
+    expect(screen.getByTestId('capability-proposal')).toHaveTextContent('mega menu')
+  })
+
+  it('just notes a first-time unmet intent', () => {
+    render(<EditPopover target={{ kind: 'global', field: 'nav_style' }} onClose={() => {}} onAskQwen={() => {}}
+                        qwenSuggestion={{ explanation: 'No nav option does that.', proposal: { capability: 'mega-menu', proposed: false, count: 1 } }} />)
+    expect(screen.getByTestId('capability-noted')).toBeTruthy()
+    expect(screen.queryByTestId('capability-proposal')).toBeFalsy()
+  })
 })

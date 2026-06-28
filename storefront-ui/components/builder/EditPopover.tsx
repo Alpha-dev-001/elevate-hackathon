@@ -21,7 +21,11 @@ export function EditPopover({
   onClose: () => void
   onAskQwen: (intent: string) => void
   qwenBusy?: boolean
-  qwenSuggestion?: { explanation: string; apply: () => void } | null
+  qwenSuggestion?: {
+    explanation: string
+    apply?: () => void
+    proposal?: { capability: string; proposed: boolean; count: number }
+  } | null
   onApplyQwen?: () => void
 }) {
   const updateSection = useBuilderStore((s) => s.updateSection)
@@ -79,11 +83,32 @@ export function EditPopover({
         {qwenSuggestion && (
           <div className="mt-1 rounded-md p-2 text-xs" style={{ background: 'rgba(110,231,183,0.08)' }}>
             <p className="mb-2 text-neutral-300">{qwenSuggestion.explanation}</p>
-            <button onClick={onApplyQwen}
-                    className="w-full text-xs font-medium px-2 py-1.5 rounded-md"
-                    style={{ background: 'var(--color-accent,#6EE7B7)', color: '#0A0A0B' }}>
-              Apply Qwen&apos;s suggestion
-            </button>
+
+            {qwenSuggestion.apply && (
+              <button onClick={onApplyQwen}
+                      className="w-full text-xs font-medium px-2 py-1.5 rounded-md"
+                      style={{ background: 'var(--color-accent,#6EE7B7)', color: '#0A0A0B' }}>
+                Apply Qwen&apos;s suggestion
+              </button>
+            )}
+
+            {qwenSuggestion.proposal && (
+              qwenSuggestion.proposal.proposed ? (
+                <div data-testid="capability-proposal" className="rounded-md p-2"
+                     style={{ background: 'rgba(255,209,102,0.12)', color: '#FFD166' }}>
+                  <p className="font-medium mb-1">✦ Qwen proposes a new capability</p>
+                  <p className="text-[11px] leading-relaxed opacity-90">
+                    You&apos;ve asked for <strong>{qwenSuggestion.proposal.capability.replace(/-/g, ' ')}</strong> {qwenSuggestion.proposal.count}× —
+                    Qwen recommends adding it as a store option. It&apos;s queued for your store.
+                  </p>
+                </div>
+              ) : (
+                <p data-testid="capability-noted" className="text-[11px] text-neutral-400">
+                  Qwen noted this — if you ask again, it&apos;ll propose adding
+                  “{qwenSuggestion.proposal.capability.replace(/-/g, ' ')}” as a new capability.
+                </p>
+              )
+            )}
           </div>
         )}
       </div>

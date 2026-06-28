@@ -131,8 +131,12 @@ export type EditPatch =
   | { kind: 'section'; index: number; variant: string }
   | { kind: 'global'; field: string; value: string }
 export interface EditIntentResult {
-  patch: EditPatch
+  patch: EditPatch | null
+  satisfiable: boolean
   explanation: string
+  capability?: string      // when !satisfiable: the gap Qwen named
+  proposed?: boolean       // true once the same gap has recurred
+  request_count?: number
 }
 
 export const api = {

@@ -21,7 +21,9 @@ export function BuilderPreview({ store }: { store: PublicStore }) {
   const [editMode, setEditMode] = useState(false)
   const [target, setTarget] = useState<EditTarget | null>(null)
   const [qwenBusy, setQwenBusy] = useState(false)
-  const [suggestion, setSuggestion] = useState<{ explanation: string; apply: () => void } | null>(null)
+  const [suggestion, setSuggestion] = useState<
+    { explanation: string; apply?: () => void; proposal?: { capability: string; proposed: boolean; count: number } } | null
+  >(null)
 
   const previewStore: PublicStore = useMemo(
     () => ({ ...store, brand_token: draftToken ?? store.brand_token }),
@@ -37,13 +39,21 @@ export function BuilderPreview({ store }: { store: PublicStore }) {
     setSuggestion(null)
     try {
       const res = await api.editIntent(store.slug, { target, intent, dsl: draftDSL })
-      const patch = res.patch
-      const apply = () => {
-        if (patch.kind === 'section') updateSection(patch.index, { variant: patch.variant })
-        else updateGlobalConfig({ [patch.field]: patch.value } as any)
-        closePopover()
+      if (res.satisfiable && res.patch) {
+        const patch = res.patch
+        const apply = () => {
+          if (patch.kind === 'section') updateSection(patch.index, { variant: patch.variant })
+          else updateGlobalConfig({ [patch.field]: patch.value } as any)
+          closePopover()
+        }
+        setSuggestion({ explanation: res.explanation, apply })
+      } else {
+        // Qwen recognized a capability the store doesn't have yet.
+        setSuggestion({
+          explanation: res.explanation,
+          proposal: { capability: res.capability ?? 'this', proposed: !!res.proposed, count: res.request_count ?? 1 },
+        })
       }
-      setSuggestion({ explanation: res.explanation, apply })
     } catch (e) {
       setSuggestion({
         explanation: e instanceof ApiError ? `Qwen couldn't map that: ${e.message}` : 'Qwen is unavailable right now.',
@@ -79,7 +89,7 @@ export function BuilderPreview({ store }: { store: PublicStore }) {
           onAskQwen={askQwen}
           qwenBusy={qwenBusy}
           qwenSuggestion={suggestion}
-          onApplyQwen={() => suggestion?.apply()}
+          onApplyQwen={() => suggestion?.apply?.()}
         />
       )}
     </div>
