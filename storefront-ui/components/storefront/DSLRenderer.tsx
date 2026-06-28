@@ -1,5 +1,5 @@
 'use client'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import type { PublicStore, LayoutDSL } from '@/types/schemas'
 import { LayoutDSLSchema } from '@/types/schemas'
 import '@/lib/registerVariants'
@@ -10,10 +10,11 @@ import { DSLNav } from './DSLNav'
 import { DSLFooter } from './DSLFooter'
 import { FallbackStorefront } from './FallbackStorefront'
 import { Cart } from './Cart'
+import { ProductDrawer } from './ProductDrawer'
 import { useCart } from '@/lib/cart'
 
 export function DSLRenderer({
-  store, slug, preview, onOpenProduct, dslOverride,
+  store, slug, preview, onOpenProduct, dslOverride, initialProductId,
 }: {
   store: PublicStore
   slug: string
@@ -21,9 +22,26 @@ export function DSLRenderer({
   onOpenProduct?: (id: string) => void
   /** Builder injects a draft DSL without mutating the store. */
   dslOverride?: LayoutDSL | null
+  /** Deep-link: open this product's drawer on mount (from ?p=). */
+  initialProductId?: string | null
 }) {
   const openCart = useCart((s) => s.setOpen)
   const cartCount = useCart((s) => s.cart?.item_count ?? 0)
+  const [openId, setOpenId] = useState<string | null>(initialProductId ?? null)
+
+  // In preview mode the builder controls clicks; otherwise own the drawer.
+  const handleOpen = onOpenProduct
+    ?? ((id: string) => {
+      setOpenId(id)
+      if (!preview && typeof window !== 'undefined') {
+        window.history.pushState(null, '', `/s/${slug}?p=${id}`)
+      }
+    })
+  const openProduct = openId ? store.products.find((p) => p.id === openId) ?? null : null
+  const closeDrawer = () => {
+    setOpenId(null)
+    if (!preview && typeof window !== 'undefined') window.history.pushState(null, '', `/s/${slug}`)
+  }
 
   const parsed = useMemo(() => {
     const candidate = dslOverride ?? store.brand_token?.layout_dsl
@@ -78,11 +96,12 @@ export function DSLRenderer({
             slug={slug}
             globalConfig={parsed.global_config}
             preview={preview}
-            onOpenProduct={onOpenProduct}
+            onOpenProduct={handleOpen}
           />
         ))}
         <DSLFooter store={store} />
       </div>
+      <ProductDrawer product={openProduct} store={store} onClose={closeDrawer} preview={preview} />
     </StoreShell>
   )
 }

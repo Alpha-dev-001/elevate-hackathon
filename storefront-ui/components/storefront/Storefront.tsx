@@ -18,7 +18,7 @@ import { DSLRenderer } from './DSLRenderer'
  *
  * Layout decisions, CSS vars, filter state, and cart UI all live in LayoutRouter.
  */
-export function Storefront({ slug }: { slug: string }) {
+export function Storefront({ slug, initialProductId }: { slug: string; initialProductId?: string | null }) {
   const [store, setStore] = useState<PublicStore | null>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading')
 
@@ -69,7 +69,7 @@ export function Storefront({ slug }: { slug: string }) {
     return <Center><p className="text-danger font-mono text-sm">Couldn't load this store.</p></Center>
   }
 
-  return <DSLRenderer store={store} slug={slug} />
+  return <DSLRenderer store={store} slug={slug} initialProductId={initialProductId} />
 }
 
 function Center({ children }: { children: React.ReactNode }) {
