@@ -211,6 +211,9 @@ class LayoutGlobalConfig(BaseModel):
     color_mode: Literal["light", "dark", "auto"] = "auto"
     corner_radius: Literal["none", "sm", "md", "lg", "full"] = "md"
     density: Literal["sparse", "normal", "dense"] = "normal"
+    # "Shared autonomy" — where the add-to-cart affordance lives is a DSL choice,
+    # not a hardcoded fix. Qwen picks a default; the merchant overrides in the builder.
+    add_to_cart: Literal["drawer-only", "card-hover", "card-always", "none"] = "drawer-only"
 
 class LayoutDSL(BaseModel):
     sections: list[LayoutSection] = Field(min_length=2, max_length=5)

@@ -232,6 +232,7 @@ export const LayoutGlobalConfigSchema = z.object({
   color_mode: z.enum(['light', 'dark', 'auto']).default('auto'),
   corner_radius: z.enum(['none', 'sm', 'md', 'lg', 'full']).default('md'),
   density: z.enum(['sparse', 'normal', 'dense']).default('normal'),
+  add_to_cart: z.enum(['drawer-only', 'card-hover', 'card-always', 'none']).default('drawer-only'),
 })
 
 export const LayoutDSLSchema = z.object({

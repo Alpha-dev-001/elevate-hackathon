@@ -27,8 +27,15 @@ export function DSLRenderer({
   initialProductId?: string | null
 }) {
   const openCart = useCart((s) => s.setOpen)
+  const addToCartFn = useCart((s) => s.add)
   const cartCount = useCart((s) => s.cart?.item_count ?? 0)
   const [openId, setOpenId] = useState<string | null>(initialProductId ?? null)
+
+  // DSL-driven inline add-to-cart (no-op in preview). Opens the cart on success.
+  const handleAddToCart = (id: string) => {
+    if (preview) return
+    void addToCartFn(id, 1).then(() => openCart(true))
+  }
 
   // In preview mode the builder controls clicks; otherwise own the drawer.
   const handleOpen = onOpenProduct
@@ -99,6 +106,7 @@ export function DSLRenderer({
             globalConfig={parsed.global_config}
             preview={preview}
             onOpenProduct={handleOpen}
+            onAddToCart={handleAddToCart}
           />
         ))}
         <DSLFooter store={store} />

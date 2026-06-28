@@ -8,6 +8,7 @@ export interface SectionProps {
   globalConfig: LayoutGlobalConfig
   preview?: boolean
   onOpenProduct?: (id: string) => void
+  onAddToCart?: (id: string) => void
   props?: Record<string, unknown>
 }
 export interface NavProps {
@@ -21,6 +22,9 @@ export interface CardProps {
   cornerRadius: LayoutGlobalConfig['corner_radius']
   preview?: boolean
   onOpen?: (id: string) => void
+  /** DSL-driven: where/whether the inline add-to-cart shows on the card. */
+  addToCart?: LayoutGlobalConfig['add_to_cart']
+  onAddToCart?: (id: string) => void
 }
 
 // Registries are filled by Tasks 10-14. Keys MUST match the Zod enums exactly.

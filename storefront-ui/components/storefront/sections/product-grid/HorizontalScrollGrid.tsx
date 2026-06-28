@@ -1,15 +1,18 @@
 'use client'
 import type { SectionProps } from '@/lib/dslRegistry'
 import { CARD_REGISTRY } from '@/lib/dslRegistry'
+import { CardAddToCart } from '@/components/storefront/cards/CardAddToCart'
 
-export function HorizontalScrollGrid({ store, slug, globalConfig, onOpenProduct }: SectionProps) {
+export function HorizontalScrollGrid({ store, slug, globalConfig, onOpenProduct, onAddToCart, preview }: SectionProps) {
   const Card = CARD_REGISTRY[globalConfig.product_card]
   const radius = globalConfig.corner_radius
+  const atc = globalConfig.add_to_cart
   return (
     <section data-grid="horizontal-scroll" className="py-12">
       <div className="flex gap-4 overflow-x-auto px-4 md:px-8 snap-x snap-mandatory">
         {store.products.map((p) => (
-          <div key={p.id} className="snap-start shrink-0 w-[200px] md:w-[280px]">
+          <div key={p.id} className="snap-start shrink-0 w-[200px] md:w-[280px] relative group">
+            <CardAddToCart product={p} addToCart={atc} onAddToCart={onAddToCart} preview={preview} />
             {Card ? (
               <Card product={p} slug={slug} cornerRadius={radius} onOpen={onOpenProduct} />
             ) : (

@@ -3,7 +3,7 @@ import type { LayoutSection, LayoutGlobalConfig, PublicStore } from '@/types/sch
 import { SECTION_REGISTRY } from '@/lib/dslRegistry'
 
 export function DSLSection({
-  section, store, slug, globalConfig, preview, onOpenProduct,
+  section, store, slug, globalConfig, preview, onOpenProduct, onAddToCart,
 }: {
   section: LayoutSection
   store: PublicStore
@@ -11,6 +11,7 @@ export function DSLSection({
   globalConfig: LayoutGlobalConfig
   preview?: boolean
   onOpenProduct?: (id: string) => void
+  onAddToCart?: (id: string) => void
 }) {
   const Comp = SECTION_REGISTRY[section.type]?.[section.variant]
   return (
@@ -23,6 +24,7 @@ export function DSLSection({
           globalConfig={globalConfig}
           preview={preview}
           onOpenProduct={onOpenProduct}
+          onAddToCart={onAddToCart}
           props={section.props}
         />
       ) : null}

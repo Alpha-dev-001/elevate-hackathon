@@ -1,11 +1,13 @@
 'use client'
 import type { SectionProps } from '@/lib/dslRegistry'
 import { CARD_REGISTRY } from '@/lib/dslRegistry'
+import { CardAddToCart } from '@/components/storefront/cards/CardAddToCart'
 
-export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct }: SectionProps) {
+export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct, onAddToCart, preview }: SectionProps) {
   const Card = CARD_REGISTRY[globalConfig.product_card]
   const [first, ...rest] = store.products
   const radius = globalConfig.corner_radius
+  const atc = globalConfig.add_to_cart
   return (
     <section data-grid="featured-2col" className="px-4 md:px-8 py-12 grid gap-4 md:grid-cols-2">
       {first && (
@@ -19,15 +21,18 @@ export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct }: S
         </button>
       )}
       <div className="grid grid-cols-2 gap-4">
-        {rest.map((p) =>
-          Card ? (
-            <Card key={p.id} product={p} slug={slug} cornerRadius={radius} onOpen={onOpenProduct} />
-          ) : (
-            <button key={p.id} data-product onClick={() => onOpenProduct?.(p.id)} className="block text-left">
-              {p.name} · ${p.price}
-            </button>
-          ),
-        )}
+        {rest.map((p) => (
+          <div key={p.id} className="relative group">
+            <CardAddToCart product={p} addToCart={atc} onAddToCart={onAddToCart} preview={preview} />
+            {Card ? (
+              <Card product={p} slug={slug} cornerRadius={radius} onOpen={onOpenProduct} />
+            ) : (
+              <button data-product onClick={() => onOpenProduct?.(p.id)} className="block text-left">
+                {p.name} · ${p.price}
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </section>
   )

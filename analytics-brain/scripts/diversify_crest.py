@@ -58,6 +58,7 @@ async def main():
         dsl.global_config.product_card = "hover-reveal-text"
         dsl.global_config.nav_style = "sidebar-text"
         dsl.global_config.corner_radius = "none"
+        dsl.global_config.add_to_cart = "card-hover"  # crest: quick-add on hover (haree stays drawer-only)
         dsl.custom_css = (
             '[data-store="crest"] .hero-title { letter-spacing: -0.03em; }\n'
             '[data-store="crest"] .product-card { transition: transform 0.5s cubic-bezier(0.4,0,0.2,1); }\n'

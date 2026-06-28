@@ -11,6 +11,7 @@ export const fixtureDSL: LayoutDSL = {
     color_mode: 'auto',
     corner_radius: 'md',
     density: 'normal',
+    add_to_cart: 'drawer-only',
   },
   custom_css: '',
 }
