@@ -1,10 +1,14 @@
 import { StoreBuilder } from '@/components/builder/StoreBuilder'
 
 /**
- * Store Builder split-screen. Reached from the terminal ("Customize Store") or
- * after StoreBirth during onboarding. ?slug={merchant_slug} selects the store.
+ * Store Builder split-screen. Reached from the terminal ("Customize store").
+ * ?slug={merchant_slug} selects the store. Merchant-only (gated in StoreBuilder).
+ *
+ * NOTE: lives at /builder — NOT /brand-review — because the onboarding flow
+ * already owns /brand-review via the (onboarding) route group, and two pages
+ * resolving to the same path is a hard Next.js build error.
  */
-export default async function BrandReviewBuilderPage({
+export default async function BuilderPage({
   searchParams,
 }: {
   searchParams: Promise<{ slug?: string }>

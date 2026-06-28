@@ -184,7 +184,7 @@ export default function TerminalPage() {
             {lastTokens != null ? ` · ~${lastTokens.toLocaleString()} tokens` : ''}
           </span>
           <a
-            href={`/brand-review?slug=${merchant.slug}`}
+            href={`/builder?slug=${merchant.slug}`}
             className="text-xs font-medium px-3 py-1.5 rounded-md transition-opacity hover:opacity-90"
             style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
           >
