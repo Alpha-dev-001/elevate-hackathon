@@ -144,3 +144,95 @@ def normalize_dsl(raw: dict) -> LayoutDSL:
         global_config=_coerce_global(raw.get("global_config")),
         custom_css=str(raw.get("custom_css") or ""),
     )
+
+
+# ─── Defense Layer C: brand-seeded deterministic fallback ────────────────────────
+
+import hashlib
+from app.models.schemas import BrandToken
+
+# Per-style base arrangement (ordered section types) + candidate pools to pick
+# from via the brand seed. Each style reads as a different store family.
+_STYLE_BLUEPRINT: dict[str, dict] = {
+    "editorial": {
+        "sections": [SectionType.hero, SectionType.banner, SectionType.product_grid, SectionType.story],
+        "hero": ["editorial-stacked", "split-50-50"],
+        "grid": ["featured-2col", "masonry-4col"],
+        "banner": ["scroll-ticker", "static-strip"],
+        "story": ["full-bleed-text", "quote-callout"],
+        "nav": ["underline-tabs", "minimal-text"],
+        "card": ["editorial-horizontal", "image-below-text", "borderless-floating"],
+        "radius": ["none", "sm"],
+    },
+    "bold-grid": {
+        "sections": [SectionType.hero, SectionType.product_grid, SectionType.banner],
+        "hero": ["full-bleed-image", "split-50-50"],
+        "grid": ["masonry-4col", "featured-2col"],
+        "banner": ["static-strip", "announcement-bar"],
+        "story": ["split-image-story"],
+        "nav": ["pill-nav", "sticky-tabs"],
+        "card": ["colored-bg-card", "polaroid-card"],
+        "radius": ["lg", "full"],
+    },
+    "minimal-dark": {
+        "sections": [SectionType.hero, SectionType.product_grid, SectionType.story],
+        "hero": ["minimal-wordmark", "full-bleed-image"],
+        "grid": ["horizontal-scroll", "single-spotlight", "masonry-4col"],
+        "banner": ["scroll-ticker"],
+        "story": ["full-bleed-text"],
+        "nav": ["sidebar-text", "minimal-text"],
+        "card": ["hover-reveal-text", "borderless-floating"],
+        "radius": ["none", "sm"],
+    },
+    "warm-craft": {
+        "sections": [SectionType.banner, SectionType.hero, SectionType.product_grid, SectionType.story],
+        "hero": ["split-50-50", "editorial-stacked"],
+        "grid": ["masonry-4col", "featured-2col"],
+        "banner": ["static-strip", "scroll-ticker"],
+        "story": ["split-image-story", "quote-callout"],
+        "nav": ["pill-nav", "underline-tabs"],
+        "card": ["polaroid-card", "image-below-text"],
+        "radius": ["md", "lg"],
+    },
+}
+
+
+def _seed(token: BrandToken) -> int:
+    raw = f"{token.store_name}|{token.mood}|{token.industry_hint}".encode()
+    return int.from_bytes(hashlib.sha256(raw).digest()[:8], "big")
+
+
+def _pick(pool: list[str], seed: int, salt: int) -> str:
+    return pool[(seed >> (salt * 3)) % len(pool)]
+
+
+def fallback_dsl_from_token(token: BrandToken) -> LayoutDSL:
+    """Defense Layer C — deterministic, brand-seeded DSL. Guarantees distinct
+    stores even when Qwen is unavailable."""
+    bp = _STYLE_BLUEPRINT.get(token.layout.style, _STYLE_BLUEPRINT["editorial"])
+    seed = _seed(token)
+
+    sections: list[dict] = []
+    for i, st in enumerate(bp["sections"]):
+        if st == SectionType.hero:
+            variant = _pick(bp["hero"], seed, i)
+        elif st == SectionType.product_grid:
+            variant = _pick(bp["grid"], seed, i)
+        elif st == SectionType.banner:
+            variant = _pick(bp["banner"], seed, i)
+        else:
+            variant = _pick(bp["story"], seed, i)
+        sections.append({"type": st.value, "variant": variant})
+
+    raw = {
+        "sections": sections,
+        "global_config": {
+            "nav_style": _pick(bp["nav"], seed, 7),
+            "product_card": _pick(bp["card"], seed, 5),
+            "color_mode": "dark" if token.layout.style == "minimal-dark" else "auto",
+            "corner_radius": _pick(bp["radius"], seed, 3),
+            "density": "dense" if token.layout.style == "bold-grid" else "normal",
+        },
+        "custom_css": "",
+    }
+    return normalize_dsl(raw)  # run through Layer B for the structural guarantee
