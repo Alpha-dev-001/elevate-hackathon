@@ -1,0 +1,90 @@
+# Serverless Devs config for Alibaba Cloud Function Compute (FC 3.0).
+# Fill in <PLACEHOLDERS>, then:  s deploy
+#
+# See ALIBABA_DEPLOY.md for the full walkthrough. Secrets here should come from
+# CI/CD variables or `s` global vars in real use — do not commit real keys.
+
+edition: 3.0.0
+name: elevate
+access: default            # the alias from `s config add`
+
+vars:
+  region: cn-hongkong       # one region for everything
+  # ACR image you pushed (see ALIBABA_DEPLOY.md §3)
+  apiImage: registry.cn-hongkong.aliyuncs.com/<namespace>/bms-backend-brain:latest
+
+resources:
+
+  # ── Backend: FastAPI on Function Compute ──────────────────────────────────
+  api:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: bms-backend-brain
+      description: Elevate analytics-brain (FastAPI + Qwen orchestration)
+      runtime: custom-container
+      customContainerConfig:
+        image: ${vars.apiImage}
+        port: 9000              # caPort — the port uvicorn listens on
+      cpu: 1
+      memorySize: 2048
+      diskSize: 512
+      timeout: 120              # qwen-max calls can run ~40s; give headroom
+      instanceConcurrency: 10
+      environmentVariables:
+        APP_ENV: production
+        DATABASE_URL: <postgresql+asyncpg://USER:PASS@RDS_HOST:5432/elevate>
+        REDIS_HOST: <tair-host>
+        REDIS_PORT: "6379"
+        REDIS_PASSWORD: <tair-password>
+        OSS_BUCKET: <bucket>
+        OSS_REGION: oss-cn-hongkong
+        OSS_ACCESS_KEY_ID: <ram-access-key-id>
+        OSS_ACCESS_KEY_SECRET: <ram-access-key-secret>
+        QWEN_API_KEY: <model-studio-api-key>
+        QWEN_API_BASE: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+        QWEN_MODEL: qwen-max
+        JWT_SECRET: <long-random-string>
+        BASE_URL: https://bms-backend-brain.${vars.region}.fcapp.run
+        FRONTEND_URL: https://<your-frontend-url>
+        CORS_ORIGINS: https://<your-frontend-url>
+      # Keep one instance warm — no 4s cold start in the demo.
+      provisionConfig:
+        target: 1
+        alwaysAllocateCPU: true
+      triggers:
+        - triggerName: http
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            methods: [GET, POST, PUT, DELETE, OPTIONS]
+      # Optional: pipe logs to SLS so `s logs --tail` works.
+      # logConfig:
+      #   project: elevate-logs
+      #   logstore: elevate-api-logs
+      #   enableRequestMetrics: true
+      #   enableInstanceMetrics: true
+
+  # ── Frontend: Next.js on Function Compute (Option A) ──────────────────────
+  # Uncomment after building/pushing storefront-ui/Dockerfile to ACR.
+  # web:
+  #   component: fc3
+  #   props:
+  #     region: ${vars.region}
+  #     functionName: bms-frontend
+  #     runtime: custom-container
+  #     customContainerConfig:
+  #       image: registry.cn-hongkong.aliyuncs.com/<namespace>/bms-frontend:latest
+  #       port: 3000
+  #     cpu: 1
+  #     memorySize: 1024
+  #     timeout: 60
+  #     environmentVariables:
+  #       NEXT_PUBLIC_API_BASE: https://bms-backend-brain.${vars.region}.fcapp.run
+  #       NEXT_PUBLIC_WS_URL: wss://bms-backend-brain.${vars.region}.fcapp.run/ws
+  #     triggers:
+  #       - triggerName: http
+  #         triggerType: http
+  #         triggerConfig:
+  #           authType: anonymous
+  #           methods: [GET, POST, OPTIONS]

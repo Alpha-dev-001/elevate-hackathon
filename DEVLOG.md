@@ -671,3 +671,17 @@ diagram with the full Qwen chain in `docs/architecture-sprint3.md`.
 tested); seed `crest` (minimal-dark) alongside `haree` (editorial) for the
 side-by-side "same platform, different store" demo beat; run the full demo dry-run
 once the stack is up; post-hackathon pgvector cross-store RAG (designed, stubbed).
+
+### Sprint 3 — Deployment readiness (Alibaba Cloud) — 2026-06-28
+**Finding:** despite CLAUDE.md describing `s.yaml` as "already scaffolded," there was
+**no `s.yaml`** in the repo and nothing deployed to Alibaba Cloud — only
+`docker-compose.yml` for local dev and `Dockerfile.dev` (hot-reload). The hackathon
+requires the backend on Function Compute, so this was a real gap.
+**Added:** `ALIBABA_DEPLOY.md` (from-zero guide: Model Studio/Qwen key, OSS bucket +
+CORS, RDS Postgres, Tair Redis, ACR image push, FC deploy, provisioned concurrency,
+SLS logs, cost control), a starter root `s.yaml` (FC 3.0 custom-container function,
+HTTP trigger, `provisionConfig.target: 1` to kill cold-start, all env vars as
+placeholders), and `analytics-brain/Dockerfile` (production, no reload, single
+uvicorn worker so the in-process outcome-observer timers + WS manager stay coherent).
+**Next:** push the backend image to ACR and run `s deploy`; record the FC console
+proof; decide frontend host (FC vs Vercel — backend-on-FC already satisfies the rule).
