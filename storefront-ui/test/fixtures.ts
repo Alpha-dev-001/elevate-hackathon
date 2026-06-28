@@ -12,6 +12,8 @@ export const fixtureDSL: LayoutDSL = {
     corner_radius: 'md',
     density: 'normal',
     add_to_cart: 'drawer-only',
+    product_detail: 'gallery-split',
+    cart_style: 'slide-panel',
   },
   custom_css: '',
 }

@@ -76,6 +76,13 @@ _VALID_NAV = {v.value for v in NavStyle}
 _VALID_CARD = {v.value for v in ProductCardVariant}
 
 
+def _opt(value: object, allowed: tuple[str, ...], default: str) -> str:
+    """Keep a value only if it's in the allowed set; else fall to default.
+    Used for every optional global-config field so normalize_dsl PRESERVES
+    merchant/Qwen choices instead of silently resetting them on re-save."""
+    return value if value in allowed else default
+
+
 def _coerce_global(raw: object) -> LayoutGlobalConfig:
     g = raw if isinstance(raw, dict) else {}
     nav = g.get("nav_style")
@@ -83,9 +90,12 @@ def _coerce_global(raw: object) -> LayoutGlobalConfig:
     return LayoutGlobalConfig(
         nav_style=nav if nav in _VALID_NAV else NavStyle.underline_tabs.value,
         product_card=card if card in _VALID_CARD else ProductCardVariant.hover_reveal_text.value,
-        color_mode=g.get("color_mode") if g.get("color_mode") in ("light", "dark", "auto") else "auto",
-        corner_radius=g.get("corner_radius") if g.get("corner_radius") in ("none", "sm", "md", "lg", "full") else "md",
-        density=g.get("density") if g.get("density") in ("sparse", "normal", "dense") else "normal",
+        color_mode=_opt(g.get("color_mode"), ("light", "dark", "auto"), "auto"),
+        corner_radius=_opt(g.get("corner_radius"), ("none", "sm", "md", "lg", "full"), "md"),
+        density=_opt(g.get("density"), ("sparse", "normal", "dense"), "normal"),
+        add_to_cart=_opt(g.get("add_to_cart"), ("drawer-only", "card-hover", "card-always", "none"), "drawer-only"),
+        product_detail=_opt(g.get("product_detail"), ("gallery-split", "editorial-stacked", "minimal-centered"), "gallery-split"),
+        cart_style=_opt(g.get("cart_style"), ("slide-panel", "full-sheet"), "slide-panel"),
     )
 
 
@@ -163,6 +173,9 @@ _STYLE_BLUEPRINT: dict[str, dict] = {
         "nav": ["underline-tabs", "minimal-text"],
         "card": ["editorial-horizontal", "image-below-text", "borderless-floating"],
         "radius": ["none", "sm"],
+        "atc": ["drawer-only"],
+        "detail": ["editorial-stacked", "gallery-split"],
+        "cart": ["slide-panel"],
     },
     "bold-grid": {
         "sections": [SectionType.hero, SectionType.product_grid, SectionType.banner],
@@ -173,6 +186,9 @@ _STYLE_BLUEPRINT: dict[str, dict] = {
         "nav": ["pill-nav", "sticky-tabs"],
         "card": ["colored-bg-card", "polaroid-card"],
         "radius": ["lg", "full"],
+        "atc": ["card-always", "card-hover"],
+        "detail": ["gallery-split", "editorial-stacked"],
+        "cart": ["full-sheet", "slide-panel"],
     },
     "minimal-dark": {
         "sections": [SectionType.hero, SectionType.product_grid, SectionType.story],
@@ -183,6 +199,9 @@ _STYLE_BLUEPRINT: dict[str, dict] = {
         "nav": ["sidebar-text", "minimal-text"],
         "card": ["hover-reveal-text", "borderless-floating"],
         "radius": ["none", "sm"],
+        "atc": ["card-hover", "drawer-only"],
+        "detail": ["minimal-centered", "gallery-split"],
+        "cart": ["slide-panel", "full-sheet"],
     },
     "warm-craft": {
         "sections": [SectionType.banner, SectionType.hero, SectionType.product_grid, SectionType.story],
@@ -193,6 +212,9 @@ _STYLE_BLUEPRINT: dict[str, dict] = {
         "nav": ["pill-nav", "underline-tabs"],
         "card": ["polaroid-card", "image-below-text"],
         "radius": ["md", "lg"],
+        "atc": ["card-hover", "card-always"],
+        "detail": ["gallery-split", "editorial-stacked"],
+        "cart": ["slide-panel"],
     },
 }
 
@@ -232,6 +254,9 @@ def fallback_dsl_from_token(token: BrandToken) -> LayoutDSL:
             "color_mode": "dark" if token.layout.style == "minimal-dark" else "auto",
             "corner_radius": _pick(bp["radius"], seed, 3),
             "density": "dense" if token.layout.style == "bold-grid" else "normal",
+            "add_to_cart": _pick(bp["atc"], seed, 9),
+            "product_detail": _pick(bp["detail"], seed, 11),
+            "cart_style": _pick(bp["cart"], seed, 13),
         },
         "custom_css": "",
     }

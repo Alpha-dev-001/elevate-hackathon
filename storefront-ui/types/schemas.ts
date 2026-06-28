@@ -233,6 +233,8 @@ export const LayoutGlobalConfigSchema = z.object({
   corner_radius: z.enum(['none', 'sm', 'md', 'lg', 'full']).default('md'),
   density: z.enum(['sparse', 'normal', 'dense']).default('normal'),
   add_to_cart: z.enum(['drawer-only', 'card-hover', 'card-always', 'none']).default('drawer-only'),
+  product_detail: z.enum(['gallery-split', 'editorial-stacked', 'minimal-centered']).default('gallery-split'),
+  cart_style: z.enum(['slide-panel', 'full-sheet']).default('slide-panel'),
 })
 
 export const LayoutDSLSchema = z.object({

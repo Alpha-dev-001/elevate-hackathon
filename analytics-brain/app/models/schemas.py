@@ -214,6 +214,10 @@ class LayoutGlobalConfig(BaseModel):
     # "Shared autonomy" — where the add-to-cart affordance lives is a DSL choice,
     # not a hardcoded fix. Qwen picks a default; the merchant overrides in the builder.
     add_to_cart: Literal["drawer-only", "card-hover", "card-always", "none"] = "drawer-only"
+    # Every page composes per store, not just the landing. The product detail and
+    # cart presentations are DSL choices too.
+    product_detail: Literal["gallery-split", "editorial-stacked", "minimal-centered"] = "gallery-split"
+    cart_style: Literal["slide-panel", "full-sheet"] = "slide-panel"
 
 class LayoutDSL(BaseModel):
     sections: list[LayoutSection] = Field(min_length=2, max_length=5)

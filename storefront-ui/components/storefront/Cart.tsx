@@ -13,8 +13,9 @@ import type { Order } from '@/types/schemas'
  * add-time — the backend honors them verbatim.
  */
 type View = 'cart' | 'checkout' | 'done'
+type CartVariant = 'slide-panel' | 'full-sheet'
 
-export function Cart() {
+export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}) {
   const { cart, open, busy, error, slug, setOpen, setQty, remove } = useCart()
   const [view, setView] = useState<View>('cart')
   const [form, setForm] = useState({ name: '', email: '', note: '' })
@@ -68,12 +69,23 @@ export function Cart() {
             onClick={close}
           />
           <motion.aside
-            initial={{ x: '100%' }}
-            animate={{ x: 0 }}
-            exit={{ x: '100%' }}
+            data-cart-style={variant}
+            initial={variant === 'full-sheet' ? { y: '100%' } : { x: '100%' }}
+            animate={variant === 'full-sheet' ? { y: 0 } : { x: 0 }}
+            exit={variant === 'full-sheet' ? { y: '100%' } : { x: '100%' }}
             transition={{ duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
-            className="fixed top-0 right-0 z-50 h-full w-full max-w-md flex flex-col shadow-2xl"
-            style={{ background: 'var(--s-bg)', color: 'var(--s-text)', borderLeft: '1px solid color-mix(in srgb, var(--s-text) 12%, transparent)' }}
+            className={
+              variant === 'full-sheet'
+                ? 'fixed inset-0 z-50 w-full flex flex-col shadow-2xl [&>*]:w-full [&>*]:max-w-2xl [&>*]:mx-auto'
+                : 'fixed top-0 right-0 z-50 h-full w-full max-w-md flex flex-col shadow-2xl'
+            }
+            style={{
+              background: 'var(--s-bg)',
+              color: 'var(--s-text)',
+              ...(variant === 'slide-panel'
+                ? { borderLeft: '1px solid color-mix(in srgb, var(--s-text) 12%, transparent)' }
+                : {}),
+            }}
           >
             <header className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid color-mix(in srgb, var(--s-text) 12%, transparent)' }}>
               <h2 className="text-lg font-semibold" style={{ fontFamily: 'var(--s-display)' }}>

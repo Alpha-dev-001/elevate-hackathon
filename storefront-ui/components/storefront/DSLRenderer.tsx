@@ -91,7 +91,7 @@ export function DSLRenderer({
               </span>
             )}
           </button>
-          <Cart />
+          <Cart variant={parsed.global_config.cart_style} />
         </>
       )}
       <div data-store={slug} className={parsed.global_config.nav_style === 'sidebar-text' ? 'md:pl-44' : ''}>
@@ -111,7 +111,8 @@ export function DSLRenderer({
         ))}
         <DSLFooter store={store} />
       </div>
-      <ProductDrawer product={openProduct} store={store} onClose={closeDrawer} preview={preview} />
+      <ProductDrawer product={openProduct} store={store} onClose={closeDrawer} preview={preview}
+                     variant={parsed.global_config.product_detail} />
     </StoreShell>
   )
 }
