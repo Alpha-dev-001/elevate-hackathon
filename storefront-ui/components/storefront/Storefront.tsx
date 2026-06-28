@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { PublicStore } from '@/types/schemas'
 import { useCart } from '@/lib/cart'
-import { LayoutRouter } from './LayoutRouter'
+import { DSLRenderer } from './DSLRenderer'
 
 /**
  * The live customer-facing store. Handles three responsibilities then
@@ -69,7 +69,7 @@ export function Storefront({ slug }: { slug: string }) {
     return <Center><p className="text-danger font-mono text-sm">Couldn't load this store.</p></Center>
   }
 
-  return <LayoutRouter store={store} slug={slug} />
+  return <DSLRenderer store={store} slug={slug} />
 }
 
 function Center({ children }: { children: React.ReactNode }) {
