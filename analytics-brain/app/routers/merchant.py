@@ -33,6 +33,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/merchant", tags=["merchant"])
 
 
+# ── Qwen memory (sprint 3) ────────────────────────────────────────────────────
+
+@router.get("/memory/{slug}")
+async def get_qwen_memory(
+    slug: str,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """The store's Qwen memory — what prior decisions taught the agent. Powers the
+    terminal's "Remembers N previous decisions" badge."""
+    if merchant.slug != slug:
+        raise HTTPException(status_code=403, detail="Not your store")
+    from app.services.memory import get_memory
+    from app.core.redis import get_redis
+    try:
+        redis = await get_redis()
+    except Exception:
+        redis = None
+    entries = await get_memory(merchant.id, db, redis)
+    return {"entries": [e.model_dump(mode="json") for e in entries], "count": len(entries)}
+
+
 # ── Orders ──────────────────────────────────────────────────────────────────────
 
 @router.get("/orders", response_model=list[Order])

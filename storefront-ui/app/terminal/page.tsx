@@ -19,6 +19,8 @@ export default function TerminalPage() {
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [simulateState, setSimulateState] = useState<'idle' | 'sending' | 'done'>('idle')
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
+  const [memoryCount, setMemoryCount] = useState<number | null>(null)
+  const [lastTokens, setLastTokens] = useState<number | null>(null)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -84,6 +86,8 @@ export default function TerminalPage() {
       onEvent: (event, payload) => {
         if (event === 'agent_action' && payload.action) {
           const incoming = payload.action as AgentAction
+          if (typeof payload.memory_count === 'number') setMemoryCount(payload.memory_count)
+          if (typeof payload.estimated_tokens === 'number') setLastTokens(payload.estimated_tokens)
           setPendingActions((prev) => {
             if (prev.some((a) => a.id === incoming.id)) return prev
             return [incoming, ...prev]
@@ -173,11 +177,13 @@ export default function TerminalPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span
-            className="w-2 h-2 rounded-full"
-            style={{ background: wsColor }}
-          />
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full"
+                style={{ background: 'rgba(110,231,183,0.12)', color: 'var(--color-accent)' }}>
+            ✦ qwen-max · Remembers {memoryCount ?? 0} previous decision{memoryCount === 1 ? '' : 's'}
+            {lastTokens != null ? ` · ~${lastTokens.toLocaleString()} tokens` : ''}
+          </span>
+          <span className="w-2 h-2 rounded-full" style={{ background: wsColor }} />
           <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
             {wsStatus}
           </span>
