@@ -229,6 +229,14 @@ async def _run_brand_pipeline(
                     brand_token_result.layout_dsl = await generate_layout_dsl(
                         brand_token_result, store_name, category, product_count,
                     )
+                    # Scoped micro-interaction CSS — best-effort, never blocks.
+                    try:
+                        from app.services.css_gen import generate_custom_css
+                        brand_token_result.layout_dsl.custom_css = await generate_custom_css(
+                            brand_token_result, slug,
+                        )
+                    except Exception as csse:
+                        logger.warning("[onboarding] custom_css generation failed for %s: %s", merchant_id, csse)
                     brand_profile.brand_tokens = brand_token_result.model_dump()
                     # cache forever; invalidated on regenerate
                     try:
