@@ -41,3 +41,17 @@ export const NAV_REGISTRY: Record<string, ComponentType<NavProps>> = {}
 export function variantsByType(type: string): string[] {
   return Object.keys(SECTION_REGISTRY[type] ?? {})
 }
+
+// ─── Point-and-edit: an addressable target in the rendered store ───────────────
+export type EditTarget =
+  | { kind: 'section'; index: number; sectionType: string; variant: string }
+  | { kind: 'global'; field: 'nav_style' | 'product_card' | 'add_to_cart' | 'product_detail' | 'cart_style' }
+
+/** Option values per editable global field (mirror schemas.ts enums exactly). */
+export const GLOBAL_OPTIONS: Record<string, string[]> = {
+  nav_style: ['underline-tabs', 'pill-nav', 'sidebar-text', 'sticky-tabs', 'minimal-text'],
+  product_card: ['hover-reveal-text', 'colored-bg-card', 'editorial-horizontal', 'borderless-floating', 'polaroid-card', 'image-below-text'],
+  add_to_cart: ['drawer-only', 'card-hover', 'card-always', 'none'],
+  product_detail: ['gallery-split', 'editorial-stacked', 'minimal-centered'],
+  cart_style: ['slide-panel', 'full-sheet'],
+}

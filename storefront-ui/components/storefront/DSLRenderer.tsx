@@ -16,8 +16,10 @@ import { useCart } from '@/lib/cart'
 import { useCustomer } from '@/lib/customerAuth'
 import { useEffect } from 'react'
 
+import type { EditTarget } from '@/lib/dslRegistry'
+
 export function DSLRenderer({
-  store, slug, preview, onOpenProduct, dslOverride, initialProductId,
+  store, slug, preview, onOpenProduct, dslOverride, initialProductId, editMode, onSelectTarget,
 }: {
   store: PublicStore
   slug: string
@@ -27,6 +29,9 @@ export function DSLRenderer({
   dslOverride?: LayoutDSL | null
   /** Deep-link: open this product's drawer on mount (from ?p=). */
   initialProductId?: string | null
+  /** Point-and-edit: when true, sections/nav become selectable in preview. */
+  editMode?: boolean
+  onSelectTarget?: (t: EditTarget) => void
 }) {
   const openCart = useCart((s) => s.setOpen)
   const addToCartFn = useCart((s) => s.add)
@@ -114,23 +119,59 @@ export function DSLRenderer({
       )}
       <div data-store={slug} className={parsed.global_config.nav_style === 'sidebar-text' ? 'md:pl-44' : ''}>
         <CustomCSSInjector css={parsed.custom_css} slug={slug} />
-        {!hasAnnounce && <DSLNav store={store} navStyle={parsed.global_config.nav_style} />}
+        {!hasAnnounce && (
+          <EditTargetWrap editMode={editMode} onClick={() => onSelectTarget?.({ kind: 'global', field: 'nav_style' })} label="Navigation">
+            <DSLNav store={store} navStyle={parsed.global_config.nav_style} />
+          </EditTargetWrap>
+        )}
         {parsed.sections.map((section, i) => (
-          <DSLSection
-            key={`${section.type}-${i}`}
-            section={section}
-            store={store}
-            slug={slug}
-            globalConfig={parsed.global_config}
-            preview={preview}
-            onOpenProduct={handleOpen}
-            onAddToCart={handleAddToCart}
-          />
+          <EditTargetWrap key={`${section.type}-${i}`} editMode={editMode}
+                          onClick={() => onSelectTarget?.({ kind: 'section', index: i, sectionType: section.type, variant: section.variant })}
+                          label={`${section.type.replace('_', ' ')} · ${section.variant}`}>
+            <DSLSection
+              section={section}
+              store={store}
+              slug={slug}
+              globalConfig={parsed.global_config}
+              preview={preview}
+              onOpenProduct={handleOpen}
+              onAddToCart={handleAddToCart}
+            />
+          </EditTargetWrap>
         ))}
         <DSLFooter store={store} />
       </div>
       <ProductDrawer product={openProduct} store={store} onClose={closeDrawer} preview={preview}
                      variant={parsed.global_config.product_detail} />
     </StoreShell>
+  )
+}
+
+/**
+ * In edit mode, wraps a storefront region so clicking it selects that DSL target
+ * (point-and-edit). A hover ring + label make regions discoverable. Outside edit
+ * mode it's a transparent passthrough — zero effect on the live store.
+ */
+function EditTargetWrap({
+  editMode, onClick, label, children,
+}: {
+  editMode?: boolean
+  onClick: () => void
+  label: string
+  children: React.ReactNode
+}) {
+  if (!editMode) return <>{children}</>
+  return (
+    <div
+      className="relative group/edit cursor-pointer outline-2 -outline-offset-2 outline-transparent hover:outline-dashed hover:outline-[var(--color-accent,#6EE7B7)]"
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); onClick() }}
+    >
+      {/* Block the storefront's own interactions while editing this region. */}
+      <div className="pointer-events-none">{children}</div>
+      <span className="absolute top-1 left-1 z-30 px-1.5 py-0.5 rounded text-[10px] font-mono opacity-0 group-hover/edit:opacity-100 transition-opacity"
+            style={{ background: 'var(--color-accent,#6EE7B7)', color: '#0A0A0B' }}>
+        ✦ {label}
+      </span>
+    </div>
   )
 }

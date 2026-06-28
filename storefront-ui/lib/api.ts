@@ -127,6 +127,14 @@ export interface BrandResponse {
   store_shell_url: string
 }
 
+export type EditPatch =
+  | { kind: 'section'; index: number; variant: string }
+  | { kind: 'global'; field: string; value: string }
+export interface EditIntentResult {
+  patch: EditPatch
+  explanation: string
+}
+
 export const api = {
   // ── Auth ────────────────────────────────────────────────────────────────
   signup: (body: MerchantCreate) =>
@@ -199,6 +207,9 @@ export const api = {
     req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'PUT', body: JSON.stringify(dsl) }),
   regenerateDsl: (slug: string) =>
     req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'POST' }),
+  // Point-and-edit: Qwen maps a clicked region + free-text intent to a DSL patch.
+  editIntent: (slug: string, body: { target: unknown; intent: string; dsl: LayoutDSL }) =>
+    req<EditIntentResult>(`/api/brand/edit-intent/${enc(slug)}`, { method: 'POST', body: JSON.stringify(body) }),
 
   // ── Public commerce: cart, checkout, order lookup (guest, slug-scoped) ────
   getCart: (slug: string, sessionId: string) =>

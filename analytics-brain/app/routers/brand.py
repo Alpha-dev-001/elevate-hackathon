@@ -18,8 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import get_current_merchant
 from app.models.db_models import MerchantDB, BrandProfileDB
-from app.models.schemas import LayoutDSL, BrandToken
-from app.services.layout_dsl import normalize_dsl, generate_layout_dsl, fallback_dsl_from_token
+from pydantic import BaseModel
+from app.models.schemas import (
+    LayoutDSL, BrandToken, SectionType,
+    NavStyle, ProductCardVariant,
+)
+from app.services.layout_dsl import normalize_dsl, generate_layout_dsl, fallback_dsl_from_token, coerce_variant, VALID_VARIANTS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/brand", tags=["brand"])
@@ -80,6 +84,98 @@ async def regenerate_dsl(
     dsl = await generate_layout_dsl(token, merchant.store_name, merchant.category, count)
     await _persist_dsl(profile, token, dsl, merchant.id, db)
     return dsl.model_dump()
+
+
+# ─── Point-and-edit: Qwen maps a free-text intent on a clicked region → a DSL change ──
+
+_GLOBAL_FIELD_OPTIONS: dict[str, list[str]] = {
+    "nav_style": [v.value for v in NavStyle],
+    "product_card": [v.value for v in ProductCardVariant],
+    "add_to_cart": ["drawer-only", "card-hover", "card-always", "none"],
+    "product_detail": ["gallery-split", "editorial-stacked", "minimal-centered"],
+    "cart_style": ["slide-panel", "full-sheet"],
+}
+
+
+class EditIntentRequest(BaseModel):
+    target: dict        # {kind:'section', index, sectionType, variant} | {kind:'global', field}
+    intent: str
+    dsl: LayoutDSL
+
+
+EDIT_INTENT_PROMPT = """You are an expert store designer. The merchant clicked a part of
+their store and described what they want. Pick the SINGLE best option from the allowed
+list that satisfies their intent. Return ONLY json.
+
+Region: {region}
+Current value: {current}
+Allowed options (pick exactly one): {options}
+Merchant intent: "{intent}"
+
+Return json: {{"choice": "<one allowed option>", "explanation": "<one first-person sentence on why this fits their intent>"}}
+Pure json."""
+
+
+@router.post("/edit-intent/{slug}")
+async def edit_intent(
+    slug: str,
+    body: EditIntentRequest,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Qwen maps the merchant's free-text intent on a clicked region to a concrete,
+    validated DSL change. Returns a patch the builder applies on approval."""
+    if merchant.slug != slug:
+        raise HTTPException(status_code=403, detail="Not your store")
+
+    kind = body.target.get("kind")
+    if kind == "section":
+        idx = int(body.target.get("index", 0))
+        try:
+            st = SectionType(str(body.target.get("sectionType", "")).replace("-", "_"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Unknown section type")
+        options = sorted(VALID_VARIANTS[st])
+        current = body.target.get("variant", "")
+        region = f"{st.value} section"
+    elif kind == "global":
+        field = str(body.target.get("field", ""))
+        if field not in _GLOBAL_FIELD_OPTIONS:
+            raise HTTPException(status_code=400, detail="Unknown global field")
+        options = _GLOBAL_FIELD_OPTIONS[field]
+        current = getattr(body.dsl.global_config, field, "")
+        region = field.replace("_", " ")
+    else:
+        raise HTTPException(status_code=400, detail="Unknown target kind")
+
+    prompt = EDIT_INTENT_PROMPT.format(
+        region=region, current=current, options=", ".join(options), intent=body.intent[:300],
+    )
+
+    from app.services.brand import _qwen_chat, _extract_json
+    from app.core.config import get_settings
+    try:
+        raw = await _qwen_chat(
+            model=get_settings().qwen_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200, temperature=0.3, timeout=30.0,
+        )
+        data = _extract_json(raw)
+        choice = str(data.get("choice", "")).strip()
+        explanation = str(data.get("explanation", "")).strip() or "This fits what you asked for."
+    except Exception as e:  # noqa: BLE001 — fall back to a deterministic pick
+        logger.warning("[edit-intent] qwen failed for %s: %s", slug, e)
+        choice, explanation = "", "Qwen was unavailable — picked the closest match."
+
+    # Validate Qwen's choice against the allowed options (never trust it raw).
+    if kind == "section":
+        variant = coerce_variant(st, choice)
+        patch = {"kind": "section", "index": idx, "variant": variant}
+    else:
+        value = choice if choice in options else (current if current in options else options[0])
+        patch = {"kind": "global", "field": field, "value": value}
+
+    return {"patch": patch, "explanation": explanation}
 
 
 # ─── StoreBirth SSE — make the Qwen pipeline visible during generation ───────────
