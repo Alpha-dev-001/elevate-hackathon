@@ -3,7 +3,7 @@
  * the SECTION/CARD/NAV registries. DSLRenderer and tests import it once so the
  * registries are filled before any lookup. Each family task appends here.
  */
-import { SECTION_REGISTRY } from '@/lib/dslRegistry'
+import { SECTION_REGISTRY, CARD_REGISTRY } from '@/lib/dslRegistry'
 
 // ─── Hero family (Task 10) ──────────────────────────────────────────────────
 import { EditorialStackedHero } from '@/components/storefront/sections/hero/EditorialStackedHero'
@@ -26,3 +26,18 @@ SECTION_REGISTRY.product_grid['featured-2col'] = Featured2ColGrid
 SECTION_REGISTRY.product_grid['masonry-4col'] = Masonry4ColGrid
 SECTION_REGISTRY.product_grid['horizontal-scroll'] = HorizontalScrollGrid
 SECTION_REGISTRY.product_grid['single-spotlight'] = SingleSpotlightGrid
+
+// ─── Product-card family (Task 12) ──────────────────────────────────────────
+import { HoverRevealCard } from '@/components/storefront/cards/HoverRevealCard'
+import { ColoredBgCard } from '@/components/storefront/cards/ColoredBgCard'
+import { EditorialHorizontalCard } from '@/components/storefront/cards/EditorialHorizontalCard'
+import { BorderlessFloatingCard } from '@/components/storefront/cards/BorderlessFloatingCard'
+import { PolaroidCard } from '@/components/storefront/cards/PolaroidCard'
+import { ImageBelowTextCard } from '@/components/storefront/cards/ImageBelowTextCard'
+
+CARD_REGISTRY['hover-reveal-text'] = HoverRevealCard
+CARD_REGISTRY['colored-bg-card'] = ColoredBgCard
+CARD_REGISTRY['editorial-horizontal'] = EditorialHorizontalCard
+CARD_REGISTRY['borderless-floating'] = BorderlessFloatingCard
+CARD_REGISTRY['polaroid-card'] = PolaroidCard
+CARD_REGISTRY['image-below-text'] = ImageBelowTextCard
