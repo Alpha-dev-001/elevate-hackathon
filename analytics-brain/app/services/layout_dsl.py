@@ -236,3 +236,77 @@ def fallback_dsl_from_token(token: BrandToken) -> LayoutDSL:
         "custom_css": "",
     }
     return normalize_dsl(raw)  # run through Layer B for the structural guarantee
+
+
+# ─── The Qwen-Max DSL composition call ───────────────────────────────────────────
+
+from app.core.config import get_settings
+
+LAYOUT_DSL_PROMPT = """You are an elite art director composing a UNIQUE storefront layout.
+Return ONLY a json object. No prose, no markdown.
+
+You assemble 2-5 ordered sections that feel cohesive for THIS brand's mood and industry.
+
+Section types and their ONLY allowed variants:
+- hero: full-bleed-image | editorial-stacked | minimal-wordmark | split-50-50
+- product_grid: masonry-4col | featured-2col | horizontal-scroll | single-spotlight
+- banner: scroll-ticker | static-strip | announcement-bar
+- story: full-bleed-text | split-image-story | quote-callout
+
+global_config:
+- nav_style: underline-tabs | pill-nav | sidebar-text | sticky-tabs | minimal-text
+- product_card: hover-reveal-text | colored-bg-card | editorial-horizontal | borderless-floating | polaroid-card | image-below-text
+- corner_radius: none | sm | md | lg | full
+- density: sparse | normal | dense
+
+Rules:
+- Exactly ONE hero, and it must be the first section (unless an announcement-bar leads).
+- Include at least one product_grid.
+- single-spotlight only if product_count <= 10.
+- Be OPINIONATED. A luxury beauty brand and a bold streetwear brand must produce
+  structurally different stores — different sections, variants, nav, and card.
+
+Return json shaped exactly:
+{
+  "sections": [{"type": "...", "variant": "...", "props": {}}],
+  "global_config": {"nav_style":"...","product_card":"...","corner_radius":"...","density":"..."}
+}
+
+Brand:
+{brand_json}
+product_count: {product_count}
+Pure json. Nothing else."""
+
+
+async def generate_layout_dsl(
+    token: BrandToken,
+    store_name: str,
+    category: str,
+    product_count: int,
+    *,
+    _chat=None,
+) -> LayoutDSL:
+    """qwen-max composes the store. NEVER raises — any failure (network, non-JSON,
+    garbage) falls back to the brand-seeded deterministic DSL."""
+    from app.services.brand import _qwen_chat, _extract_json
+    import json as _json
+
+    chat = _chat or _qwen_chat
+    brand_json = _json.dumps({
+        "store_name": store_name, "category": category,
+        "mood": token.mood, "industry_hint": token.industry_hint,
+        "layout_style": token.layout.style, "brand_voice": token.brand_voice,
+    })
+    prompt = LAYOUT_DSL_PROMPT.replace("{brand_json}", brand_json).replace("{product_count}", str(product_count))
+
+    try:
+        raw = await chat(
+            model=get_settings().qwen_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=1200, temperature=0.7, timeout=60.0,
+        )
+        data = _extract_json(raw)
+        return normalize_dsl(data)
+    except Exception as e:  # noqa: BLE001 — fallback must be total for the demo path
+        logger.warning("[dsl] generate_layout_dsl falling back to deterministic DSL: %s", e)
+        return fallback_dsl_from_token(token)
