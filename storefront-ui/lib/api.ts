@@ -25,6 +25,9 @@ import type {
   Violation,
   AgentAction,
   LayoutDSL,
+  Customer,
+  CustomerCreate,
+  CustomerLogin,
 } from '@/types/schemas'
 
 export interface DashboardData {
@@ -181,6 +184,15 @@ export const api = {
 
   // ── Public storefront ───────────────────────────────────────────────────
   getStore: (slug: string) => req<PublicStore>(`/api/store/${enc(slug)}`),
+
+  // ── Sprint 4: per-brand customer auth (RBAC role=customer) ────────────────
+  customerRegister: (slug: string, body: CustomerCreate) =>
+    req<Customer>(`/s/${enc(slug)}/auth/register`, { method: 'POST', body: JSON.stringify(body) }),
+  customerLogin: (slug: string, body: CustomerLogin) =>
+    req<Customer>(`/s/${enc(slug)}/auth/login`, { method: 'POST', body: JSON.stringify(body) }),
+  customerLogout: (slug: string) =>
+    req<{ status: string }>(`/s/${enc(slug)}/auth/logout`, { method: 'POST' }),
+  customerMe: (slug: string) => req<Customer>(`/s/${enc(slug)}/auth/me`),
 
   // ── Sprint 3: LayoutDSL save / regenerate ─────────────────────────────────
   saveDsl: (slug: string, dsl: LayoutDSL) =>

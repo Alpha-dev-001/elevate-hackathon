@@ -13,6 +13,8 @@ import { CustomCSSInjector } from './CustomCSSInjector'
 import { Cart } from './Cart'
 import { ProductDrawer } from './ProductDrawer'
 import { useCart } from '@/lib/cart'
+import { useCustomer } from '@/lib/customerAuth'
+import { useEffect } from 'react'
 
 export function DSLRenderer({
   store, slug, preview, onOpenProduct, dslOverride, initialProductId,
@@ -29,7 +31,14 @@ export function DSLRenderer({
   const openCart = useCart((s) => s.setOpen)
   const addToCartFn = useCart((s) => s.add)
   const cartCount = useCart((s) => s.cart?.item_count ?? 0)
+  const customer = useCustomer((s) => s.customer)
+  const initCustomer = useCustomer((s) => s.init)
   const [openId, setOpenId] = useState<string | null>(initialProductId ?? null)
+
+  // Resolve the signed-in customer for this store (guest = null). Not in preview.
+  useEffect(() => {
+    if (!preview) initCustomer(slug)
+  }, [slug, preview, initCustomer])
 
   // DSL-driven inline add-to-cart (no-op in preview). Opens the cart on success.
   const handleAddToCart = (id: string) => {
@@ -77,6 +86,15 @@ export function DSLRenderer({
       )}
       {!preview && (
         <>
+          <a
+            href={`/s/${slug}/account`}
+            aria-label={customer ? `Account: ${customer.name}` : 'Sign in'}
+            className="fixed top-4 right-20 z-30 h-10 px-3 rounded-full flex items-center gap-1.5 text-sm font-medium shadow-lg hover:opacity-90 transition-opacity"
+            style={{ background: 'var(--s-surface)', color: 'var(--s-text)' }}
+          >
+            <span aria-hidden>{customer ? '👤' : '↪'}</span>
+            <span className="hidden sm:inline">{customer ? customer.name.split(' ')[0] : 'Sign in'}</span>
+          </a>
           <button
             onClick={() => openCart(true)}
             aria-label={`Open cart (${cartCount} items)`}

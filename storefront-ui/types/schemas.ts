@@ -93,6 +93,28 @@ export const MerchantLoginSchema = z.object({
   password: z.string(),
 })
 
+// ─── Per-brand customer (RBAC role=customer) ───────────────────────────────────
+export const CustomerSchema = z.object({
+  id: z.string(),
+  merchant_id: z.string(),
+  store_slug: z.string(),
+  email: z.string().email(),
+  name: z.string(),
+  role: z.literal('customer').default('customer'),
+})
+export const CustomerCreateSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(72),
+  name: z.string().min(1).max(120),
+})
+export const CustomerLoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string(),
+})
+export type Customer = z.infer<typeof CustomerSchema>
+export type CustomerCreate = z.infer<typeof CustomerCreateSchema>
+export type CustomerLogin = z.infer<typeof CustomerLoginSchema>
+
 // ─── 6. Product ───────────────────────────────────────────────────────────────
 
 export const ProductSchema = z.object({
