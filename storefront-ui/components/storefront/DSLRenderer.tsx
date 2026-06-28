@@ -117,11 +117,11 @@ export function DSLRenderer({
           <Cart variant={parsed.global_config.cart_style} />
         </>
       )}
-      <div data-store={slug} className={parsed.global_config.nav_style === 'sidebar-text' ? 'md:pl-44' : ''}>
+      <div data-store={slug} className={`relative ${parsed.global_config.nav_style === 'sidebar-text' ? 'md:pl-44' : ''}`}>
         <CustomCSSInjector css={parsed.custom_css} slug={slug} />
         {!hasAnnounce && (
           <EditTargetWrap editMode={editMode} onClick={() => onSelectTarget?.({ kind: 'global', field: 'nav_style' })} label="Navigation">
-            <DSLNav store={store} navStyle={parsed.global_config.nav_style} />
+            <DSLNav store={store} navStyle={parsed.global_config.nav_style} preview={preview} />
           </EditTargetWrap>
         )}
         {parsed.sections.map((section, i) => (

@@ -15,6 +15,8 @@ export interface NavProps {
   store: PublicStore
   activeCategory: string | null
   onSelect: (c: string | null) => void
+  /** In the builder preview, fixed-position navs must be contained, not escape to the viewport. */
+  preview?: boolean
 }
 export interface CardProps {
   product: PublicStore['products'][number]

@@ -3,13 +3,13 @@ import { useState } from 'react'
 import type { PublicStore } from '@/types/schemas'
 import { NAV_REGISTRY } from '@/lib/dslRegistry'
 
-export function DSLNav({ store, navStyle }: { store: PublicStore; navStyle: string }) {
+export function DSLNav({ store, navStyle, preview }: { store: PublicStore; navStyle: string; preview?: boolean }) {
   const [active, setActive] = useState<string | null>(null)
   const Comp = NAV_REGISTRY[navStyle]
   if (Comp) {
     return (
       <div data-nav={navStyle}>
-        <Comp store={store} activeCategory={active} onSelect={setActive} />
+        <Comp store={store} activeCategory={active} onSelect={setActive} preview={preview} />
       </div>
     )
   }

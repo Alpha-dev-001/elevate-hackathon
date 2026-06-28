@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import type { NavProps } from '@/lib/dslRegistry'
 
-export function SidebarTextNav({ store, activeCategory, onSelect }: NavProps) {
+export function SidebarTextNav({ store, activeCategory, onSelect, preview }: NavProps) {
   const [open, setOpen] = useState(false)
   const items: (string | null)[] = [null, ...store.categories]
   const list = (
@@ -17,10 +17,16 @@ export function SidebarTextNav({ store, activeCategory, onSelect }: NavProps) {
       ))}
     </ul>
   )
+  // Live store: fixed full-height rail. Builder preview: absolute within the
+  // store container so it never escapes the pane and covers the builder controls.
+  // (The container — the [data-store] div — is position:relative, and scrolls.)
+  const railClass = preview
+    ? 'hidden md:block absolute left-0 top-0 h-full w-44 px-6 py-10 overflow-y-auto'
+    : 'hidden md:block fixed left-0 top-0 h-full w-44 px-6 py-10 overflow-y-auto'
   return (
     <>
       <button className="md:hidden px-5 py-3 text-sm" aria-label="Menu" onClick={() => setOpen((o) => !o)}>☰ Menu</button>
-      <nav className="hidden md:block fixed left-0 top-0 h-full w-44 px-6 py-10" style={{ background: 'var(--s-bg)' }}>
+      <nav className={railClass} style={{ background: 'var(--s-bg)' }}>
         {list}
       </nav>
       {open && (
