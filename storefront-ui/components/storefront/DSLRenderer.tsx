@@ -2,6 +2,7 @@
 import { useMemo } from 'react'
 import type { PublicStore, LayoutDSL } from '@/types/schemas'
 import { LayoutDSLSchema } from '@/types/schemas'
+import '@/lib/registerVariants'
 import { resolveTheme } from '@/lib/storeTheme'
 import { StoreShell } from '@/components/store/StoreShell'
 import { DSLSection } from './DSLSection'
