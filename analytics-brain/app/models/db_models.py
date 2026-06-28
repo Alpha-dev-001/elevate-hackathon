@@ -2,7 +2,7 @@
 Database models — persistent source of truth.
 Redis is the fast layer. Postgres is what survives a restart.
 """
-from sqlalchemy import String, Float, Integer, BigInteger, Boolean, JSON, Text, ForeignKey
+from sqlalchemy import String, Float, Integer, BigInteger, Boolean, JSON, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 import time
@@ -26,6 +26,20 @@ class MerchantDB(Base):
 
     products: Mapped[list["ProductDB"]] = relationship(back_populates="merchant")
     orders: Mapped[list["OrderDB"]] = relationship(back_populates="merchant")
+
+
+class CustomerDB(Base):
+    """A store's customer. Scoped to one merchant — the same email may register
+    at different stores (RBAC: role=customer, isolated per brand)."""
+    __tablename__ = "customers"
+    __table_args__ = (UniqueConstraint("merchant_id", "email", name="uq_customer_store_email"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
 
 class ProductDB(Base):

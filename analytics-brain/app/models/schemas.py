@@ -309,6 +309,26 @@ class MerchantInDB(Merchant):
     hashed_password: str    # never returned in API responses
 
 
+# ─── Per-brand customers (RBAC: role=customer, scoped to one store) ────────────
+
+class CustomerCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=72)
+    name: str = Field(min_length=1, max_length=120)
+
+class CustomerLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class Customer(BaseModel):
+    id: str
+    merchant_id: str
+    store_slug: str
+    email: EmailStr
+    name: str
+    role: Literal["customer"] = "customer"
+
+
 # ─── 6. Product ───────────────────────────────────────────────────────────────
 
 class ProductBase(BaseModel):
