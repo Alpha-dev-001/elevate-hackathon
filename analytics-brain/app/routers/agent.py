@@ -66,6 +66,7 @@ async def approve_action(action_id: str, db: AsyncSession = Depends(get_db)):
     now = int(time.time() * 1000)
     row.status = "approved"
     row.approved_at = now
+    row.merchant_behavior = "approved"
 
     # Execute payload — apply flash_sale as a promo, layout_morph updates state, etc.
     await _execute_payload(row, db)
@@ -77,7 +78,32 @@ async def approve_action(action_id: str, db: AsyncSession = Depends(get_db)):
     # Broadcast store update to all WS connections
     await _broadcast_state_update(row.merchant_id)
 
+    # Schedule the outcome observation for when this action's promo expires —
+    # closes the cognitive loop (action → outcome → memory).
+    try:
+        from app.services.outcome_observer import schedule_observation
+        from app.core.redis import get_redis
+        state = await _load_state_promo_expiry(row, db)
+        if state is not None:
+            schedule_observation(row.id, state, redis=await get_redis())
+    except Exception as e:  # noqa: BLE001 — observation scheduling must never fail the approve
+        import logging
+        logging.getLogger(__name__).warning("[agent] could not schedule observation for %s: %s", row.id, e)
+
     return {"action": _to_schema(row).model_dump()}
+
+
+async def _load_state_promo_expiry(row: AgentActionDB, db: AsyncSession) -> int | None:
+    """The expiry ms of this action's promo, if it created one. Falls back to a
+    short window so the observer still fires for the demo."""
+    import time as _t
+    payload = row.payload or {}
+    minutes = payload.get("duration_minutes") or payload.get("flash_sale", {}).get("duration_minutes")
+    try:
+        minutes = int(minutes) if minutes else 30
+    except (TypeError, ValueError):
+        minutes = 30
+    return int(_t.time() * 1000) + minutes * 60 * 1000
 
 
 @router.post("/actions/{action_id}/dismiss")
@@ -86,7 +112,18 @@ async def dismiss_action(action_id: str, db: AsyncSession = Depends(get_db)):
     if not row:
         raise HTTPException(status_code=404, detail="Action not found")
     row.status = "dismissed"
+    row.merchant_behavior = "dismissed"
     await db.commit()
+
+    # A dismissed action still teaches Qwen — observe it now (no promo to wait on).
+    try:
+        from app.services.outcome_observer import observe_outcome
+        from app.core.redis import get_redis
+        await observe_outcome(row.id, db, await get_redis(), behavior="dismissed")
+    except Exception as e:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("[agent] dismiss observation failed for %s: %s", row.id, e)
+
     return {"action": _to_schema(row).model_dump()}
 
 

@@ -149,6 +149,86 @@ class BrandToken(BaseModel):
     mood: str
     industry_hint: str
     brand_voice: str
+    layout_dsl: "LayoutDSL | None" = None   # populated by generate_layout_dsl()
+
+
+# ─── Sprint 3: LayoutDSL ──────────────────────────────────────────────────────
+from datetime import datetime, timezone
+
+
+class SectionType(str, Enum):
+    hero = "hero"
+    product_grid = "product_grid"
+    banner = "banner"
+    story = "story"
+
+class HeroVariant(str, Enum):
+    full_bleed_image = "full-bleed-image"
+    editorial_stacked = "editorial-stacked"
+    minimal_wordmark = "minimal-wordmark"
+    split_50_50 = "split-50-50"
+
+class ProductGridVariant(str, Enum):
+    masonry_4col = "masonry-4col"
+    featured_2col = "featured-2col"
+    horizontal_scroll = "horizontal-scroll"
+    single_spotlight = "single-spotlight"
+
+class BannerVariant(str, Enum):
+    scroll_ticker = "scroll-ticker"
+    static_strip = "static-strip"
+    announcement_bar = "announcement-bar"
+
+class StoryVariant(str, Enum):
+    full_bleed_text = "full-bleed-text"
+    split_image_story = "split-image-story"
+    quote_callout = "quote-callout"
+
+class ProductCardVariant(str, Enum):
+    hover_reveal_text = "hover-reveal-text"
+    colored_bg_card = "colored-bg-card"
+    editorial_horizontal = "editorial-horizontal"
+    borderless_floating = "borderless-floating"
+    polaroid_card = "polaroid-card"
+    image_below_text = "image-below-text"
+
+class NavStyle(str, Enum):
+    underline_tabs = "underline-tabs"
+    pill_nav = "pill-nav"
+    sidebar_text = "sidebar-text"
+    sticky_tabs = "sticky-tabs"
+    minimal_text = "minimal-text"
+
+
+class LayoutSection(BaseModel):
+    type: SectionType
+    variant: str  # validated against the type's enum by layout_dsl.coerce_variant
+    props: dict[str, Any] = Field(default_factory=dict)
+
+class LayoutGlobalConfig(BaseModel):
+    nav_style: NavStyle
+    product_card: ProductCardVariant
+    color_mode: Literal["light", "dark", "auto"] = "auto"
+    corner_radius: Literal["none", "sm", "md", "lg", "full"] = "md"
+    density: Literal["sparse", "normal", "dense"] = "normal"
+
+class LayoutDSL(BaseModel):
+    sections: list[LayoutSection] = Field(min_length=2, max_length=5)
+    global_config: LayoutGlobalConfig
+    custom_css: str = ""
+
+
+class MemoryEntry(BaseModel):
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    action_type: str
+    trigger: str
+    outcome: str
+    merchant_behavior: str          # approved | dismissed | approved_then_modified
+    notes: str = ""
+
+
+BrandToken.model_rebuild()   # resolve the forward ref to LayoutDSL
+
 
 class GeneratedBrand(BaseModel):
     store_name: str

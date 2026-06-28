@@ -628,3 +628,46 @@ each shipped sprint into upgrade areas, framed for a business owner. Records the
 decided principle that customers always see the *store's* brand, never Elevate.
 
 ---
+
+### Sprint 3 — AI-Native Storefront (LayoutDSL · Store Builder · Memory Loop) — 2026-06-28
+**Approach:** Took the Qwen chain from 2 calls to 5+ and made it visible. Qwen-Max
+now composes a per-brand `LayoutDSL` (sections + variants + global config + scoped
+CSS) that a new frontend `DSLRenderer` materialises from a registry of 4 hero / 4
+grid / 3 banner / 3 story sections, 6 product cards, and 5 nav styles. A draft-DSL
+Store Builder (Zustand + @dnd-kit) lets the merchant drag-to-reorder Qwen's
+recommendation — the human-in-the-loop checkpoint. The cognitive loop closes: a
+background outcome-observer writes a `MemoryEntry` after each promo resolves, and
+every decision cycle reads prior outcomes back into its prompt.
+
+**Qwen calls (est. tokens, caching):**
+- qwen-vl-max `analyze_logo` (~0.5k) → cached `brand:{id}`
+- qwen-max `generate_brand_token` (~1.2k) → `brand_tokens` JSONB
+- qwen-max `generate_layout_dsl` (~1.0k) → `layout_dsl:{id}` (cached forever)
+- qwen-max `generate_custom_css` (~0.5k) → `layout_dsl.custom_css`
+- qwen-max `run_decision_cycle` (+~0.8k memory context) → WS shows `estimated_tokens`/`memory_count`
+
+**Reliability (the interesting part):** Qwen *will* hallucinate variant names, wrong
+section types, 0 or 8 sections. Coercion alone isn't enough — built a three-layer
+defense: `coerce_variant` (type-aware), `normalize_dsl` (structural guarantees the
+renderer trusts), and `fallback_dsl_from_token` (deterministic, brand-seeded). The
+fallback is the distinctness backbone: 40 brands → ≥12 distinct structural
+signatures with Qwen entirely offline. `generate_layout_dsl` never raises.
+
+**Problems:** (1) No frontend test runner existed — added vitest + testing-library
+first. (2) Backend venv had no pip — bootstrapped via ensurepip. (3) Preview
+re-render test needed `act()` to flush zustand→React. (4) `useCart` is called both
+with and without a selector — test mock had to handle both forms.
+
+**Edge cases tested:** garbage/cross-type variants, empty section list, double
+heroes, adjacent banners, >5 sections, Qwen non-JSON and Qwen-down (fallback),
+empty memory (no wasted tokens), CSS with url()/@import/position:fixed/z-index
+stripped, announcement-bar dismissal, deep-link `?p=` drawer, optimistic publish.
+
+**Verification:** 39 backend unit tests + 57 frontend tests green. `*_live.py`
+tests document the endpoint contracts (need `docker compose up`). Architecture
+diagram with the full Qwen chain in `docs/architecture-sprint3.md`.
+
+**Next:** Mount `StoreBirth` in the onboarding incubation flow (component is built +
+tested); seed `crest` (minimal-dark) alongside `haree` (editorial) for the
+side-by-side "same platform, different store" demo beat; run the full demo dry-run
+once the stack is up; post-hackathon pgvector cross-store RAG (designed, stubbed).

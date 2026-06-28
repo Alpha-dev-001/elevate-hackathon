@@ -1,0 +1,31 @@
+'use client'
+import { useState } from 'react'
+import type { NavProps } from '@/lib/dslRegistry'
+
+export function SidebarTextNav({ store, activeCategory, onSelect }: NavProps) {
+  const [open, setOpen] = useState(false)
+  const items: (string | null)[] = [null, ...store.categories]
+  const list = (
+    <ul className="flex flex-col gap-3 text-sm uppercase tracking-wide">
+      {items.map((c) => (
+        <li key={c ?? 'all'}>
+          <button onClick={() => { onSelect(c); setOpen(false) }}
+                  style={{ color: activeCategory === c ? 'var(--s-accent)' : 'var(--s-text-muted)' }}>
+            {c ?? 'All'}
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
+  return (
+    <>
+      <button className="md:hidden px-5 py-3 text-sm" aria-label="Menu" onClick={() => setOpen((o) => !o)}>☰ Menu</button>
+      <nav className="hidden md:block fixed left-0 top-0 h-full w-44 px-6 py-10" style={{ background: 'var(--s-bg)' }}>
+        {list}
+      </nav>
+      {open && (
+        <nav className="md:hidden px-6 py-4" style={{ background: 'var(--s-bg)' }}>{list}</nav>
+      )}
+    </>
+  )
+}

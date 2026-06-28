@@ -224,10 +224,34 @@ async def _run_brand_pipeline(
                 # Store BrandToken if generation succeeded
                 brand_profile = await db.get(BrandProfileDB, merchant_id)
                 if brand_profile and isinstance(brand_token_result, BrandToken):
+                    from app.services.layout_dsl import generate_layout_dsl
+                    product_count = len(seed_products_raw) if isinstance(seed_products_raw, list) else 0
+                    brand_token_result.layout_dsl = await generate_layout_dsl(
+                        brand_token_result, store_name, category, product_count,
+                    )
+                    # Scoped micro-interaction CSS — best-effort, never blocks.
+                    try:
+                        from app.services.css_gen import generate_custom_css
+                        brand_token_result.layout_dsl.custom_css = await generate_custom_css(
+                            brand_token_result, slug,
+                        )
+                    except Exception as csse:
+                        logger.warning("[onboarding] custom_css generation failed for %s: %s", merchant_id, csse)
                     brand_profile.brand_tokens = brand_token_result.model_dump()
+                    # cache forever; invalidated on regenerate
+                    try:
+                        from app.core.redis import get_redis, Keys  # noqa: F401
+                        r = await get_redis()
+                        await r.set(
+                            f"layout_dsl:{merchant_id}",
+                            brand_token_result.layout_dsl.model_dump_json(),
+                        )
+                    except Exception as ce:
+                        logger.warning("[onboarding] layout_dsl cache failed for %s: %s", merchant_id, ce)
                     logger.info(
                         f"[onboarding] BrandToken saved for {merchant_id}: "
-                        f"layout.style={brand_token_result.layout.style}"
+                        f"layout.style={brand_token_result.layout.style} "
+                        f"sections={len(brand_token_result.layout_dsl.sections)}"
                     )
                 elif isinstance(brand_token_result, Exception):
                     logger.warning(

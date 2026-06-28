@@ -24,6 +24,7 @@ import type {
   CatalogReview,
   Violation,
   AgentAction,
+  LayoutDSL,
 } from '@/types/schemas'
 
 export interface DashboardData {
@@ -146,6 +147,15 @@ export const api = {
       body: JSON.stringify({ logo_oss_url }),
     }),
   getBrand: () => req<BrandResponse>('/onboarding/brand'),
+  // Brand guard rules for the builder's local advisory (no Qwen call at edit time).
+  getBrandGuards: async () => {
+    try {
+      const r = await req<BrandResponse>('/onboarding/brand')
+      return r.brand_package.guards
+    } catch {
+      return null
+    }
+  },
   publish: () =>
     req<{ status: string; store_name: string; storefront_url: string }>(
       '/onboarding/publish',
@@ -171,6 +181,12 @@ export const api = {
 
   // ── Public storefront ───────────────────────────────────────────────────
   getStore: (slug: string) => req<PublicStore>(`/api/store/${enc(slug)}`),
+
+  // ── Sprint 3: LayoutDSL save / regenerate ─────────────────────────────────
+  saveDsl: (slug: string, dsl: LayoutDSL) =>
+    req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'PUT', body: JSON.stringify(dsl) }),
+  regenerateDsl: (slug: string) =>
+    req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'POST' }),
 
   // ── Public commerce: cart, checkout, order lookup (guest, slug-scoped) ────
   getCart: (slug: string, sessionId: string) =>

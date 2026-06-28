@@ -21,6 +21,7 @@ class MerchantDB(Base):
     logo_url: Mapped[str | None] = mapped_column(String)
     onboarding_status: Mapped[str] = mapped_column(String, default="store_info")
     is_live: Mapped[bool] = mapped_column(Boolean, default=False)
+    qwen_memory: Mapped[dict] = mapped_column(JSON, default=lambda: {"entries": []})
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
     products: Mapped[list["ProductDB"]] = relationship(back_populates="merchant")
@@ -142,3 +143,5 @@ class AgentActionDB(Base):
     )
     approved_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     executed_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    merchant_behavior: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger_description: Mapped[str | None] = mapped_column(Text, nullable=True)

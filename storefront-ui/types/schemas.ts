@@ -216,6 +216,30 @@ export const BrandLayoutTokenSchema = z.object({
   category_style: z.enum(['pill', 'underline-tab', 'minimal-text']),
 })
 
+// ─── Sprint 3: LayoutDSL (mirrors schemas.py exactly) ──────────────────────────
+export const LayoutSectionSchema = z.object({
+  type: z.enum(['hero', 'product_grid', 'banner', 'story']),
+  variant: z.string(),
+  props: z.record(z.any()).default({}),
+})
+
+export const LayoutGlobalConfigSchema = z.object({
+  nav_style: z.enum(['underline-tabs', 'pill-nav', 'sidebar-text', 'sticky-tabs', 'minimal-text']),
+  product_card: z.enum([
+    'hover-reveal-text', 'colored-bg-card', 'editorial-horizontal',
+    'borderless-floating', 'polaroid-card', 'image-below-text',
+  ]),
+  color_mode: z.enum(['light', 'dark', 'auto']).default('auto'),
+  corner_radius: z.enum(['none', 'sm', 'md', 'lg', 'full']).default('md'),
+  density: z.enum(['sparse', 'normal', 'dense']).default('normal'),
+})
+
+export const LayoutDSLSchema = z.object({
+  sections: z.array(LayoutSectionSchema).min(2).max(5),
+  global_config: LayoutGlobalConfigSchema,
+  custom_css: z.string().default(''),
+})
+
 export const BrandTokenSchema = z.object({
   store_name: z.string(),
   tagline: z.string(),
@@ -225,6 +249,7 @@ export const BrandTokenSchema = z.object({
   mood: z.string(),
   industry_hint: z.string(),
   brand_voice: z.string(),
+  layout_dsl: LayoutDSLSchema.nullable().optional(),
 })
 
 // ─── 10. Public storefront payload ────────────────────────────────────────────
@@ -414,6 +439,9 @@ export type BrandColors = z.infer<typeof BrandColorsSchema>
 export type BrandTypographyToken = z.infer<typeof BrandTypographyTokenSchema>
 export type BrandLayoutToken = z.infer<typeof BrandLayoutTokenSchema>
 export type BrandToken = z.infer<typeof BrandTokenSchema>
+export type LayoutSection = z.infer<typeof LayoutSectionSchema>
+export type LayoutGlobalConfig = z.infer<typeof LayoutGlobalConfigSchema>
+export type LayoutDSL = z.infer<typeof LayoutDSLSchema>
 export type AgentActionType = z.infer<typeof AgentActionTypeSchema>
 export type AgentActionStatus = z.infer<typeof AgentActionStatusSchema>
 export type AgentAction = z.infer<typeof AgentActionSchema>
