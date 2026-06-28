@@ -87,7 +87,7 @@ export function DSLRenderer({
           <Cart />
         </>
       )}
-      <div data-store={slug}>
+      <div data-store={slug} className={parsed.global_config.nav_style === 'sidebar-text' ? 'md:pl-44' : ''}>
         <CustomCSSInjector css={parsed.custom_css} slug={slug} />
         {!hasAnnounce && <DSLNav store={store} navStyle={parsed.global_config.nav_style} />}
         {parsed.sections.map((section, i) => (

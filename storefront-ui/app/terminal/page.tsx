@@ -183,6 +183,22 @@ export default function TerminalPage() {
             ✦ qwen-max · Remembers {memoryCount ?? 0} previous decision{memoryCount === 1 ? '' : 's'}
             {lastTokens != null ? ` · ~${lastTokens.toLocaleString()} tokens` : ''}
           </span>
+          <a
+            href={`/brand-review?slug=${merchant.slug}`}
+            className="text-xs font-medium px-3 py-1.5 rounded-md transition-opacity hover:opacity-90"
+            style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
+          >
+            Customize store
+          </a>
+          <a
+            href={`/s/${merchant.slug}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+          >
+            View store ↗
+          </a>
           <span className="w-2 h-2 rounded-full" style={{ background: wsColor }} />
           <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
             {wsStatus}
