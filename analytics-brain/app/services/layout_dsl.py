@@ -66,3 +66,81 @@ def coerce_variant(section_type: SectionType, raw: str) -> str:
         return nmap[_norm(raw)]
     logger.warning("[dsl] unmapped variant %r for %s → default", raw, section_type.value)
     return DEFAULT_VARIANT[section_type]
+
+
+# ─── Defense Layer B: structural normalization ───────────────────────────────────
+
+from app.models.schemas import LayoutDSL, LayoutSection, LayoutGlobalConfig
+
+_VALID_NAV = {v.value for v in NavStyle}
+_VALID_CARD = {v.value for v in ProductCardVariant}
+
+
+def _coerce_global(raw: object) -> LayoutGlobalConfig:
+    g = raw if isinstance(raw, dict) else {}
+    nav = g.get("nav_style")
+    card = g.get("product_card")
+    return LayoutGlobalConfig(
+        nav_style=nav if nav in _VALID_NAV else NavStyle.underline_tabs.value,
+        product_card=card if card in _VALID_CARD else ProductCardVariant.hover_reveal_text.value,
+        color_mode=g.get("color_mode") if g.get("color_mode") in ("light", "dark", "auto") else "auto",
+        corner_radius=g.get("corner_radius") if g.get("corner_radius") in ("none", "sm", "md", "lg", "full") else "md",
+        density=g.get("density") if g.get("density") in ("sparse", "normal", "dense") else "normal",
+    )
+
+
+def _clean_sections(raw_sections: object) -> list[LayoutSection]:
+    out: list[LayoutSection] = []
+    if isinstance(raw_sections, list):
+        for s in raw_sections:
+            if not isinstance(s, dict):
+                continue
+            try:
+                st = SectionType(str(s.get("type", "")).strip().replace("-", "_"))
+            except ValueError:
+                continue
+            variant = coerce_variant(st, str(s.get("variant", "")))
+            props = s.get("props") if isinstance(s.get("props"), dict) else {}
+            out.append(LayoutSection(type=st, variant=variant, props=props))
+    return out
+
+
+def normalize_dsl(raw: dict) -> LayoutDSL:
+    """Defense Layer B. Turn any raw dict into a structurally-safe LayoutDSL."""
+    sections = _clean_sections(raw.get("sections"))
+
+    # Rule: at most one hero, and it leads.
+    heroes = [s for s in sections if s.type == SectionType.hero]
+    non_hero = [s for s in sections if s.type != SectionType.hero]
+    sections = ([heroes[0]] if heroes else []) + non_hero
+
+    # Rule: announcement-bar floats above everything (even the hero).
+    announce = [s for s in sections if s.type == SectionType.banner and s.variant == "announcement-bar"]
+    rest = [s for s in sections if not (s.type == SectionType.banner and s.variant == "announcement-bar")]
+    sections = announce[:1] + rest
+
+    # Rule: at least one product_grid.
+    if not any(s.type == SectionType.product_grid for s in sections):
+        sections.append(LayoutSection(
+            type=SectionType.product_grid,
+            variant=DEFAULT_VARIANT[SectionType.product_grid],
+        ))
+
+    # Rule: no two banners adjacent — drop the second of any adjacent pair.
+    deduped: list[LayoutSection] = []
+    for s in sections:
+        if deduped and deduped[-1].type == SectionType.banner and s.type == SectionType.banner:
+            continue
+        deduped.append(s)
+    sections = deduped
+
+    # Clamp 2..5. Pad with a story if too short.
+    if len(sections) < 2:
+        sections.append(LayoutSection(type=SectionType.story, variant=DEFAULT_VARIANT[SectionType.story]))
+    sections = sections[:5]
+
+    return LayoutDSL(
+        sections=sections,
+        global_config=_coerce_global(raw.get("global_config")),
+        custom_css=str(raw.get("custom_css") or ""),
+    )
