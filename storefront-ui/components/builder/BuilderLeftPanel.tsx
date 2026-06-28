@@ -27,6 +27,7 @@ export function BuilderLeftPanel({
   const [advisoryMode, setAdvisoryMode] = useState<'conversational' | 'structured'>('conversational')
   const isDirty = useBuilderStore((s) => s.isDirty)
   const updateGlobalConfig = useBuilderStore((s) => s.updateGlobalConfig)
+  const gc = useBuilderStore((s) => s.draftDSL?.global_config)
   const reset = useBuilderStore((s) => s.reset)
 
   return (
@@ -60,6 +61,19 @@ export function BuilderLeftPanel({
         <ColorPicker colorKey="background" guards={guards} advisoryMode={advisoryMode} />
       </section>
 
+      <section className="flex flex-col gap-3">
+        <span className="text-xs uppercase tracking-widest text-neutral-500">Store behavior</span>
+        <ConfigSelect label="Add to cart" value={gc?.add_to_cart ?? 'drawer-only'}
+                      options={['drawer-only', 'card-hover', 'card-always', 'none']}
+                      onChange={(v) => updateGlobalConfig({ add_to_cart: v as LayoutGlobalConfig['add_to_cart'] })} />
+        <ConfigSelect label="Product detail" value={gc?.product_detail ?? 'gallery-split'}
+                      options={['gallery-split', 'editorial-stacked', 'minimal-centered']}
+                      onChange={(v) => updateGlobalConfig({ product_detail: v as LayoutGlobalConfig['product_detail'] })} />
+        <ConfigSelect label="Cart" value={gc?.cart_style ?? 'slide-panel'}
+                      options={['slide-panel', 'full-sheet']}
+                      onChange={(v) => updateGlobalConfig({ cart_style: v as LayoutGlobalConfig['cart_style'] })} />
+      </section>
+
       <section>
         <span className="text-xs uppercase tracking-widest text-neutral-500">Advisory style</span>
         <div className="flex gap-2 mt-2">
@@ -86,5 +100,27 @@ export function BuilderLeftPanel({
         </button>
       </footer>
     </aside>
+  )
+}
+
+function ConfigSelect({
+  label, value, options, onChange,
+}: {
+  label: string
+  value: string
+  options: string[]
+  onChange: (v: string) => void
+}) {
+  return (
+    <label className="flex items-center justify-between gap-2 text-xs">
+      <span className="text-neutral-400">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="text-xs bg-transparent border border-neutral-700 rounded px-2 py-1 max-w-[60%]"
+      >
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
   )
 }
