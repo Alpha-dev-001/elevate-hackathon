@@ -113,6 +113,11 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
         try:
             from app.models.schemas import BrandToken
             brand_token_data = BrandToken.model_validate(brand_profile_row.brand_tokens)
+            # Backfill layout_dsl for rows created before Sprint 3 so older
+            # stores still render a composed (not fallback-uniform) layout.
+            if brand_token_data.layout_dsl is None:
+                from app.services.layout_dsl import fallback_dsl_from_token
+                brand_token_data.layout_dsl = fallback_dsl_from_token(brand_token_data)
         except (ValueError, TypeError) as e:
             logger.warning(f"[store] invalid brand_tokens for {merchant.id}: {e}")
 
