@@ -13,6 +13,7 @@ const saveDsl = vi.fn().mockResolvedValue(fixtureStore.brand_token!.layout_dsl)
 const publish = vi.fn().mockResolvedValue({ status: 'live' })
 vi.mock('@/lib/api', () => ({
   api: {
+    me: () => Promise.resolve({ slug: 'haree', store_name: 'Haree', is_live: true }),
     getStore: (..._a: any[]) => Promise.resolve(fixtureStore),
     getBrandGuards: () => Promise.resolve(null),
     saveDsl: (...a: any[]) => saveDsl(...a),

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { PublicStore, BrandGuardRules } from '@/types/schemas'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
 import { useBuilderStore } from '@/lib/builderStore'
 import { BuilderLeftPanel } from './BuilderLeftPanel'
 import { BuilderPreview } from './BuilderPreview'
@@ -23,16 +23,26 @@ export function StoreBuilder({ slug }: { slug: string }) {
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([api.getStore(slug), api.getBrandGuards()])
-      .then(([s, g]) => {
+    // RBAC gate: the builder is merchant-only, and only for the merchant who
+    // owns THIS store. Customers / wrong merchants are bounced to sign in.
+    api.me()
+      .then((m) => {
         if (cancelled) return
-        setStore(s)
-        setGuards(g)
-        if (s.brand_token?.layout_dsl) setFromStore(s.brand_token.layout_dsl, s.brand_token)
+        if (m.slug !== slug) { router.replace('/terminal'); return }
+        return Promise.all([api.getStore(slug), api.getBrandGuards()]).then(([s, g]) => {
+          if (cancelled) return
+          setStore(s)
+          setGuards(g)
+          if (s.brand_token?.layout_dsl) setFromStore(s.brand_token.layout_dsl, s.brand_token)
+        })
       })
-      .catch(() => !cancelled && setError('Could not load your store.'))
+      .catch((e) => {
+        if (cancelled) return
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) router.replace('/login')
+        else setError('Could not load your store.')
+      })
     return () => { cancelled = true }
-  }, [slug, setFromStore])
+  }, [slug, setFromStore, router])
 
   const onPublish = async () => {
     const dsl = useBuilderStore.getState().draftDSL
