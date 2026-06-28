@@ -147,6 +147,15 @@ export const api = {
       body: JSON.stringify({ logo_oss_url }),
     }),
   getBrand: () => req<BrandResponse>('/onboarding/brand'),
+  // Brand guard rules for the builder's local advisory (no Qwen call at edit time).
+  getBrandGuards: async () => {
+    try {
+      const r = await req<BrandResponse>('/onboarding/brand')
+      return r.brand_package.guards
+    } catch {
+      return null
+    }
+  },
   publish: () =>
     req<{ status: string; store_name: string; storefront_url: string }>(
       '/onboarding/publish',
