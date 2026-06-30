@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        # Tolerate unknown env vars (e.g. deploy-only ACR_NAMESPACE, or FC
+        # platform vars) instead of crashing the whole backend on startup.
+        extra = "ignore"
 
 
 @lru_cache
