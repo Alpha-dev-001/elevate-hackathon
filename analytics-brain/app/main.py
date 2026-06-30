@@ -1,5 +1,7 @@
+from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.database import get_engine, Base
 from app.models import db_models  # noqa: F401 — registers tables on Base.metadata
@@ -49,37 +51,66 @@ if settings.app_env == "development":
     app.include_router(dev.router)     # dev-only: brand regeneration for existing stores
 
 
+# ── DB bootstrap ────────────────────────────────────────────────────────────
+# Columns not yet captured in a migration file (Sprint 2 orders cols +
+# brand_tokens). create_all creates missing TABLES only, never missing COLUMNS,
+# so these need an explicit, idempotent ALTER. Applied on every startup.
+_INLINE_PATCHES = [
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal DOUBLE PRECISION DEFAULT 0",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR DEFAULT ''",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR DEFAULT ''",
+    "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0",
+    "ALTER TABLE brand_profiles ADD COLUMN IF NOT EXISTS brand_tokens JSONB",
+]
+
+# migrations/*.sql live one level up from app/ (copied into the image via COPY . .)
+_MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
+
+
+def _split_sql(sql: str) -> list[str]:
+    """Strip `--` comment lines, then split into individual statements.
+
+    asyncpg rejects multiple statements in one execute(), so each statement must
+    be sent separately. Comment lines are dropped first so a leading comment
+    doesn't get glued onto (and swallow) the statement that follows it.
+    """
+    body = "\n".join(
+        ln for ln in sql.splitlines() if not ln.strip().startswith("--")
+    )
+    return [s.strip() for s in body.split(";") if s.strip()]
+
+
+async def _bootstrap_database() -> None:
+    """Create missing tables and apply idempotent migrations, in EVERY env.
+
+    create_all is purely additive (creates missing tables, never drops/alters),
+    and every migration here is `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`, so
+    this is safe on a fresh RDS and on an already-seeded dev DB alike. This is
+    what makes a from-zero production deploy work with no manual SQL step.
+    TODO: replace with Alembic for real migration history (see UPGRADES.md §6).
+    """
+    async with get_engine().begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)          # 1. base schema
+        for stmt in _INLINE_PATCHES:                            # 2. uncaptured cols
+            await conn.execute(text(stmt))
+        for sql_file in sorted(_MIGRATIONS_DIR.glob("*.sql")):  # 3. .sql migrations
+            for stmt in _split_sql(sql_file.read_text(encoding="utf-8")):
+                await conn.execute(text(stmt))
+
+
 @app.on_event("startup")
 async def startup():
     logger.info("Elevate API starting up")
     logger.info(f"Frontend: {settings.frontend_url}")
     logger.info(f"Qwen model: {settings.qwen_model}")
 
-    if settings.app_env == "development":
-        # Dev convenience: sync tables to models. Production uses Alembic
-        # migrations against RDS — create_all never runs there.
-        from sqlalchemy import text
-
-        # create_all only creates missing TABLES, not missing COLUMNS. The
-        # Sprint 2 additions to the existing `orders` table need an explicit,
-        # idempotent ALTER so an already-seeded dev DB picks them up.
-        _SCHEMA_PATCHES = [
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS subtotal DOUBLE PRECISION DEFAULT 0",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_name VARCHAR DEFAULT ''",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR DEFAULT ''",
-            "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0",
-            "ALTER TABLE brand_profiles ADD COLUMN IF NOT EXISTS brand_tokens JSONB",
-        ]
-        try:
-            async with get_engine().begin() as conn:
-                await conn.run_sync(Base.metadata.create_all)
-                for stmt in _SCHEMA_PATCHES:
-                    await conn.execute(text(stmt))
-            logger.info("Database tables synced")
-        except Exception as e:
-            logger.error(
-                f"Database unreachable — auth and persistence will fail: {e}"
-            )
+    try:
+        await _bootstrap_database()
+        logger.info("Database schema bootstrapped (tables + migrations applied)")
+    except Exception as e:
+        logger.error(
+            f"DB bootstrap failed — auth and persistence will fail: {e}"
+        )
 
 
 @app.get("/api/health")
