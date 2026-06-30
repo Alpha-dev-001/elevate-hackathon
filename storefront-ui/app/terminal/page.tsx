@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { api, ApiError, type DashboardData } from '@/lib/api'
+import { api, ApiError, type DashboardData, type Capability } from '@/lib/api'
 import { connectTerminal } from '@/lib/ws'
 import type { AgentAction, Merchant } from '@/types/schemas'
 import { StoreSnapshot } from '@/components/terminal/StoreSnapshot'
 import { DecisionFeed } from '@/components/terminal/DecisionFeed'
 import { AttributionDashboard } from '@/components/terminal/AttributionDashboard'
+import { CapabilityProposals } from '@/components/terminal/CapabilityProposals'
 
 export default function TerminalPage() {
   const router = useRouter()
@@ -21,6 +22,7 @@ export default function TerminalPage() {
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [memoryCount, setMemoryCount] = useState<number | null>(null)
   const [lastTokens, setLastTokens] = useState<number | null>(null)
+  const [capabilities, setCapabilities] = useState<Capability[]>([])
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -66,6 +68,15 @@ export default function TerminalPage() {
     }
   }, [])
 
+  const fetchCapabilities = useCallback(async (slug: string) => {
+    try {
+      const { capabilities } = await api.getCapabilities(slug)
+      setCapabilities(capabilities)
+    } catch {
+      // non-critical surface — leave whatever we had
+    }
+  }, [])
+
   // ── Subscriptions ──────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -75,9 +86,14 @@ export default function TerminalPage() {
     // Initial fetch
     fetchActions(slug)
     fetchDashboard(slug)
+    fetchCapabilities(slug)
 
-    // 5s poll for new actions (fallback — WS is primary)
-    pollRef.current = setInterval(() => fetchActions(slug), 5000)
+    // 5s poll for new actions + capability gaps (capability changes originate in
+    // the builder's point-and-edit flow, so the terminal learns of them by poll).
+    pollRef.current = setInterval(() => {
+      fetchActions(slug)
+      fetchCapabilities(slug)
+    }, 5000)
 
     // WS subscription
     const conn = connectTerminal(id, {
@@ -103,7 +119,7 @@ export default function TerminalPage() {
       if (pollRef.current) clearInterval(pollRef.current)
       conn.close()
     }
-  }, [merchant, fetchActions, fetchDashboard])
+  }, [merchant, fetchActions, fetchDashboard, fetchCapabilities])
 
   // ── Action handlers ────────────────────────────────────────────────────────
 
@@ -206,8 +222,13 @@ export default function TerminalPage() {
         </div>
       </header>
 
+      {/* ── Qwen capability proposals (surfaces only when there are any) ── */}
+      <div className="px-6 pt-6 max-w-[1400px] mx-auto">
+        <CapabilityProposals capabilities={capabilities} />
+      </div>
+
       {/* ── 3-column layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 max-w-[1400px] mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 px-6 pb-6 max-w-[1400px] mx-auto">
         {/* Left: Store snapshot + simulate */}
         <div className="lg:col-span-1">
           <StoreSnapshot

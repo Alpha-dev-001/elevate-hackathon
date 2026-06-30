@@ -139,6 +139,16 @@ export interface EditIntentResult {
   request_count?: number
 }
 
+/** A capability gap Qwen noticed via point-and-edit intents it couldn't satisfy.
+ *  status flips 'open' → 'proposed' once the same gap recurs (self-extending config). */
+export interface Capability {
+  capability: string       // stable slug key
+  label: string            // human label Qwen named for the gap
+  count: number            // how many times it's been requested
+  status: 'open' | 'proposed'
+  last_intent: string      // the merchant's most recent wording
+}
+
 export const api = {
   // ── Auth ────────────────────────────────────────────────────────────────
   signup: (body: MerchantCreate) =>
@@ -291,6 +301,10 @@ export const api = {
   // ── Dashboard ────────────────────────────────────────────────────────────
   getDashboard: (slug: string) =>
     req<DashboardData>(`/api/dashboard/${enc(slug)}`),
+
+  // ── Self-extending config: capability gaps Qwen has noticed ───────────────
+  getCapabilities: (slug: string) =>
+    req<{ capabilities: Capability[] }>(`/api/brand/capabilities/${enc(slug)}`),
 }
 
 export const WS_BASE =
