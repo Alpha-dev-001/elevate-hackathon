@@ -103,7 +103,11 @@ async def checkout(
     active_promos = state.active_promos if state else {}
 
     order_items: list[OrderItem] = []
-    promo_labels: list[str] = []
+    # Tag the order with the promo *id* (not its label): attribution in
+    # dashboard.py and outcome_observer.py matches OrderDB.promo_applied against
+    # AgentActionDB.promo_id. Storing the label here silently broke that match —
+    # every AI-driven sale read back as "no conversions", poisoning the memory loop.
+    promo_ids: list[str] = []
 
     for item in cart.items:
         result = await db.execute(
@@ -135,7 +139,7 @@ async def checkout(
         )
         promo = best_active_promo(item.product_id, active_promos)
         if promo:
-            promo_labels.append(promo.label)
+            promo_ids.append(promo.id)
 
     subtotal = round(sum(i.line_total for i in order_items), 2)
     order = OrderDB(
@@ -148,7 +152,7 @@ async def checkout(
         status=OrderStatus.PAID.value,  # payment is simulated as successful
         customer_name=customer.name,
         customer_email=customer.email,
-        promo_applied=", ".join(sorted(set(promo_labels))) or None,
+        promo_applied=", ".join(sorted(set(promo_ids))) or None,
         created_at=_now(),
         updated_at=_now(),
     )
