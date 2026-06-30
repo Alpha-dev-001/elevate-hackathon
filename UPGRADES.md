@@ -145,3 +145,94 @@ Where it can deepen:
 Realtime telemetry → anomaly trigger → Qwen decision cycles → terminal option
 cards → interceptor (3 layers) → storefront hot-reload → brand-tweak reflex.
 _Upgrade areas will be appended here as Sprint 2 ships._
+
+---
+
+## Sprint 4+ / "AI IS the store" — vision capture (logged 2026-06-29)
+
+> Captured from the founder's direction dump. The through-line: **Qwen is not a
+> wrapper around a shop — Qwen *is* the shop's brain.** Everything below should
+> make a merchant *want Qwen to do more*, never feel fenced in by it. Sequenced
+> against the hackathon clock elsewhere; this is the durable backlog.
+
+### A. The Qwen-as-runtime loop (the flagship cluster — one nervous system)
+These are not four features; they're one self-improving loop. Build them so they
+share the memory/decision/outcome plumbing already in `services/memory.py` +
+`outcome_observer.py`.
+- 🔜 **Per-customer personalization.** Now that shoppers log in per brand (RBAC,
+  Sprint 4), Qwen tailors recommendations / storefront emphasis to the
+  *individual* shopper from their own views + orders — not just the store.
+  _Owner value:_ relevance → conversion + retention. Granular: per-customer
+  signal in Redis, decision cycle reads it, personalized product ordering /
+  hero. Respect the margins/internals-stay-backend principle.
+- 🔜 **Proactive Qwen → merchant.** Option cards surface *on their own* by
+  urgency (not only on anomaly), and Qwen **learns the merchant's approve/dismiss
+  patterns** to tune what (and when) it proposes. _Owner value:_ the cockpit
+  feels alive and gets smarter about *this* owner.
+- 🧪 **Qwen self-extends its config on repeated requests.** Partly built
+  (`capability_tracker.py`, `GET /api/brand/capabilities/{slug}`). Finish: the
+  terminal widget surfacing proposed capabilities, and the loop where a
+  recurring unmet intent → Qwen proposes a NEW config dimension.
+- 🔲 **Merchant → Qwen feature requests.** Merchant tells Qwen, in words, what
+  they wish the store could do. Qwen either (a) does it within existing config,
+  or (b) **escalates a structured request** to the Elevate team to build. Closes
+  the "I just wish merchants could tell Qwen and boom" loop. Tie to capability
+  tracker.
+- 🔲 **Qwen ↔ merchant conversation + relationship.** Qwen actually *talks* to
+  the merchant (status, nudges, asks). Onboarding sets the tone: "What should
+  Qwen call you?" — a named, personal relationship, not a tool. _Owner value:_
+  trust; merchants who want Qwen on their side.
+
+### B. Qwen autonomy in operations
+- 🔲 **Qwen-run inventory management.** Low-stock detection, restock nudges,
+  hide/feature by stock, demand-aware ordering suggestions. (Extends the
+  inventory-management item under Sprint 1 §4.)
+- 🔲 **Qwen self-A/B-tests design.** Aggregate which DSL variants shoppers
+  engage with vs. those never used; Qwen proposes/test new layout additions and
+  keeps winners. _Owner value:_ the store optimizes itself. (Autopilot story.)
+- 🔲 **Pricing/discount autonomy.** "If a discount works, keep/extend it." Qwen
+  proposes promos, measures lift via the existing attribution loop, doubles down
+  on what converts — always inside the interceptor's margin/discount ceilings.
+
+### C. Lifecycle & communications
+- 🔲 **Qwen-drafted customer email.** Personalized from real data when it exists;
+  a sensible default welcome/follow-up when it doesn't. Recommend, re-engage,
+  and send a discount **only when warranted**. _Hard rule:_ **no spamming** —
+  frequency caps + "did the last one work?" gating.
+- 🔲 **Promo-notification timing.** Qwen decides *when* to notify, as the store
+  would — not on a dumb schedule.
+- 🔲 **Notifications surface (in-site + email).** Both merchant- and
+  customer-facing. Merchant urgency cards can "pop from nowhere"; customers get
+  in-store + email notices. Needs a notifications model + delivery path.
+
+### D. Commerce depth
+- 🔲 **Smarter checkout.** Don't ask for a name if the shopper is signed in;
+  ask for the info that's actually useful. _Qwen sees all_ — use what we know.
+- 🔲 **Orders carry location (+ "Transit-tree" core).** Persist location/shipping
+  on orders so Qwen can **group orders by location** and reason about
+  logistics/fulfillment. Foundation for delivery intelligence.
+- 🔜 **Customer → order history.** Link orders to `customer_id` when signed in
+  (today cart is guest `session_id`); show past orders on `/s/{slug}/account`.
+  (Also in `docs/CHAIN.md` NEXT #4.)
+
+### E. Storefront / builder UX & motion
+- 🔲 **Cart affordance: icon, not just "Add".** Replace/augment the "Add" button
+  with a cart icon (consider both). Small, high-frequency polish.
+- 🔲 **Cart presentation variants.** Popup / slide-in from left·right·top·bottom
+  as DSL config, per brand. (Extends Sprint-4 `cart_style`.)
+- 🔲 **Collapsible advanced pickers in the builder.** Basic controls first, then
+  an "advanced" disclosure for power tweaks (cart direction, motion, etc.) — keep
+  the first run simple, let depth be opt-in.
+- 🔲 **Motion as part of the brand.** Subtle, branded animation baked into the
+  DSL *at store creation* (Qwen chooses motion personality like it chooses type).
+  Polish micro-interactions with the `impeccable` design pass. Respect
+  `prefers-reduced-motion`.
+
+### F. Trust, safety & economics
+- 🔲 **Anti-gaming the AI surface.** Guard against shoppers/merchants trying to
+  manipulate Qwen (prompt injection via product text, fake velocity to trigger
+  promos, intent-spam to force capabilities). Rate-limit + validate every
+  Qwen-triggering input. (Extends Sprint 1 §6 abuse item.)
+- 🔲 **Qwen's cut / take-rate accounting.** Track Elevate's economic share per
+  store ("Qwen code stuff to know Qwen's cut") — the revenue model instrumented
+  in code. Needs definition before build (flag as a decision).
