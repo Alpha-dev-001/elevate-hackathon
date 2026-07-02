@@ -5,6 +5,12 @@
 **/.env
 **/.env.local
 **/.env.*.local
+# backups/variants of env files (e.g. .env.bak) — catch stray secrets
+*.env.bak
+**/*.env.bak
+.env.*
+!.env.example
+**/.env.example
 
 # ── Node / Next.js ────────────────────────────────────────────
 node_modules/
@@ -65,7 +71,17 @@ htmlcov/
 # ── Uploads (local dev only) ──────────────────────────────────
 uploads/
 
-# ── Internal build docs — private ────────────────────────────
+# ── Internal build docs — private (NEVER in the public hackathon repo) ──
 CLAUDE.md
 SPRINTS.md
 PRODUCT.md
+UPGRADES.md
+docs/Read.md
+docs/CHAIN.md
+docs/DEMO_SCRIPT.md
+docs/architecture-sprint3.md
+docs/superpowers/
+.impeccable/
+.claude/commands/
+# NOTE: docs/ARCHITECTURE.md, README.md, DEVLOG.md, HACKATHON.md, QWEN_USAGE.md,
+# ALIBABA_DEPLOY.md, OSS_SETUP.md stay PUBLIC — they are submission artifacts.
