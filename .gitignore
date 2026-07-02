@@ -89,3 +89,6 @@ ALIBABA_DEPLOY.md
 OSS_SETUP.md
 # PUBLIC submission artifacts that stay tracked: README.md, DEVLOG.md,
 # docs/ARCHITECTURE.md, QWEN_USAGE.md, LICENSE.
+
+# stray keys / junk
+*.pub
