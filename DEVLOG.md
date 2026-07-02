@@ -685,3 +685,115 @@ placeholders), and `analytics-brain/Dockerfile` (production, no reload, single
 uvicorn worker so the in-process outcome-observer timers + WS manager stay coherent).
 **Next:** push the backend image to ACR and run `s deploy`; record the FC console
 proof; decide frontend host (FC vs Vercel — backend-on-FC already satisfies the rule).
+
+---
+
+### Sprint 4 — The Store Becomes Configurable (DSL-as-Config · RBAC · Point-and-Edit) — 2026-06-29
+
+**Approach:** Sprint 3 made the store *generated*; Sprint 4 made it *governed and
+shared*. The core realization, from staring at live screenshots: the storefront is
+**data** (the LayoutDSL), so autonomy can be shared — Qwen proposes, the merchant
+disposes, and both edit the *same* config surface.
+
+Four things shipped on that idea:
+
+1. **DSL-as-config / shared autonomy.** Behaviours that were hard-coded became DSL
+   fields the merchant can override in the Store Builder: `add_to_cart`
+   (`drawer-only | card-hover | card-always | none`), plus per-store
+   `product_detail` (3 variants) and `cart_style` (2 variants). One store now
+   differs from another on *every* page — not just the grid. A latent bug fell out
+   of this: `_coerce_global` in `layout_dsl.py` was **resetting** these optional
+   fields on every re-save, silently flattening customized stores back to default;
+   `normalize_dsl` must preserve every optional `global_config` field.
+
+2. **RBAC — merchant vs customer.** The JWT now carries a `role`; `decode_token`
+   rejects customer tokens on merchant routes (legacy role-less tokens still
+   accepted). A new `CustomerDB` + `customer_auth.py` gives each store its *own*
+   branded auth at `/s/{slug}/auth/*` (cookie `elevate_customer`), scoped so a
+   customer of one store is 403 on another. Customers never see Elevate chrome —
+   the account page at `/s/{slug}/account` wears the store's brand.
+
+3. **Point-and-edit.** In the Builder preview, sections and nav are clickable; an
+   `EditPopover` offers an instant variant swap (no Qwen) *or* a free-text "ask
+   Qwen." `POST /api/brand/edit-intent/{slug}` sends the intent to qwen-max, which
+   maps it to **one allowed option** — validated through `coerce_variant` and the
+   option lists, never trusting the raw model output. Verified live: "cleaner and
+   more minimal" → Qwen picked `minimal-text` with an explanation.
+
+4. **Self-extending config.** `edit-intent` returns whether the intent was
+   *satisfiable* with existing options. Unmet intents are tracked in
+   `merchants.capability_requests`; on recurrence, Qwen **proposes a brand-new
+   capability** (`GET /api/brand/capabilities/{slug}`), surfaced in the terminal.
+   The config surface grows itself from what merchants keep asking for.
+
+**Qwen calls:** qwen-max for edit-intent (intent → validated DSL option) and for
+capability proposals (recurring unmet intent → new config dimension). No new models.
+
+**Problems / Solutions:** (1) Two pages resolved to `/brand-review` (onboarding
+route-group + the new Builder) → a whole-app Next build error; moved the Builder to
+`/builder`. (2) The Builder preview let a storefront `position:fixed` sidebar nav
+escape and cover the controls — contained it with a `translateZ(0)` stacking
+context. (3) Attribution silently read zero because orders were tagged with the
+promo *label*, not the promo *id* — every AI-driven sale looked like "no
+conversion," poisoning the memory loop; fixed to match on `promo_id`.
+
+**Edge cases tested:** customer→merchant route (401), cross-store customer (403),
+role-less legacy token (accepted), edit-intent with an unmappable request
+(→ tracked, not forced into a wrong option). 69 frontend + 41 backend unit tests green.
+
+**Next:** harden the demo path and deploy to Alibaba Function Compute.
+
+---
+
+### Demo Hardening — Dead-Image Resilience and the $0 Attribution Money-Shot — 2026-07-03
+
+**Approach:** With the product feature-complete, this pass was pure demo-day
+paranoia: walk the exact 3-minute flow and try to break it before a judge does.
+Two real failures surfaced — one cosmetic, one that gutted the closing beat.
+
+**1 — Dead product images (cosmetic, but everywhere).** ~12–19% of the seed
+catalog's Unsplash URLs had rotted (Haree 11/91, Crest ~19%), and **none of the
+seven DSL card variants had a fallback** — a 404 rendered the browser's
+broken-image glyph. A grid speckled with broken tiles reads as "the whole thing is
+broken." Fix: one reusable `ProductImage` component with an on-brand fallback
+(surface tint + the product's initial in the store's display font/accent), wired
+into all six cards, the four grids, the full-bleed hero (which hides gracefully),
+and the cart. Any dead URL — current, future rot, or a merchant's pasted link —
+now degrades to a tile that looks *intentional*. Products with no image get the
+same treatment.
+
+**2 — The attribution dashboard showed $0 (the real bug).** The whole pitch builds
+to "*this AI action drove $X — Elevate's fee $Y.*" Driving the loop live revealed
+it read **zero** on the default demo path. Root cause was a two-part trap: the
+demo's only "simulate activity" scenario is a cart-abandon surge, which naturally
+makes Qwen answer with a `recovery_offer` — but `_execute_payload` only created a
+promo for `flash_sale`/`layout_morph`. `recovery_offer` (and `scarcity_price`) were
+"logged, not applied," so no promo entered live state, checkout stamped no
+`promo_applied`, and the dashboard attributed nothing. The presenter would click
+the one button the script calls for, approve, sell — and land on an empty number.
+
+Fix: `_register_promo` now makes **every revenue action attributable** — a
+`recovery_offer` registers a real "welcome back" promo (Qwen's payload discount if
+present, else 10%), so `best_active_promo` matches at checkout and the loop closes.
+Added a `velocity_spike` simulate scenario too, so there's a `flash_sale` demo path
+as well as the recovery one.
+
+**Qwen calls:** none new — this hardens the execution and rendering around the
+existing chain.
+
+**Verification:** driven end-to-end live on Haree — abandon surge → `recovery_offer`
+card → approve → checkout $56.25 with `promo_applied` set → dashboard **attributed
+$56.25, fee $5.62** (was $0). 44 frontend + 43 backend unit tests green; `tsc` clean.
+
+**Also this pass:** a rendered architecture diagram (`docs/ARCHITECTURE.md`, Mermaid)
+covering the two-model Qwen loop, the WebSocket pipeline, the three-layer
+interceptor, and the Alibaba data layer; and a repo-hygiene sweep so the public repo
+carries only judge-facing docs.
+
+**Lesson recorded:** the happy path is not the interesting path. The attribution bug
+never showed up in unit tests — every layer worked in isolation; it only appeared
+when the *whole* loop ran with the action type the demo actually produces. Some
+failures live only in the seams.
+
+**Next:** record the 3-minute demo, deploy the backend to Alibaba Function Compute
+(the eligibility gate), and capture the deployment proof.
