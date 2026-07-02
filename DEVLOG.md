@@ -34,6 +34,12 @@ Each layer has different severity and different source of authority.
 
 **Next:** Sprint 1 — merchant auth → logo upload → brand generation → live store
 
+> _Editor's note (added later): the model roster above was the initial plan and
+> was deliberately consolidated to **two** — `qwen-vl-max` (vision/logo) and
+> `qwen-max` (brand, layout, CSS, descriptions, decisions). Four models meant four
+> routers and four failure modes; two won on simplicity and quality. The current,
+> accurate model usage is documented in `QWEN_USAGE.md` and the Sprint 3 entry below._
+
 ---
 
 ### Repo Restructure + Dead Code Cleanup — June 10, 2026
