@@ -2,6 +2,7 @@
 import type { SectionProps } from '@/lib/dslRegistry'
 import { CARD_REGISTRY } from '@/lib/dslRegistry'
 import { CardAddToCart } from '@/components/storefront/cards/CardAddToCart'
+import { ProductImage } from '@/components/storefront/ProductImage'
 
 export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct, onAddToCart, preview }: SectionProps) {
   const Card = CARD_REGISTRY[globalConfig.product_card]
@@ -14,7 +15,7 @@ export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct, onA
         <button data-product onClick={() => onOpenProduct?.(first.id)}
                 className="relative block w-full aspect-[3/4] overflow-hidden text-left"
                 style={{ background: 'var(--s-surface)' }}>
-          {first.image_url && <img src={first.image_url} alt={first.name} className="w-full h-full object-cover" />}
+          <ProductImage src={first.image_url} alt={first.name} initial={first.name} className="w-full h-full object-cover" />
           <span className="absolute bottom-3 left-3 font-medium" style={{ color: 'var(--s-text)' }}>
             {first.name} · ${first.price}
           </span>

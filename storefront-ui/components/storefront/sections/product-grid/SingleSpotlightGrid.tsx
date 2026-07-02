@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import type { SectionProps } from '@/lib/dslRegistry'
+import { ProductImage } from '@/components/storefront/ProductImage'
 
 export function SingleSpotlightGrid({ store, onOpenProduct }: SectionProps) {
   const [idx, setIdx] = useState(0)
@@ -12,7 +13,7 @@ export function SingleSpotlightGrid({ store, onOpenProduct }: SectionProps) {
     <section data-grid="single-spotlight" className="px-4 md:px-8 py-16 grid md:grid-cols-2 gap-8 items-center">
       <button data-product onClick={() => onOpenProduct?.(p.id)}
               className="block w-full aspect-[4/5] overflow-hidden" style={{ background: c.surface }}>
-        {p.image_url && <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />}
+        <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
       </button>
       <div className="flex flex-col gap-4" style={{ color: c.text }}>
         <h3 className="text-3xl font-bold" style={{ fontFamily: 'var(--s-display)' }}>{p.name}</h3>

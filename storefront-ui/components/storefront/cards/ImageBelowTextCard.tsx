@@ -1,6 +1,7 @@
 'use client'
 import type { CardProps } from '@/lib/dslRegistry'
 import { RADIUS } from './radius'
+import { ProductImage } from '@/components/storefront/ProductImage'
 
 export function ImageBelowTextCard({ product, cornerRadius, onOpen }: CardProps) {
   return (
@@ -16,7 +17,7 @@ export function ImageBelowTextCard({ product, cornerRadius, onOpen }: CardProps)
       </span>
       <span className="block text-xs mb-2" style={{ color: 'var(--s-accent)' }}>${product.price}</span>
       <div className="w-full aspect-[3/4] overflow-hidden" style={{ borderRadius: RADIUS[cornerRadius], background: 'var(--s-surface)' }}>
-        {product.image_url && <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />}
+        <ProductImage src={product.image_url} alt={product.name} initial={product.name} className="w-full h-full object-cover" />
       </div>
     </button>
   )

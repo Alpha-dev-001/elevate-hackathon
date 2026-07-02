@@ -1,9 +1,11 @@
 'use client'
+import { useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import type { SectionProps } from '@/lib/dslRegistry'
 
 export function FullBleedImageHero({ store }: SectionProps) {
   const reduced = useReducedMotion()
+  const [imgFailed, setImgFailed] = useState(false)
   const c = store.brand_token!.colors
   const featured = store.products.find((p) => p.image_url) ?? store.products[0]
   return (
@@ -12,12 +14,13 @@ export function FullBleedImageHero({ store }: SectionProps) {
       className="relative w-full h-[58vh] md:h-[78vh] overflow-hidden flex items-end"
       style={{ background: c.background }}
     >
-      {featured?.image_url && (
+      {featured?.image_url && !imgFailed && (
         <img
           src={featured.image_url}
           alt=""
           aria-hidden
           className="absolute inset-0 w-full h-full object-cover"
+          onError={() => setImgFailed(true)}
         />
       )}
       {/* Bottom-anchored scrim so the wordmark always reads, never clipped. */}

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
 import { useCart, getSessionId } from '@/lib/cart'
+import { ProductImage } from '@/components/storefront/ProductImage'
 import type { Order } from '@/types/schemas'
 
 /**
@@ -109,12 +110,7 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                           className="w-14 h-14 rounded-md shrink-0 flex items-center justify-center overflow-hidden"
                           style={{ background: 'color-mix(in srgb, var(--s-primary) 16%, var(--s-bg))' }}
                         >
-                          {it.image_url ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={it.image_url} alt={it.name} className="w-full h-full object-cover" />
-                          ) : (
-                            <span style={{ color: 'var(--s-accent)' }}>{it.name.slice(0, 1).toUpperCase()}</span>
-                          )}
+                          <ProductImage src={it.image_url} alt={it.name} initial={it.name} className="w-full h-full object-cover" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate">{it.name}</p>

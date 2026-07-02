@@ -2,6 +2,7 @@
 import type { SectionProps } from '@/lib/dslRegistry'
 import { CARD_REGISTRY } from '@/lib/dslRegistry'
 import { CardAddToCart } from '@/components/storefront/cards/CardAddToCart'
+import { ProductImage } from '@/components/storefront/ProductImage'
 
 export function HorizontalScrollGrid({ store, slug, globalConfig, onOpenProduct, onAddToCart, preview }: SectionProps) {
   const Card = CARD_REGISTRY[globalConfig.product_card]
@@ -18,7 +19,7 @@ export function HorizontalScrollGrid({ store, slug, globalConfig, onOpenProduct,
             ) : (
               <button data-product onClick={() => onOpenProduct?.(p.id)}
                       className="block w-full aspect-[3/4] text-left" style={{ background: 'var(--s-surface)' }}>
-                {p.image_url && <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />}
+                <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
                 <span className="block p-2 text-sm" style={{ color: 'var(--s-text)' }}>{p.name} · ${p.price}</span>
               </button>
             )}
