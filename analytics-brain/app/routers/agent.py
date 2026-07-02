@@ -127,35 +127,72 @@ async def dismiss_action(action_id: str, db: AsyncSession = Depends(get_db)):
     return {"action": _to_schema(row).model_dump()}
 
 
-async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
-    """Apply the action's payload to the live store state."""
+# Every revenue-driving action registers a real, attributable promo so the
+# dashboard can measure what the AI actually drove. Without this, an approved
+# recovery_offer/scarcity_price creates no promo → orders can't attribute →
+# the "this action drove $X" loop reads $0. Defaults per type; Qwen's payload
+# overrides the discount when it supplies one.
+_PROMO_ACTIONS = {
+    "flash_sale":     {"discount": 15, "label": "Flash Sale — {d}% off"},
+    "recovery_offer": {"discount": 10, "label": "Welcome back — {d}% off"},
+    "scarcity_price": {"discount": 10, "label": "Limited time — {d}% off"},
+}
+
+
+async def _register_promo(row: AgentActionDB, cfg: dict, payload: dict, db: AsyncSession) -> None:
+    """Create an attributable Promo in live state for a revenue action.
+
+    Targets the first product (matches the demo's abandoned-product scenario and
+    what best_active_promo needs — a product-matched promo with discount > 0).
+    Best-effort: products already live in Postgres, so a missing state can't lose
+    the approval; it just means no promo was applied.
+    """
     from app.services import delta as delta_svc
     from app.models.schemas import Promo
 
+    state = await delta_svc.load_state(row.merchant_id)
+    if not state:
+        logger.warning(
+            "[agent] %s: state not found for merchant %s — promo not applied",
+            row.action_type, row.merchant_id,
+        )
+        return
+
+    # Qwen may supply its own discount; otherwise use the per-type default.
+    try:
+        discount = float(payload.get("discount_percent") or cfg["discount"])
+    except (TypeError, ValueError):
+        discount = float(cfg["discount"])
+    discount = max(1.0, min(90.0, discount))  # keep it real + attributable (>0)
+
+    try:
+        duration = int(payload.get("duration_minutes") or 30)
+    except (TypeError, ValueError):
+        duration = 30
+    expires_at = int(time.time() * 1000) + duration * 60 * 1000
+
+    promo = Promo(
+        id=row.promo_id,
+        product_id=list(state.products.keys())[0] if state.products else "all",
+        discount_percent=discount,
+        label=cfg["label"].format(d=int(discount)),
+        expires_at=expires_at,
+        triggered_by="auto",
+    )
+    state.active_promos[row.promo_id] = promo
+    await delta_svc.save_state(row.merchant_id, state)
+    logger.info("[agent] %s registered promo %s (%d%%)", row.action_type, row.promo_id, int(discount))
+
+
+async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
+    """Apply the action's payload to the live store state."""
+    from app.services import delta as delta_svc
+
     payload = row.payload or {}
 
-    if row.action_type == "flash_sale":
-        discount = float(payload.get("discount_percent", 15))
-        duration = int(payload.get("duration_minutes", 30))
-        expires_at = int(time.time() * 1000) + duration * 60 * 1000
-
-        state = await delta_svc.load_state(row.merchant_id)
-        if not state:
-            logger.warning(
-                "[agent] flash_sale: state not found for merchant %s — promo not applied",
-                row.merchant_id,
-            )
-        else:
-            promo = Promo(
-                id=row.promo_id,
-                product_id=list(state.products.keys())[0] if state.products else "all",
-                discount_percent=discount,
-                label=f"Flash Sale — {int(discount)}% off",
-                expires_at=expires_at,
-                triggered_by="auto",
-            )
-            state.active_promos[row.promo_id] = promo
-            await delta_svc.save_state(row.merchant_id, state)
+    cfg = _PROMO_ACTIONS.get(row.action_type)
+    if cfg:
+        await _register_promo(row, cfg, payload, db)
 
     elif row.action_type == "layout_morph":
         state = await delta_svc.load_state(row.merchant_id)
@@ -169,7 +206,7 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
                     pass
             await delta_svc.save_state(row.merchant_id, state)
 
-    # recovery_offer, scarcity_price, copy_rewrite — log for now, extend post-hackathon
+    # copy_rewrite and any unknown type — not a promo/layout action; log only.
     else:
         logger.info(f"[agent] action type {row.action_type} logged but not auto-applied")
 

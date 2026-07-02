@@ -74,7 +74,9 @@ async def ingest_event(
 
 # ─── Simulation ───────────────────────────────────────────────────────────────
 
-DEMO_SCENARIO = [
+# Two demo scenarios so the presenter can show either recovery (abandon surge)
+# or a flash sale (velocity spike). Both cross a deterministic anomaly threshold.
+ABANDON_SCENARIO = [
     {"event_type": "view",        "product_id": "__first__", "delay": 0.0},
     {"event_type": "view",        "product_id": "__first__", "delay": 0.3},
     {"event_type": "add_to_cart", "product_id": "__first__", "delay": 0.6},
@@ -87,16 +89,31 @@ DEMO_SCENARIO = [
     {"event_type": "view",        "product_id": "__first__", "delay": 2.7},
 ]
 
+# Velocity spike: >= ANOMALY_THRESHOLD*4 (default 20) views in the window →
+# "products going viral" → Qwen leans toward a flash_sale.
+VELOCITY_SCENARIO = [
+    {"event_type": "view", "product_id": "__first__", "delay": round(i * 0.1, 2)}
+    for i in range(24)
+]
+
+SCENARIOS = {
+    "cart_abandon_surge": ABANDON_SCENARIO,
+    "velocity_spike": VELOCITY_SCENARIO,
+}
+
 
 @router.post("/simulate/{slug}")
 async def simulate_activity(
     slug: str,
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    scenario: str = "cart_abandon_surge",
 ):
-    """Fire a pre-scripted event sequence that crosses the abandon anomaly threshold.
+    """Fire a pre-scripted event sequence that crosses an anomaly threshold.
     Used by the merchant terminal 'Simulate customer activity' button for the demo.
+    scenario=cart_abandon_surge (recovery) | velocity_spike (flash sale).
     """
+    DEMO_SCENARIO = SCENARIOS.get(scenario, ABANDON_SCENARIO)
     merchant = await db.scalar(select(MerchantDB).where(MerchantDB.slug == slug))
     if not merchant:
         raise HTTPException(status_code=404, detail="Store not found")
@@ -132,4 +149,4 @@ async def simulate_activity(
                 await run_decision_cycle(merchant_id, desc, session, redis)
 
     background.add_task(_run_scenario)
-    return {"ok": True, "scenario": "cart_abandon_surge", "events": len(DEMO_SCENARIO)}
+    return {"ok": True, "scenario": scenario, "events": len(DEMO_SCENARIO)}
