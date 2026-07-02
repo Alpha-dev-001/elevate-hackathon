@@ -83,5 +83,9 @@ docs/architecture-sprint3.md
 docs/superpowers/
 .impeccable/
 .claude/commands/
-# NOTE: docs/ARCHITECTURE.md, README.md, DEVLOG.md, HACKATHON.md, QWEN_USAGE.md,
-# ALIBABA_DEPLOY.md, OSS_SETUP.md stay PUBLIC — they are submission artifacts.
+# Internal build guide + operational setup runbooks — not judge-facing.
+HACKATHON.md
+ALIBABA_DEPLOY.md
+OSS_SETUP.md
+# PUBLIC submission artifacts that stay tracked: README.md, DEVLOG.md,
+# docs/ARCHITECTURE.md, QWEN_USAGE.md, LICENSE.
