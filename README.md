@@ -31,6 +31,15 @@ Just your store working with you.
 
 ---
 
+## Architecture
+
+See **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** for the full system design —
+the two-model Qwen cognitive loop (logo → brand → layout → live decisions →
+memory), the realtime WebSocket pipeline, the three-layer interceptor, and the
+Alibaba Cloud data layer. Diagrams render inline on GitHub.
+
+---
+
 ## Getting Started
 
 ```bash
