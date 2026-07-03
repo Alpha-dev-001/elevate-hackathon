@@ -26,8 +26,8 @@ Just your store working with you.
 | Frontend | Next.js 15, TypeScript, Tailwind, Framer Motion |
 | Backend | FastAPI, Python 3.10, Pydantic v2 |
 | AI | Qwen Cloud |
-| Infrastructure | Alibaba Cloud Function Compute, Redis, RDS, OSS |
-| Deploy | Serverless Devs |
+| Infrastructure | Alibaba Cloud ECS (containerized backend), OSS (assets) |
+| Deploy | Docker Compose on Alibaba Cloud ECS |
 
 ---
 

@@ -23,12 +23,12 @@ flowchart TB
         S["Storefront /s/{slug}<br/>(shopper — wears the brand)"]
     end
 
-    subgraph FE["Frontend — Next.js 15 (Function Compute)"]
+    subgraph FE["Frontend — Next.js 15"]
         UI["App Router · Zustand · Framer Motion<br/>DSLRenderer + section/card/nav registries"]
         WS["WebSocket client (lib/ws.ts)"]
     end
 
-    subgraph BE["Backend — FastAPI (Function Compute)"]
+    subgraph BE["Backend — FastAPI · Alibaba Cloud ECS (Docker)"]
         API["REST: onboarding · products · brand DSL · orders"]
         WSM["WebSocket manager<br/>(the realtime nervous system — zero polling)"]
         ICPT["Subconscious Interceptor<br/>3 layers · immutable · Qwen cannot override"]
@@ -42,8 +42,8 @@ flowchart TB
 
     subgraph DATA["Alibaba Cloud data layer"]
         OSS[("OSS<br/>logos · SVG icons")]
-        RDS[("RDS Postgres<br/>source of truth")]
-        TAIR[("Tair / Redis<br/>fast operational layer")]
+        RDS[("PostgreSQL<br/>source of truth")]
+        TAIR[("Redis<br/>fast operational layer")]
     end
 
     M <--> UI
@@ -68,6 +68,12 @@ flowchart TB
 - FastAPI never touches file bytes — the browser uploads logos straight to OSS
   via a short-lived STS token (serverless functions must not stream binaries).
 - Redis is never the only copy of anything important; Postgres is the truth.
+
+**Deployment:** the backend runs on **Alibaba Cloud ECS** — a single instance
+running the FastAPI service, PostgreSQL, and Redis as Docker containers — with
+**Alibaba OSS** for logo/asset storage (`analytics-brain/app/routers/upload.py`
+uses the `oss2` SDK) and **Qwen Cloud** for all model calls. The frontend can be
+hosted anywhere (only the backend must run on Alibaba per the hackathon rules).
 
 ---
 
