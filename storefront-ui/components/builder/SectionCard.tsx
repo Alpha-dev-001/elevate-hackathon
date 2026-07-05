@@ -24,9 +24,10 @@ export function SectionCard({ section, index }: { section: LayoutSection; index:
         data-testid="variant-select"
         value={section.variant}
         onChange={(e) => updateSection(index, { variant: e.target.value })}
-        className="flex-1 text-sm bg-transparent border border-neutral-700 rounded px-2 py-1"
+        className="flex-1 text-sm border border-neutral-700 rounded px-2 py-1"
+        style={{ background: '#16181D', color: '#e5e5e5' }}
       >
-        {variants.map((v) => <option key={v} value={v}>{v}</option>)}
+        {variants.map((v) => <option key={v} value={v} style={{ background: '#16181D', color: '#fff' }}>{v}</option>)}
       </select>
       <button aria-label="Remove section" onClick={() => removeSection(index)} className="px-2 text-neutral-400 hover:text-red-400">×</button>
     </div>

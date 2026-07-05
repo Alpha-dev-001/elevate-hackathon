@@ -281,10 +281,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  simulateActivity: (slug: string) =>
-    req<{ ok: boolean; scenario: string; events: number }>(`/api/behavior/simulate/${enc(slug)}`, {
-      method: 'POST',
-    }),
+  simulateActivity: (slug: string, scenario?: string) =>
+    req<{ ok: boolean; scenario: string; events: number }>(
+      `/api/behavior/simulate/${enc(slug)}${scenario ? `?scenario=${enc(scenario)}` : ''}`,
+      { method: 'POST' },
+    ),
 
   // ── Agent actions ────────────────────────────────────────────────────────
   getPendingActions: (slug: string) =>

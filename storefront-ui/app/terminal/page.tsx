@@ -137,17 +137,34 @@ export default function TerminalPage() {
     setPendingActions((prev) => prev.filter((a) => a.id !== id))
   }, [])
 
-  const handleSimulate = useCallback(async () => {
-    if (!merchant || simulateState !== 'idle') return
-    setSimulateState('sending')
-    try {
-      await api.simulateActivity(merchant.slug)
-    } catch {
-      // show done regardless — the scenario may have been queued server-side
+  const handleSimulate = useCallback(
+    async (scenario: 'cart_abandon_surge' | 'velocity_spike') => {
+      if (!merchant || simulateState !== 'idle') return
+      setSimulateState('sending')
+      try {
+        await api.simulateActivity(merchant.slug, scenario)
+      } catch {
+        // the scenario may still be queued server-side — keep waiting for the decision
+      }
+      // Stay in 'sending' until a new decision card arrives (effect below). Safety
+      // timeout so the button never gets stuck if no anomaly ends up firing.
+      window.setTimeout(() => {
+        setSimulateState((s) => (s === 'sending' ? 'idle' : s))
+      }, 30000)
+    },
+    [merchant, simulateState],
+  )
+
+  // Flip 'sending' → 'done' the moment Qwen's decision card actually lands, so
+  // the merchant sees the loop resolve instead of a button that seems to do nothing.
+  const prevActionCount = useRef(0)
+  useEffect(() => {
+    if (simulateState === 'sending' && pendingActions.length > prevActionCount.current) {
+      setSimulateState('done')
+      window.setTimeout(() => setSimulateState('idle'), 4000)
     }
-    setSimulateState('done')
-    setTimeout(() => setSimulateState('idle'), 3000)
-  }, [merchant, simulateState])
+    prevActionCount.current = pendingActions.length
+  }, [pendingActions.length, simulateState])
 
   // ── Render ─────────────────────────────────────────────────────────────────
 

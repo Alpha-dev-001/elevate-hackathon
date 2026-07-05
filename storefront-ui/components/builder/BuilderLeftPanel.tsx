@@ -92,7 +92,12 @@ export function BuilderLeftPanel({
       </button>
 
       <footer className="mt-auto flex flex-col gap-2 pt-4">
-        {isDirty && <button onClick={reset} className="text-xs text-neutral-400">Reset to Qwen&apos;s recommendation</button>}
+        {isDirty && (
+          <button onClick={reset}
+                  className="w-full py-2 rounded-lg text-xs font-medium border border-neutral-600 text-neutral-200 transition-colors hover:border-emerald-400 hover:text-emerald-400">
+            ↺ Restore Qwen&apos;s original
+          </button>
+        )}
         <button onClick={onPublish} disabled={publishing}
                 className="w-full py-2.5 rounded-lg font-medium disabled:opacity-50"
                 style={{ background: 'var(--color-accent,#6EE7B7)', color: '#0A0A0B' }}>
@@ -117,9 +122,10 @@ function ConfigSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="text-xs bg-transparent border border-neutral-700 rounded px-2 py-1 max-w-[60%]"
+        className="text-xs border border-neutral-700 rounded px-2 py-1 max-w-[60%]"
+        style={{ background: '#16181D', color: '#e5e5e5' }}
       >
-        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+        {options.map((o) => <option key={o} value={o} style={{ background: '#16181D', color: '#fff' }}>{o}</option>)}
       </select>
     </label>
   )

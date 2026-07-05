@@ -20,10 +20,12 @@ function useReducedMotion() {
   return reduced
 }
 
+type Scenario = 'cart_abandon_surge' | 'velocity_spike'
+
 interface StoreSnapshotProps {
   merchant: Merchant
   slug: string
-  onSimulate: () => void
+  onSimulate: (scenario: Scenario) => void
   simulateState: 'idle' | 'sending' | 'done'
 }
 
@@ -82,37 +84,52 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: Sto
         </div>
       </div>
 
-      {/* Simulate Activity button — the demo's money button */}
-      <motion.button
-        onClick={onSimulate}
-        disabled={simulateState !== 'idle'}
-        whileTap={{ scale: simulateState === 'idle' ? 0.97 : 1 }}
-        transition={{ duration: 0.15 }}
-        className="w-full py-3 rounded-xl text-sm font-semibold font-mono cursor-pointer disabled:cursor-not-allowed"
-        style={{
-          border: `2px solid ${simulateState === 'done' ? '#4ade80' : 'var(--color-accent)'}`,
-          color:
-            simulateState === 'idle'
-              ? 'var(--color-accent)'
-              : simulateState === 'sending'
-              ? 'var(--color-text-muted)'
-              : '#4ade80',
-          background:
-            simulateState === 'idle'
-              ? 'transparent'
-              : 'var(--color-surface-2)',
-          transition: 'color 0.2s, border-color 0.2s, background 0.2s',
-        }}
-      >
-        {simulateState === 'idle' && '▶ Simulate Activity'}
-        {simulateState === 'sending' && (
-          <span className="flex items-center justify-center gap-2">
-            <SpinnerIcon prefersReduced={prefersReduced} />
-            Sending events…
-          </span>
+      {/* Simulate Activity — the demo's money button. Two scenarios so Qwen
+          produces different decision types (abandon → recovery, spike → sale). */}
+      <div className="flex flex-col gap-2">
+        <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--color-text-muted)', letterSpacing: '0.1em' }}>
+          Simulate customer activity
+        </span>
+
+        {simulateState !== 'idle' ? (
+          <div
+            className="w-full py-3 rounded-xl text-sm font-semibold font-mono flex items-center justify-center gap-2"
+            style={{
+              border: `2px solid ${simulateState === 'done' ? '#4ade80' : 'var(--color-accent)'}`,
+              color: simulateState === 'done' ? '#4ade80' : 'var(--color-accent)',
+              background: 'var(--color-surface-2)',
+            }}
+          >
+            {simulateState === 'sending' ? (
+              <>
+                <SpinnerIcon prefersReduced={prefersReduced} />
+                ✦ Qwen is analyzing… (~15s)
+              </>
+            ) : (
+              '✓ Decision ready — see the feed'
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2">
+            <motion.button
+              onClick={() => onSimulate('cart_abandon_surge')}
+              whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
+              style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
+            >
+              🛒 Cart-abandon surge
+            </motion.button>
+            <motion.button
+              onClick={() => onSimulate('velocity_spike')}
+              whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
+              style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
+            >
+              📈 Traffic spike
+            </motion.button>
+          </div>
         )}
-        {simulateState === 'done' && '✓ Done'}
-      </motion.button>
+      </div>
 
       {/* View live store */}
       <Link
