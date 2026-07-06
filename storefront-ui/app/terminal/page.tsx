@@ -232,6 +232,13 @@ export default function TerminalPage() {
           >
             View store ↗
           </a>
+          <a
+            href="/logout"
+            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+          >
+            Sign out
+          </a>
           <span className="w-2 h-2 rounded-full" style={{ background: wsColor }} />
           <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
             {wsStatus}
