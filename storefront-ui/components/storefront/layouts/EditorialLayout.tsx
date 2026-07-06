@@ -48,6 +48,7 @@ export function EditorialLayout({
         storeName={store.store_name}
         tagline={store.tagline}
         logoMark={store.icons.logo_mark}
+        logoUrl={store.logo_url}
       />
 
       {/* Thin rule separator */}

@@ -2,6 +2,7 @@
 
 import { motion, useReducedMotion } from 'framer-motion'
 import type { BrandToken } from '@/types/schemas'
+import { BrandLogo } from '@/components/storefront/BrandLogo'
 
 interface HeroSectionProps {
   brandToken: BrandToken
@@ -9,6 +10,8 @@ interface HeroSectionProps {
   tagline: string
   /** SVG string — the store's logo mark. May be empty. */
   logoMark: string
+  /** Merchant's real uploaded logo; falls back to logoMark when empty. */
+  logoUrl?: string
 }
 
 /**
@@ -18,7 +21,7 @@ interface HeroSectionProps {
  *   split        — text left / logo right (dual emphasis)
  *   texture-bg   — radial gradient, logo centered, warm feel (warm-craft)
  */
-export function HeroSection({ brandToken, storeName, tagline, logoMark }: HeroSectionProps) {
+export function HeroSection({ brandToken, storeName, tagline, logoMark, logoUrl }: HeroSectionProps) {
   const prefersReduced = useReducedMotion()
   const { layout, colors, typography } = brandToken
   const fade = {
@@ -40,14 +43,12 @@ export function HeroSection({ brandToken, storeName, tagline, logoMark }: HeroSe
           background: `linear-gradient(160deg, ${colors.primary}22 0%, ${colors.background} 60%)`,
         }}
       >
-        {logoMark && (
-          <div
-            className="w-20 h-20 mb-6 [&>svg]:w-full [&>svg]:h-full"
-            role="img"
-            aria-label={`${storeName} logo`}
-            dangerouslySetInnerHTML={{ __html: logoMark }}
-          />
-        )}
+        <BrandLogo
+          logoUrl={logoUrl}
+          logoMark={logoMark}
+          storeName={storeName}
+          className="w-20 h-20 mb-6"
+        />
         <h1
           className="text-5xl md:text-7xl font-bold tracking-tight mb-4 [text-wrap:balance] max-w-3xl"
           style={displayStyle}

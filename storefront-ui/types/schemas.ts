@@ -294,6 +294,7 @@ export const PublicProductSchema = z.object({
 export const PublicStoreSchema = z.object({
   store_name: z.string(),
   slug: z.string(),
+  logo_url: z.string().default(''),   // real uploaded logo; '' → generated SVG mark
   tagline: z.string(),
   palette: BrandPaletteSchema,
   typography: BrandTypographySchema,

@@ -21,6 +21,7 @@ export const fixtureDSL: LayoutDSL = {
 export const fixtureStore: PublicStore = {
   store_name: 'Haree',
   slug: 'haree',
+  logo_url: '',
   tagline: 'Quiet luxury',
   palette: { primary: '#0A0A0B', secondary: '#222', accent: '#6EE7B7', background: '#0A0A0B', text: '#fff' },
   typography: { display_font: 'Syne', body_font: 'Inter' },

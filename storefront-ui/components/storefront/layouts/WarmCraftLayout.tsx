@@ -3,6 +3,7 @@
 import type { PublicProduct, PublicStore } from '@/types/schemas'
 import { CategoryNav } from '@/components/store/CategoryNav'
 import { ProductGrid } from '@/components/storefront/ProductGrid'
+import { BrandLogo } from '@/components/storefront/BrandLogo'
 
 /**
  * Warm Craft — artisan, handmade, warm-and-inviting layout.
@@ -59,14 +60,12 @@ export function WarmCraftLayout({
         />
 
         <div className="relative z-10">
-          {store.icons.logo_mark && (
-            <div
-              className="w-24 h-24 mx-auto mb-6 [&>svg]:w-full [&>svg]:h-full"
-              role="img"
-              aria-label={`${store.store_name} logo`}
-              dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }}
-            />
-          )}
+          <BrandLogo
+            logoUrl={store.logo_url}
+            logoMark={store.icons.logo_mark}
+            storeName={store.store_name}
+            className="w-24 h-24 mx-auto mb-6"
+          />
           <h1
             className="text-4xl md:text-6xl font-bold mb-3 [text-wrap:balance] max-w-xl mx-auto"
             style={{

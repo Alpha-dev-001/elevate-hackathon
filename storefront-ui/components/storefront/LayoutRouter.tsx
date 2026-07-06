@@ -10,6 +10,7 @@ import { BoldGridLayout } from './layouts/BoldGridLayout'
 import { MinimalDarkLayout } from './layouts/MinimalDarkLayout'
 import { WarmCraftLayout } from './layouts/WarmCraftLayout'
 import { ProductGrid } from './ProductGrid'
+import { BrandLogo } from './BrandLogo'
 import { Cart } from './Cart'
 import { useCart } from '@/lib/cart'
 import { readableOn } from '@/lib/color'
@@ -154,11 +155,11 @@ export function LayoutRouter({ store, slug }: { store: PublicStore; slug: string
           transition={{ duration: prefersReduced ? 0 : 0.5, ease: [0.4, 0, 0.2, 1] }}
           className="flex flex-col items-center text-center gap-3 mb-12"
         >
-          <div
-            className="w-16 h-16 [&>svg]:w-full [&>svg]:h-full"
-            role="img"
-            aria-label={`${store.store_name} logo`}
-            dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }}
+          <BrandLogo
+            logoUrl={store.logo_url}
+            logoMark={store.icons.logo_mark}
+            storeName={store.store_name}
+            className="w-16 h-16"
           />
           <h1
             className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight break-words max-w-2xl [text-wrap:balance]"

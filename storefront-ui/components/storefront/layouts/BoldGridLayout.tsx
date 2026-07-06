@@ -3,6 +3,7 @@
 import type { PublicProduct, PublicStore } from '@/types/schemas'
 import { CategoryNav } from '@/components/store/CategoryNav'
 import { ProductGrid } from '@/components/storefront/ProductGrid'
+import { BrandLogo } from '@/components/storefront/BrandLogo'
 
 /**
  * Bold Grid — high-energy, grid-first layout. No hero section.
@@ -50,13 +51,13 @@ export function BoldGridLayout({
       >
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex items-center gap-4">
-            {store.icons.logo_mark && (
-              <div
-                className="w-8 h-8 shrink-0 [&>svg]:w-full [&>svg]:h-full"
-                aria-hidden="true"
-                dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }}
-              />
-            )}
+            <BrandLogo
+              decorative
+              logoUrl={store.logo_url}
+              logoMark={store.icons.logo_mark}
+              storeName={store.store_name}
+              className="w-8 h-8 shrink-0"
+            />
             <h1
               className="text-xl font-black uppercase tracking-tighter leading-none"
               style={{

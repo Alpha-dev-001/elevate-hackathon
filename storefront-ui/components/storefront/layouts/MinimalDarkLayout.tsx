@@ -3,6 +3,7 @@
 import type { PublicProduct, PublicStore } from '@/types/schemas'
 import { CategoryNav } from '@/components/store/CategoryNav'
 import { ProductGrid } from '@/components/storefront/ProductGrid'
+import { BrandLogo } from '@/components/storefront/BrandLogo'
 
 /**
  * Minimal Dark — quiet, refined, whitespace-forward layout.
@@ -65,13 +66,13 @@ export function MinimalDarkLayout({
         style={{ borderBottom: `1px solid ${MD_TEXT}18` }}
       >
         <div className="flex items-center gap-3">
-          {store.icons.logo_mark && (
-            <div
-              className="w-5 h-5 [&>svg]:w-full [&>svg]:h-full opacity-60"
-              aria-hidden="true"
-              dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }}
-            />
-          )}
+          <BrandLogo
+            decorative
+            logoUrl={store.logo_url}
+            logoMark={store.icons.logo_mark}
+            storeName={store.store_name}
+            className="w-5 h-5 opacity-60"
+          />
           <span
             className="text-[11px] font-mono uppercase tracking-[0.3em]"
             style={{ color: MD_MUTED }}
