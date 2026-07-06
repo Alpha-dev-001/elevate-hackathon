@@ -919,3 +919,33 @@ ticking — with the top banner appearing and the catalog behind it still at ful
 
 **Next:** per-customer targeting (only the abandoning session's cart), and letting
 Qwen choose the recovery depth within a guarded band instead of a fixed default.
+
+
+### Grounded revenue estimate + live attribution on the terminal — 2026-07-06
+
+**Approach:** Two demo-credibility fixes surfaced in review.
+
+1. **The "Est. Revenue Impact" was a Qwen hallucination.** It came straight from
+   Qwen's `estimated_gmv`, which swung $760 → $175 → $285 for the *same* "5
+   abandons in 30s" trigger — an unexplained, unstable number. It's now grounded:
+   `anomaly_count × average catalog price × a per-type rate` (config-tunable). The
+   count is parsed from the anomaly the detector already captured; the average is a
+   catalog-wide aggregate (not the 10-row prompt sample). For Owoyemi that's a
+   stable `5 × $41.95 × 0.5 = $104.87` — real and explainable. Qwen's number is only
+   a fallback when there's nothing to ground on.
+
+2. **Attribution didn't update live on the terminal.** A checkout only pushed
+   `state_updated` to the storefront, so the merchant's attribution panel stayed
+   stale until a manual refresh. Checkout now pushes to *both* surfaces; the
+   terminal's existing `state_updated` handler refetches the dashboard, and the
+   metric cards animate — a count-up (easeOutCubic) plus a pulse on the card the
+   moment revenue increases. Revenue visibly lands the instant a customer buys.
+
+**Verified end-to-end in a real browser:** logged into the terminal, read
+Elevate-Attributed ($112.50), placed a real order via the public API under an
+active recovery offer, and watched — with no reload — Total Revenue go $150.50 →
+$225.20 and Elevate-Attributed $112.50 → $187.20, the executed-action row appearing
+live. Grounded estimate confirmed against a real Qwen decision cycle.
+
+**Next:** the same live-push pattern for stock/availability changes; and clearing
+pre-fix "$0" executed-action rows so the attribution log stays clean for the demo.
