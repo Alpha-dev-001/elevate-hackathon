@@ -50,7 +50,7 @@ export function ProductDrawer({
         {p.name}
       </h2>
       <div className="flex items-baseline flex-wrap gap-x-3 gap-y-1">
-        <p className={big ? 'text-2xl' : 'text-lg'} style={{ color: ctaBg }}>${p.price}</p>
+        <p className={big ? 'text-2xl' : 'text-lg'} style={{ color: ctaBg }}>${p.price.toFixed(2)}</p>
         {p.compare_at_price != null && (
           <span className={big ? 'text-xl line-through' : 'text-base line-through'} style={{ color: 'var(--s-text-subtle)' }}>
             ${p.compare_at_price.toFixed(2)}

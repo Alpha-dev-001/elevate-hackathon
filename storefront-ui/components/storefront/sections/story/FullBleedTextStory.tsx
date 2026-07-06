@@ -6,7 +6,7 @@ export function FullBleedTextStory({ store }: SectionProps) {
   return (
     <section data-story="full-bleed-text" className="px-6 py-24" style={{ background: c.surface, color: c.text }}>
       <div className="max-w-[680px] mx-auto text-center">
-        <p className="text-2xl md:text-3xl font-light mb-6" style={{ fontFamily: 'var(--s-display)', color: c.accent }}>
+        <p className="text-2xl md:text-3xl font-light mb-6" style={{ fontFamily: 'var(--s-display)', color: 'var(--s-cta)' }}>
           {store.tagline}
         </p>
         <p className="text-lg md:text-2xl leading-relaxed" style={{ fontFamily: 'var(--s-body)', color: c.text_muted }}>

@@ -9,7 +9,7 @@ export function ScrollTickerBanner({ store }: SectionProps) {
   const items = Array.from({ length: 8 }, () => text)
   return (
     <div data-banner="scroll-ticker" className="overflow-hidden h-9 flex items-center group"
-         style={{ background: c.accent, color: c.background }}>
+         style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
       <div className="flex whitespace-nowrap gap-6 px-3 text-xs uppercase tracking-widest"
            style={
              reduced

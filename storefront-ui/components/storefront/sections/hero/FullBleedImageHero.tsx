@@ -31,7 +31,7 @@ export function FullBleedImageHero({ store }: SectionProps) {
       />
       <span
         className="absolute top-4 right-4 z-10 text-xs font-mono px-2.5 py-1 rounded-full"
-        style={{ background: c.accent, color: c.background }}
+        style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
       >
         {store.products.length} pieces
       </span>

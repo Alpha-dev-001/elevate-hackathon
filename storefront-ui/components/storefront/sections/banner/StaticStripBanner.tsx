@@ -9,7 +9,7 @@ export function StaticStripBanner({ store }: SectionProps) {
          style={{ background: c.primary, color: c.background }}>
       <span className="text-sm md:text-base font-medium">{store.tagline}</span>
       <span className="inline-flex px-4 py-2 text-sm font-medium rounded-full"
-            style={{ background: c.accent, color: c.background }}>Shop now</span>
+            style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>Shop now</span>
     </div>
   )
 }

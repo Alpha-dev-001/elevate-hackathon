@@ -19,7 +19,7 @@ export function Split5050Hero({ store }: SectionProps) {
         </h1>
         <p style={{ color: c.text_muted, fontFamily: 'var(--s-body)' }}>{store.tagline}</p>
         <span className="inline-flex w-fit px-5 py-2.5 text-sm font-medium rounded-full"
-              style={{ background: c.accent, color: c.background }}>Shop the collection</span>
+              style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>Shop the collection</span>
       </motion.div>
       <div className="order-1 md:order-2 h-[40vh] md:h-auto bg-cover bg-center"
            style={{

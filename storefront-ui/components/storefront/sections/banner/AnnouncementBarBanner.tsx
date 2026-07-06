@@ -16,7 +16,7 @@ export function AnnouncementBarBanner({ store, slug, props }: SectionProps) {
   return (
     <div data-banner="announcement-bar"
          className="w-full h-11 flex items-center justify-center gap-3 px-4 text-xs md:text-sm relative"
-         style={{ background: c.accent, color: c.background }}>
+         style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
       <span>Use <strong>{code}</strong> for 15% off</span>
       <button aria-label="Dismiss" className="absolute right-3 text-base leading-none"
               onClick={() => { setDismissed(true); try { localStorage.setItem(key, '1') } catch {} }}>×</button>
