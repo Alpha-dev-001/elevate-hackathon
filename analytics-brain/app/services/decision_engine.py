@@ -49,12 +49,18 @@ Decide ONE action. Return ONLY this JSON:
       "reason": "highlight trending product"
     }},
     "recovery_offer fields if action_type=recovery_offer": {{
-      "offer": "free_shipping",
-      "message": "Come back — we saved your cart"
+      "discount_percent": 10,
+      "duration_minutes": 30,
+      "message": "Complete your order and save"
     }}
   }},
   "brand_check": "<confirm this respects brand rules or flag conflict>"
 }}
+
+A recovery_offer is an ORDER-LEVEL percentage discount on the shopper's existing
+cart to win back an abandoned checkout — this store has no shipping concept, so
+never propose free shipping. Title/description must describe a "% off your order",
+matching the discount_percent you choose (typically 10-15).
 
 The merchant approves before execution. Make it compelling.
 Return ONLY JSON."""
