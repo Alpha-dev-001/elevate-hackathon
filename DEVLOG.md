@@ -803,3 +803,74 @@ failures live only in the seams.
 
 **Next:** record the 3-minute demo, deploy the backend to Alibaba Function Compute
 (the eligibility gate), and capture the deployment proof.
+
+---
+
+### Vision Catalog — A Folder of 98 Photos Becomes a Store — 2026-07-06
+
+**Approach:** The product-upload flow accepted a CSV or one item at a time — fine,
+but not magic. A real merchant handed us the truth: a folder of 98 phone photos of
+branded footwear (Pedro, Nautica, Balenciaga…), names printed on nothing, prices
+nowhere. So we built the pipeline that matches how inventory actually arrives.
+`qwen-vl-max` reads each photo and returns a structured draft — product name from
+what it *sees* (brand markings, type, standout design), colourways, a brand-voice
+description, a category, and a *suggested* price. The whole thing —
+logo → brand → 98-product catalogue → published store — runs from one script that
+reuses the real onboarding services (nothing faked): `build_brand_package`,
+`generate_brand_token`, `generate_layout_dsl`, then `products_state_map` +
+`SystemState` to publish. Result: `/s/owoyemi-of-offa`, a genuine store Qwen built
+end to end from a logo and a folder.
+
+**Qwen calls:** `qwen-vl-max` ×98 (one per product photo, concurrency-limited to
+4–6 so a big catalogue stays a few minutes, not an hour) + the usual
+`qwen-vl-max → qwen-max` brand pair from the logo. Each product call is capped at
+~400 tokens of JSON. Prices are clamped in code to [0.6×, 2×] the merchant baseline
+so a hallucinated MSRP can never leak to the storefront.
+
+**The pricing insight (the one that mattered):** the obvious feature was
+"web-search the usual price." For *resale* goods it's a trap — search returns
+designer MSRP ($400 Balenciaga slides) that has nothing to do with what an Offa
+reseller charges. Auto-pricing there isn't smart, it's a confidently-wrong number
+on camera. So Qwen anchors every price to a merchant-provided baseline and nudges
+by visible premium-ness, and is explicit that it won't presume margins. Knowing
+what *not* to guess is part of the intelligence.
+
+**Problems:**
+- **Honest-but-overconfident reads.** `qwen-vl-max` read a "SUICOKE" strap label as
+  "Suicide" — a real brand misread, delivered with full confidence, so the honesty
+  flag never fired. A handful of others were minor misreads.
+- **White-on-white.** Qwen derived the brand accent from a black-and-white logo →
+  accent `#FFFFFF` on a `#F5F5F5` page. The price and the "Add to cart" button
+  rendered invisible: white text on a white button.
+
+**Solutions:**
+- Hardened the vision prompt (only claim a brand you can actually read; never emit
+  offensive/nonsensical names) and leaned on the design's honest escape hatch:
+  low-confidence reads are created *inactive* and reported for a merchant-review
+  pass — which is exactly how the demo tells the story. The stubborn misreads got
+  the two-minute review edit a real merchant would make.
+- Made the CTA colours contrast-aware: `readableOn(accent, bg)` darkens a
+  too-light accent until it clears WCAG on the page, and picks a label colour that
+  reads on the resulting button. Brands with a vivid accent are untouched; only
+  unreadable ones get corrected — the brand is preserved, the button is legible.
+
+**Edge cases tested:** re-running the pipeline (idempotent — wipes and rebuilds the
+merchant's products); a live store's Redis `SystemState` going stale after a direct
+DB edit (added a resync script — the storefront reads `state.products`, not the DB);
+a brand whose accent is near-white; product photos with multiple colourways in one
+frame (detected and folded into the name).
+
+**Also shipped this session:** the merchant's *real* uploaded logo now renders in
+the storefront header (it was previously used only as VL input and never shown — a
+`BrandLogo` component prefers the real logo, falls back to the generated SVG mark on
+empty or load failure).
+
+**Lesson recorded:** the wow wasn't a cleverer model — it was pointing a capable one
+at the real shape of the problem (photos, not spreadsheets) and being honest about
+its limits (what it can read vs. what it must not presume). The features that landed
+were the ones that respected reality.
+
+**Next:** record the demo against the Owoyemi store; then the post-hackathon roadmap —
+web-search *verification* to raise VL confidence (the real tool-use story), a
+browser folder-drop UI for a live capture beat, and Qwen self-flagging contrast/
+accessibility issues at brand-generation time.

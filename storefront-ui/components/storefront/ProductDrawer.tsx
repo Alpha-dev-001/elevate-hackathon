@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import type { PublicStore, LayoutGlobalConfig } from '@/types/schemas'
 import { useCart } from '@/lib/cart'
+import { readableOn } from '@/lib/color'
 
 type Product = PublicStore['products'][number]
 type DetailVariant = LayoutGlobalConfig['product_detail']
@@ -33,13 +34,22 @@ export function ProductDrawer({
     ? store.products.filter((p) => p.id !== product.id && p.category === product.category).slice(0, 4)
     : []
 
+  // Contrast-safe CTA colours. A brand whose accent is near-white (e.g. a B&W
+  // logo → white accent on a light page) would render an invisible price and an
+  // invisible "Add to cart". readableOn darkens the accent until it clears WCAG
+  // on the page, then picks a label colour that reads on the resulting button.
+  const accent = store.brand_token?.colors.accent ?? store.palette.accent
+  const bg = store.brand_token?.colors.background ?? store.palette.background
+  const ctaBg = readableOn(accent, bg)
+  const ctaText = readableOn(bg, ctaBg)
+
   const Info = ({ p, big }: { p: Product; big?: boolean }) => (
     <div className="flex flex-col gap-4">
       <h2 className={big ? 'text-4xl md:text-5xl font-bold leading-tight' : 'text-2xl font-bold'}
           style={{ fontFamily: 'var(--s-display)' }}>
         {p.name}
       </h2>
-      <p className={big ? 'text-2xl' : 'text-lg'} style={{ color: 'var(--s-accent)' }}>${p.price}</p>
+      <p className={big ? 'text-2xl' : 'text-lg'} style={{ color: ctaBg }}>${p.price}</p>
       {p.description && (
         <p className="max-w-prose leading-relaxed" style={{ color: 'var(--s-text-muted)' }}>{p.description}</p>
       )}
@@ -47,7 +57,7 @@ export function ProductDrawer({
         disabled={preview || !p.available}
         onClick={async () => { if (!preview) { await add(p.id, 1); setOpen(true) } }}
         className="mt-1 w-full py-3 rounded-full font-medium disabled:opacity-50"
-        style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+        style={{ background: ctaBg, color: ctaText }}
       >
         {p.available ? 'Add to cart' : 'Sold out'}
       </button>
