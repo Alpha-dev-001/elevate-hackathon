@@ -36,6 +36,13 @@ export default function SetupPage() {
       .finally(() => setAuthChecked(true))
   }, [authChecked, setMerchant, setAuthChecked])
 
+  // A live merchant must not re-onboard — a new logo would regenerate and
+  // overwrite their brand/logo/layout. Send them to their terminal instead.
+  // (The backend also hard-blocks /onboarding/start for a live store.)
+  useEffect(() => {
+    if (merchant?.is_live) router.replace('/terminal')
+  }, [merchant, router])
+
   // Once the brand is ready, glide to the review.
   useEffect(() => {
     if (phase === 'ready') router.push('/brand-review')

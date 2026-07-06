@@ -333,6 +333,15 @@ async def start_onboarding(
     """Merchant submits their uploaded logo's OSS URL. We store it and kick off
     brand generation in the background; the frontend watches the terminal WS
     for `brand_ready`."""
+    # Guard: a live store must never be re-onboarded — a fresh logo would
+    # regenerate (and overwrite) its brand, logo, and layout. To brand a
+    # different store, sign out and create a new account.
+    if merchant.is_live:
+        raise HTTPException(
+            status_code=409,
+            detail="Your store is already live. Sign out and create a new account to onboard a different brand.",
+        )
+
     url = payload.logo_oss_url.strip()
     if not url or not url.lower().startswith(("http://", "https://")):
         raise HTTPException(status_code=400, detail="logo_oss_url must be an http(s) URL")
@@ -389,6 +398,14 @@ async def publish_store(
     """Store goes live. Initialises SystemState (hot-reload source) and the
     BusinessProfile (interceptor constraints) from the brand, flips the merchant
     live, and returns the public URL."""
+    # Re-publishing a live store would reset its SystemState (wiping active promos
+    # and layout). Publishing is a one-time onboarding step — block it once live.
+    if merchant.is_live:
+        raise HTTPException(
+            status_code=409,
+            detail="Your store is already live. Use the store builder to make changes.",
+        )
+
     pkg = await _load_brand(merchant.id, db)
     if pkg is None:
         raise HTTPException(status_code=409, detail="Generate your brand before publishing")
