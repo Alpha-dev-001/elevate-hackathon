@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
 import { parseProductCsv } from '@/lib/csv'
 import { useStore } from '@/lib/store'
+import { ProductImage } from '@/components/storefront/ProductImage'
 import type { Product } from '@/types/schemas'
 
 /**
@@ -149,10 +150,12 @@ export default function ProductsPage() {
                 transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
                 className="card p-4 flex gap-4 items-start"
               >
-                {p.image_url && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={p.image_url} alt={p.name} className="w-14 h-14 rounded-md object-cover bg-surface-2 shrink-0" />
-                )}
+                {/* Always render via ProductImage: a dead/missing URL falls back
+                    to a branded initial tile instead of a broken-image glyph —
+                    keeps the add screen clean on camera. */}
+                <div className="w-14 h-14 rounded-md overflow-hidden bg-surface-2 shrink-0">
+                  <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
+                </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-text font-semibold truncate">{p.name}</p>
