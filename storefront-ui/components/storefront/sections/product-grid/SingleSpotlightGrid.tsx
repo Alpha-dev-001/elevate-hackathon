@@ -17,7 +17,20 @@ export function SingleSpotlightGrid({ store, onOpenProduct }: SectionProps) {
       </button>
       <div className="flex flex-col gap-4" style={{ color: c.text }}>
         <h3 className="text-3xl font-bold" style={{ fontFamily: 'var(--s-display)' }}>{p.name}</h3>
-        <p className="text-lg" style={{ color: 'var(--s-cta)' }}>${p.price}</p>
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <p className="text-lg" style={{ color: 'var(--s-cta)' }}>${p.price.toFixed(2)}</p>
+          {p.compare_at_price != null && (
+            <span className="text-base line-through" style={{ color: 'var(--s-text-subtle)' }}>
+              ${p.compare_at_price.toFixed(2)}
+            </span>
+          )}
+          {p.promo_label && (
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
+              {p.promo_label}
+            </span>
+          )}
+        </div>
         <p style={{ color: c.text_muted }}>{p.description}</p>
         <div className="flex gap-3 mt-2">
           <button aria-label="Previous" onClick={() => setIdx((i) => (i - 1 + products.length) % products.length)}

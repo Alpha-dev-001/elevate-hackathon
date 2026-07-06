@@ -31,7 +31,9 @@ def best_active_promo(
     candidates = [
         p
         for p in active_promos.values()
-        if p.product_id == product_id and p.expires_at > now and p.discount_percent > 0
+        # "all" is a store-wide promo (e.g. a cart-recovery "everything 10% off")
+        if (p.product_id == product_id or p.product_id == "all")
+        and p.expires_at > now and p.discount_percent > 0
     ]
     if not candidates:
         return None

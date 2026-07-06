@@ -17,6 +17,7 @@ export function StoreBuilder({ slug }: { slug: string }) {
   const [store, setStore] = useState<PublicStore | null>(null)
   const [guards, setGuards] = useState<BrandGuardRules | null>(null)
   const [publishing, setPublishing] = useState(false)
+  const [published, setPublished] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const setFromStore = useBuilderStore((s) => s.setFromStore)
   const markPublished = useBuilderStore((s) => s.markPublished)
@@ -52,7 +53,8 @@ export function StoreBuilder({ slug }: { slug: string }) {
       await api.saveDsl(slug, dsl)            // optimistic: persist the draft
       try { await api.publish() } catch { /* already live — fine */ }
       markPublished()
-      router.push(`/s/${slug}`)
+      setPublishing(false)
+      setPublished(true)                      // ask before leaving the builder
     } catch {
       setError('Publish failed — your changes are still saved locally. Try again.')
       setPublishing(false)
@@ -78,6 +80,36 @@ export function StoreBuilder({ slug }: { slug: string }) {
     <main className="h-screen flex" style={{ background: 'var(--color-bg, #0A0A0B)', color: '#fff' }}>
       <BuilderLeftPanel guards={guards} onPublish={onPublish} onRegenerate={onRegenerate} publishing={publishing} />
       <BuilderPreview store={store} />
+
+      {published && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+             onClick={() => setPublished(false)}>
+          <div className="rounded-2xl p-6 max-w-sm w-full mx-4 text-center"
+               style={{ background: 'var(--color-surface, #111113)', border: '1px solid var(--color-border, #2A2A30)' }}
+               onClick={(e) => e.stopPropagation()}>
+            <p className="text-lg font-semibold mb-1">Your store is live ✨</p>
+            <p className="text-sm mb-5" style={{ color: 'var(--color-text-muted, #9AA0A8)' }}>
+              Do you want to view your store now?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPublished(false)}
+                className="flex-1 py-2.5 rounded-full text-sm font-medium"
+                style={{ border: '1px solid var(--color-border, #2A2A30)', color: '#fff' }}
+              >
+                Keep editing
+              </button>
+              <button
+                onClick={() => router.push(`/s/${slug}`)}
+                className="flex-1 py-2.5 rounded-full text-sm font-semibold"
+                style={{ background: 'var(--color-accent, #6EE7B7)', color: '#0A0A0B' }}
+              >
+                View store →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }

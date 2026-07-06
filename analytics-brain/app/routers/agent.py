@@ -171,6 +171,10 @@ async def _register_promo(row: AgentActionDB, cfg: dict, payload: dict, db: Asyn
         duration = 30
     expires_at = int(time.time() * 1000) + duration * 60 * 1000
 
+    # NOTE: a recovery offer *should* target the abandoning shopper's cart items
+    # (per-customer). That needs customer-scoped promos (promos are global today).
+    # Until then we discount the featured/first product so the money-shot is
+    # visible without falsely blanket-discounting the whole store. See handoff.
     promo = Promo(
         id=row.promo_id,
         product_id=list(state.products.keys())[0] if state.products else "all",
