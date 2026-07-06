@@ -124,6 +124,7 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
     return PublicStore(
         store_name=merchant.store_name,
         slug=merchant.slug,
+        merchant_id=merchant.id,
         logo_url=merchant.logo_url or "",
         tagline=pkg.brand.tagline,
         palette=pkg.brand.palette,

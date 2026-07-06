@@ -40,6 +40,21 @@ async def main():
         state.version += 1
         await delta_svc.save_state(m.id, state)
 
+        # Broadcast like a real approve does, so connected storefronts morph live.
+        import json
+        from app.core.ws_manager import manager
+        from app.models.schemas import WSMessage, WSEventType
+        await manager.push_to_all(
+            m.id,
+            WSMessage(
+                event=WSEventType.STATE_UPDATED,
+                payload={"state": json.loads(state.model_dump_json())},
+                merchant_id=m.id,
+                timestamp=int(time.time() * 1000),
+            ),
+        )
+        print("broadcast state_updated")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

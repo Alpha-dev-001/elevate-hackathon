@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { api, ApiError } from '@/lib/api'
 import type { PublicStore } from '@/types/schemas'
 import { useCart } from '@/lib/cart'
+import { connectStorefront } from '@/lib/ws'
 import { DSLRenderer } from './DSLRenderer'
 
 /**
@@ -38,6 +39,21 @@ export function Storefront({ slug, initialProductId }: { slug: string; initialPr
   useEffect(() => {
     initCart(slug)
   }, [slug, initCart])
+
+  // Live updates — the other half of the nervous system. The merchant approves
+  // in the terminal → the backend broadcasts state_updated to every connected
+  // storefront → we refetch and the store morphs (promos, prices) with no reload
+  // and no polling. This is the customer-facing payoff of the autopilot loop.
+  useEffect(() => {
+    const mid = store?.merchant_id
+    if (!mid) return
+    const conn = connectStorefront(mid, {
+      onStateUpdated: () => {
+        api.getStore(slug).then(setStore).catch(() => {})
+      },
+    })
+    return () => conn.close()
+  }, [store?.merchant_id, slug])
 
   // Load the brand's Google Fonts. Prefer brand_token fonts when present —
   // they may differ from the legacy typography object.

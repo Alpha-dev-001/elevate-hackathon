@@ -12,6 +12,7 @@ import { FallbackStorefront } from './FallbackStorefront'
 import { CustomCSSInjector } from './CustomCSSInjector'
 import { Cart } from './Cart'
 import { ProductDrawer } from './ProductDrawer'
+import { PromoCountdown } from './PromoCountdown'
 import { useCart } from '@/lib/cart'
 import { useCustomer } from '@/lib/customerAuth'
 import { useEffect } from 'react'
@@ -84,9 +85,10 @@ export function DSLRenderer({
   return (
     <StoreShell brandToken={store.brand_token} cssVars={theme.cssVars}>
       {showPromoBar && (
-        <div className="w-full text-center py-2.5 text-sm font-medium"
+        <div className="w-full text-center py-2.5 text-sm font-medium flex items-center justify-center gap-2 flex-wrap px-4"
              style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
-          {store.promos[0].label}
+          <span>{store.promos[0].label}</span>
+          <PromoCountdown expiresAt={store.promos[0].expires_at} />
         </div>
       )}
       {!preview && (

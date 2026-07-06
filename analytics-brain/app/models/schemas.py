@@ -634,6 +634,7 @@ class PublicProduct(BaseModel):
 class PublicStore(BaseModel):
     store_name: str
     slug: str
+    merchant_id: str = ""   # opaque room id for the storefront WebSocket (live state pushes)
     logo_url: str = ""   # merchant's real uploaded logo; "" falls back to generated SVG mark
     tagline: str
     palette: BrandPalette

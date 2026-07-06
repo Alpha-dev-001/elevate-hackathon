@@ -86,3 +86,84 @@ export function connectTerminal(
     },
   }
 }
+
+// ── Storefront (customer) socket ──────────────────────────────────────────────
+
+export interface StorefrontHandlers {
+  /** Fired on any state_updated push (approve, rollback, promo) — refetch/morph. */
+  onStateUpdated?: (payload: Record<string, unknown>) => void
+  onOpen?: () => void
+  onClose?: () => void
+}
+
+export interface StorefrontConnection {
+  close: () => void
+  /** Emit a customer behavior event into the telemetry loop (view, abandon, …). */
+  sendEvent: (event: Record<string, unknown>) => void
+}
+
+/**
+ * The live customer store socket. This is the other half of the nervous system:
+ * the merchant approves in the terminal, the backend broadcasts state_updated to
+ * every connected storefront, and the shopper's store morphs — no reload, no
+ * polling. Reconnects with backoff so a blip doesn't silently kill live updates.
+ */
+export function connectStorefront(
+  merchantId: string,
+  handlers: StorefrontHandlers,
+): StorefrontConnection {
+  let socket: WebSocket | null = null
+  let closedByCaller = false
+  let attempt = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+  const url = `${WS_BASE}/storefront/${merchantId}`
+
+  const open = () => {
+    socket = new WebSocket(url)
+
+    socket.onopen = () => {
+      attempt = 0
+      handlers.onOpen?.()
+    }
+
+    socket.onmessage = (ev) => {
+      let msg: { event?: string; payload?: Record<string, unknown> }
+      try {
+        msg = JSON.parse(ev.data)
+      } catch {
+        return
+      }
+      if (msg.event === 'state_updated') {
+        handlers.onStateUpdated?.(msg.payload ?? {})
+      }
+    }
+
+    socket.onclose = () => {
+      handlers.onClose?.()
+      if (closedByCaller) return
+      attempt += 1
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 8000)
+      reconnectTimer = setTimeout(open, delay)
+    }
+
+    socket.onerror = () => {
+      socket?.close()
+    }
+  }
+
+  open()
+
+  return {
+    close: () => {
+      closedByCaller = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      socket?.close()
+    },
+    sendEvent: (event) => {
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event: 'customer_event', payload: { event } }))
+      }
+    },
+  }
+}
