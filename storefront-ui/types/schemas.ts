@@ -142,6 +142,16 @@ export const PromoSchema = z.object({
   triggered_by: z.enum(['merchant', 'auto']),
 })
 
+// Order-level cart-recovery discount (mirrors RecoveryOffer in schemas.py).
+// Discounts an existing cart's total only — never the browse grid.
+export const RecoveryOfferSchema = z.object({
+  percent: z.number(),
+  label: z.string(),
+  expires_at: z.number(),
+  promo_id: z.string().default(''),
+  triggered_by: z.enum(['merchant', 'auto']).default('auto'),
+})
+
 export const LayoutConfigSchema = z.object({
   hero_product_id: z.string().nullable().optional(),
   featured_category: z.string().nullable().optional(),
@@ -157,6 +167,7 @@ export const SystemStateSchema = z.object({
   active_promos: z.record(PromoSchema).default({}),
   layout_config: LayoutConfigSchema.default({}),
   qr_campaigns: z.record(z.any()).default({}),
+  recovery: RecoveryOfferSchema.nullable().optional(),
 })
 
 // ─── 8. WebSocket Messages ────────────────────────────────────────────────────
@@ -303,6 +314,7 @@ export const PublicStoreSchema = z.object({
   layout: LayoutConfigSchema,
   products: z.array(PublicProductSchema),
   promos: z.array(PromoSchema).default([]),
+  recovery: RecoveryOfferSchema.nullable().optional(),
   categories: z.array(z.string()).default([]),
   brand_token: BrandTokenSchema.nullable().optional(),
 })
@@ -328,6 +340,12 @@ export const CartSchema = z.object({
   items: z.array(CartItemSchema).default([]),
   subtotal: z.number().default(0),
   item_count: z.number().int().default(0),
+  // Order-level recovery discount overlaid by the backend at read time.
+  discount_percent: z.number().default(0),
+  discount_label: z.string().nullable().optional(),
+  discount_expires_at: z.number().nullable().optional(),
+  discount_amount: z.number().default(0),
+  total: z.number().default(0),
   updated_at: z.number(),
 })
 
@@ -443,6 +461,7 @@ export type MerchantLogin = z.infer<typeof MerchantLoginSchema>
 export type Product = z.infer<typeof ProductSchema>
 export type SystemState = z.infer<typeof SystemStateSchema>
 export type Promo = z.infer<typeof PromoSchema>
+export type RecoveryOffer = z.infer<typeof RecoveryOfferSchema>
 export type BrandWarning = z.infer<typeof BrandWarningSchema>
 export type WSMessage = z.infer<typeof WSMessageSchema>
 export type LogoSubmitRequest = z.infer<typeof LogoSubmitRequestSchema>

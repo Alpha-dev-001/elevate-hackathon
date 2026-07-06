@@ -454,6 +454,19 @@ class Promo(BaseModel):
     expires_at: int
     triggered_by: Literal["merchant", "auto"]
 
+class RecoveryOffer(BaseModel):
+    """Order-level cart-recovery discount — set when the merchant approves a
+    `recovery_offer` agent action. Unlike a Promo it targets NO product: the
+    browse grid stays at full price and only an existing cart's *total* drops.
+    Applied to the subtotal at cart-read time; expiry is enforced there so a
+    stale state can never resurrect it. `promo_id` mirrors the AgentAction's
+    promo_id so a checkout under this offer still attributes to that action."""
+    percent: float = Field(gt=0, le=90)
+    label: str
+    expires_at: int
+    promo_id: str = ""
+    triggered_by: Literal["merchant", "auto"] = "auto"
+
 class LayoutConfig(BaseModel):
     hero_product_id: Optional[str] = None
     featured_category: Optional[str] = None
@@ -477,6 +490,7 @@ class SystemState(BaseModel):
     active_promos: dict[str, Promo] = Field(default_factory=dict)
     layout_config: LayoutConfig = Field(default_factory=LayoutConfig)
     qr_campaigns: dict[str, QRCampaign] = Field(default_factory=dict)
+    recovery: Optional[RecoveryOffer] = None   # active order-level cart-recovery discount
 
 class AgentAction(BaseModel):
     id: str
@@ -643,6 +657,7 @@ class PublicStore(BaseModel):
     layout: LayoutConfig
     products: list[PublicProduct]
     promos: list[Promo] = Field(default_factory=list)
+    recovery: Optional[RecoveryOffer] = None  # active cart-recovery banner (order-level)
     categories: list[str] = Field(default_factory=list)  # for storefront filter chips
     brand_token: Optional[BrandToken] = None
 
@@ -663,8 +678,15 @@ class Cart(BaseModel):
     session_id: str
     merchant_id: str
     items: list[CartItem] = Field(default_factory=list)
-    subtotal: float = 0.0
+    subtotal: float = 0.0            # sum of line_totals, before any recovery discount
     item_count: int = 0
+    # Order-level recovery discount overlaid at read time from SystemState.recovery.
+    # Never snapshotted onto lines — recomputed on every read so it can expire.
+    discount_percent: float = 0.0
+    discount_label: Optional[str] = None
+    discount_expires_at: Optional[int] = None
+    discount_amount: float = 0.0     # round(subtotal * percent / 100, 2)
+    total: float = 0.0               # subtotal - discount_amount
     updated_at: int
 
 class CartMutation(BaseModel):
