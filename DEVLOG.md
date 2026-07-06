@@ -874,3 +874,48 @@ were the ones that respected reality.
 web-search *verification* to raise VL confidence (the real tool-use story), a
 browser folder-drop UI for a live capture beat, and Qwen self-flagging contrast/
 accessibility issues at brand-generation time.
+
+
+### Order-level cart recovery — the abandon money-shot done right — 2026-07-06
+
+**Approach:** The autopilot's cart-abandon reflex was firing a *product* promo on
+the featured item — an item that isn't in the abandoning shopper's cart. The store
+"recovered" a cart by discounting something else and leaving the actual cart at full
+price. We rebuilt it as what a cart recovery actually is: an **order-level discount**
+on the existing cart, with the browse grid untouched.
+
+- New `RecoveryOffer` on `SystemState` (`percent`, `label`, `expires_at`, `promo_id`).
+  It targets no product, so approving it never restyles the catalog.
+- `Cart` gained `discount_percent / discount_label / discount_expires_at /
+  discount_amount / total`. The cart service overlays the live recovery on **every
+  read** (`_apply_recovery`) — computed fresh from state, never snapshotted onto a
+  line, so an expired offer simply stops applying. Line-level price snapshots (the
+  thing that protects a mid-checkout customer) are left alone.
+- The agent's approve path now routes `recovery_offer` to `_register_recovery`
+  (order-level) and keeps `flash_sale`/`scarcity_price` as product promos.
+- Attribution survived the move: the offer carries the action's `promo_id`, checkout
+  applies the discount to `order.total` and tags the order with that id, so the
+  dashboard still reads the AI-driven revenue instead of $0.
+- Frontend: the cart drawer renders the discount line (struck subtotal, −amount,
+  reduced total) with a live countdown ("Complete your order — 10% off · ends in
+  MM:SS"); a matching top banner surfaces from `store.recovery`; and the storefront's
+  WebSocket `state_updated` handler now refetches the **cart** as well as the store,
+  so an already-open cart morphs live on approve with no reload.
+
+**Qwen calls:** none added — this is the execution/interceptor layer downstream of
+the decision cycle. The decision that emits `recovery_offer` is unchanged.
+
+**Edge cases tested:** offer expiry (read-time gate zeroes the discount); a stale
+stored cart blob (discount recomputed on load, never resurrected); empty cart (no
+discount); browse grid must stay full price (asserted 0 discounted products in the
+public payload); checkout under the offer (order total discounted + attributed).
+
+**Verified end-to-end, not asserted:** a backend script builds a real 2-item cart
+($83), approves a real `recovery_offer`, and confirms the same cart drops to $74.70
+with the grid untouched and the dashboard attributing $74.70. Then a headless browser
+adds two items with real drawer clicks, opens the cart, fires the real approve, and
+**watches the open cart morph live** — struck $83.00, −$8.30, Total $74.70, countdown
+ticking — with the top banner appearing and the catalog behind it still at full price.
+
+**Next:** per-customer targeting (only the abandoning session's cart), and letting
+Qwen choose the recovery depth within a guarded band instead of a fixed default.
