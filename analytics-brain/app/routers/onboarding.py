@@ -433,6 +433,23 @@ async def publish_store(
     merchant.is_live = True
     merchant.onboarding_status = OnboardingStatus.LIVE.value
 
+    # Broadcast so any open storefront morphs to the freshly-published layout/state
+    # live — the merchant-drives-the-store half of the pipeline. Best-effort; the
+    # publish already succeeded, a WS blip must not fail it.
+    try:
+        import json
+        await manager.push_to_all(
+            merchant.id,
+            WSMessage(
+                event=WSEventType.STATE_UPDATED,
+                payload={"state": json.loads(initial_state.model_dump_json())},
+                merchant_id=merchant.id,
+                timestamp=_now(),
+            ),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[onboarding] publish broadcast failed for {merchant.id}: {e}")
+
     return {
         "status": "live",
         "store_name": merchant.store_name,

@@ -1,8 +1,9 @@
-"""Owoyemi's Qwen-generated accent came back #FFFFFF (white) — invisible on the
-light page, and the source of the builder-swatch/store mismatch. Set a usable,
-on-brand accent (a deep peacock teal — the logo is a peacock) across both the
-brand token and the palette, and refresh the cache. Merchant can re-pick in the
-builder now that publish no longer nukes the layout.
+"""Owoyemi's stored palette accent came back #FFFFFF (white) — a bug: Qwen's OWN
+brand guard reasoned about #C0C0C0 (silver, "subtle elegance"). Align the stored
+accent to Qwen's actual choice so palette, guard, and store all agree. (Root
+brand-gen mismatch — palette.accent != guard color — is a logged follow-up.)
+The storefront's readableOn/--s-cta layer keeps silver CTAs legible; the silver
+identity stays for subtle accents, as Qwen intended.
 
 Run: docker compose exec api sh -c "cd /app && python -m scripts.fix_owoyemi_accent"
 """
@@ -12,7 +13,7 @@ from app.core.database import get_session_factory
 from app.models.db_models import MerchantDB, BrandProfileDB
 from app.models.schemas import BrandToken
 
-ACCENT = "#127475"  # deep peacock teal — reads on both light and dark, on-brand
+ACCENT = "#C0C0C0"  # Qwen's actual choice, per its brand guard — not an imposed color
 
 
 async def main():
