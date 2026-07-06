@@ -75,7 +75,10 @@ async def _sync_state_after_stock_change(db: AsyncSession, merchant_id: str) -> 
         state.version += 1
         state.last_updated = _now()
         await delta_svc.save_state(merchant_id, state)
-        await manager.push_to_storefront(
+        # Push to BOTH surfaces: the storefront refreshes availability/prices, and
+        # the merchant terminal refetches attribution so revenue ticks up live on
+        # checkout instead of staying $0 until a manual refresh.
+        await manager.push_to_all(
             merchant_id,
             WSMessage(
                 event=WSEventType.STATE_UPDATED,

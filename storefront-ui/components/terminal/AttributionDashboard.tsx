@@ -1,6 +1,7 @@
 'use client'
 
-import { motion, useReducedMotion } from 'framer-motion'
+import { useEffect, useRef, useState } from 'react'
+import { motion, useReducedMotion, useAnimationControls } from 'framer-motion'
 import type { DashboardData } from '@/lib/api'
 
 interface AttributionDashboardProps {
@@ -17,6 +18,33 @@ function formatCurrency(value: number): string {
   })
 }
 
+/** Ease a displayed number from its previous value to the new one, so revenue
+ * visibly counts up when a customer checks out (respects reduced-motion). */
+function useCountUp(target: number, enabled: boolean, duration = 750): number {
+  const [display, setDisplay] = useState(target)
+  const fromRef = useRef(target)
+  useEffect(() => {
+    const from = fromRef.current
+    if (!enabled || from === target) {
+      fromRef.current = target
+      setDisplay(target)
+      return
+    }
+    let raf = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration)
+      const eased = 1 - Math.pow(1 - t, 3) // easeOutCubic
+      setDisplay(from + (target - from) * eased)
+      if (t < 1) raf = requestAnimationFrame(tick)
+      else fromRef.current = target
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [target, enabled, duration])
+  return display
+}
+
 export function AttributionDashboard({ data, loading }: AttributionDashboardProps) {
   return (
     <section>
@@ -30,22 +58,9 @@ export function AttributionDashboard({ data, loading }: AttributionDashboardProp
 
       {/* 3 metric cards */}
       <div className="flex flex-col gap-3 mb-6">
-        <MetricCard
-          label="Total Revenue"
-          value={data ? formatCurrency(data.total_gmv) : '—'}
-          loading={loading}
-        />
-        <MetricCard
-          label="Elevate-Attributed"
-          value={data ? formatCurrency(data.elevate_attributed_gmv) : '—'}
-          loading={loading}
-          accent
-        />
-        <MetricCard
-          label="Your Fee (10%)"
-          value={data ? formatCurrency(data.elevate_fee) : '—'}
-          loading={loading}
-        />
+        <MetricCard label="Total Revenue" value={data ? data.total_gmv : null} loading={loading} />
+        <MetricCard label="Elevate-Attributed" value={data ? data.elevate_attributed_gmv : null} loading={loading} accent />
+        <MetricCard label="Your Fee (10%)" value={data ? data.elevate_fee : null} loading={loading} />
       </div>
 
       {/* Executed actions log */}
@@ -116,15 +131,34 @@ export function AttributionDashboard({ data, loading }: AttributionDashboardProp
 
 interface MetricCardProps {
   label: string
-  value: string
+  value: number | null
   loading: boolean
   accent?: boolean
 }
 
 function MetricCard({ label, value, loading, accent }: MetricCardProps) {
   const prefersReduced = useReducedMotion()
+  const controls = useAnimationControls()
+  const prevRef = useRef<number | null>(value)
+
+  const animated = useCountUp(value ?? 0, value != null && !prefersReduced)
+
+  // Pulse the card the moment revenue increases — the live "money landed" beat.
+  useEffect(() => {
+    const prev = prevRef.current
+    if (value != null && prev != null && value > prev && !prefersReduced) {
+      controls.start({
+        scale: [1, 1.035, 1],
+        borderColor: ['var(--color-accent)', 'var(--color-accent)', accent ? 'var(--color-accent-dim)' : 'var(--color-border)'],
+        transition: { duration: 0.6, ease: [0.4, 0, 0.2, 1] },
+      })
+    }
+    prevRef.current = value
+  }, [value, accent, controls, prefersReduced])
+
   return (
-    <div
+    <motion.div
+      animate={controls}
       className="rounded-xl p-4"
       style={{
         background: 'var(--color-surface)',
@@ -137,7 +171,7 @@ function MetricCard({ label, value, loading, accent }: MetricCardProps) {
       >
         {label}
       </p>
-      {loading ? (
+      {loading && value == null ? (
         <motion.div
           animate={{ opacity: prefersReduced ? 0.5 : [0.3, 0.7, 0.3] }}
           transition={{ duration: 1.5, repeat: prefersReduced ? 0 : Infinity, ease: 'easeInOut' }}
@@ -146,15 +180,15 @@ function MetricCard({ label, value, loading, accent }: MetricCardProps) {
         />
       ) : (
         <p
-          className="text-xl font-bold"
+          className="text-xl font-bold tabular-nums"
           style={{
             fontFamily: 'var(--font-mono)',
             color: accent ? 'var(--color-accent)' : 'var(--color-text)',
           }}
         >
-          {value}
+          {value == null ? '—' : formatCurrency(animated)}
         </p>
       )}
-    </div>
+    </motion.div>
   )
 }
