@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24 * 7  # 7 days — hackathon-friendly session
 
+    # ── Autopilot action defaults ─────────────────────────
+    # Deterministic FALLBACKS only — Qwen chooses the real discount/duration in
+    # its decision payload; these apply when it omits one. The upper bound on any
+    # discount is never set here: it's the merchant's max_discount_percent
+    # business constraint (interceptor Layer 2). Same env-configurable pattern as
+    # ANOMALY_THRESHOLD.
+    recovery_default_discount_percent: float = 10.0
+    flash_sale_default_discount_percent: float = 15.0
+    scarcity_default_discount_percent: float = 10.0
+    agent_action_duration_minutes: int = 30
+
     # ── App ───────────────────────────────────────────────
     app_env: str = "development"
     base_url: str = "http://localhost:8000"

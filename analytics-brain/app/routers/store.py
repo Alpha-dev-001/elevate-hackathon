@@ -72,6 +72,7 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
     state = await delta_svc.load_state(merchant.id)
     products: list[PublicProduct] = []
     promos = []
+    recovery = None
     categories: list[str] = []
     layout = LayoutConfig(
         color_accent=pkg.brand.palette.accent,
@@ -83,6 +84,9 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
         layout = state.layout_config
         # Only surface promos that are still live — never an expired banner.
         promos = [p for p in state.active_promos.values() if p.expires_at > now]
+        # Surface the cart-recovery banner only while it's live.
+        if state.recovery and state.recovery.expires_at > now and state.recovery.percent > 0:
+            recovery = state.recovery
         seen_categories: list[str] = []
         for p in state.products.values():
             if not p.qwen_generated and p.description is None and p.price <= 0:
@@ -133,6 +137,7 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
         layout=layout,
         products=products,
         promos=promos,
+        recovery=recovery,
         categories=categories,
         brand_token=brand_token_data,
     )

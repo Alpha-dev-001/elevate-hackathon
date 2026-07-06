@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.db_models import AgentActionDB, MerchantDB
 from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType
@@ -94,16 +95,9 @@ async def approve_action(action_id: str, db: AsyncSession = Depends(get_db)):
 
 
 async def _load_state_promo_expiry(row: AgentActionDB, db: AsyncSession) -> int | None:
-    """The expiry ms of this action's promo, if it created one. Falls back to a
-    short window so the observer still fires for the demo."""
-    import time as _t
-    payload = row.payload or {}
-    minutes = payload.get("duration_minutes") or payload.get("flash_sale", {}).get("duration_minutes")
-    try:
-        minutes = int(minutes) if minutes else 30
-    except (TypeError, ValueError):
-        minutes = 30
-    return int(_t.time() * 1000) + minutes * 60 * 1000
+    """The expiry ms of this action's promo/recovery — the same duration the
+    execution used — so the outcome observer fires when the offer actually ends."""
+    return _payload_duration_ms(row.payload or {})
 
 
 @router.post("/actions/{action_id}/dismiss")
@@ -127,19 +121,49 @@ async def dismiss_action(action_id: str, db: AsyncSession = Depends(get_db)):
     return {"action": _to_schema(row).model_dump()}
 
 
-# Every revenue-driving action registers a real, attributable promo so the
-# dashboard can measure what the AI actually drove. Without this, an approved
-# recovery_offer/scarcity_price creates no promo → orders can't attribute →
-# the "this action drove $X" loop reads $0. Defaults per type; Qwen's payload
-# overrides the discount when it supplies one.
-_PROMO_ACTIONS = {
-    "flash_sale":     {"discount": 15, "label": "Flash Sale — {d}% off"},
-    "recovery_offer": {"discount": 10, "label": "Welcome back — {d}% off"},
-    "scarcity_price": {"discount": 10, "label": "Limited time — {d}% off"},
+# Product-scoped revenue actions register a real, attributable Promo on a
+# product so the dashboard can measure what the AI drove. recovery_offer is NOT
+# here on purpose — a cart-recovery discount is order-level (see _register_recovery),
+# it must not blanket-discount the browse grid. Labels only; the discount depth is
+# Qwen's payload, falling back to the per-type config default.
+_PROMO_LABELS = {
+    "flash_sale":     "Flash Sale — {d}% off",
+    "scarcity_price": "Limited time — {d}% off",
 }
 
 
-async def _register_promo(row: AgentActionDB, cfg: dict, payload: dict, db: AsyncSession) -> None:
+def _default_discount(action_type: str) -> float:
+    """The deterministic fallback discount for an action type, from config —
+    used only when Qwen's payload omits discount_percent."""
+    s = get_settings()
+    return {
+        "flash_sale": s.flash_sale_default_discount_percent,
+        "scarcity_price": s.scarcity_default_discount_percent,
+        "recovery_offer": s.recovery_default_discount_percent,
+    }.get(action_type, s.recovery_default_discount_percent)
+
+
+def _payload_discount(payload: dict, default: float, ceiling: float) -> float:
+    """Qwen's chosen discount (or the config default), floored above 0 so it stays
+    attributable and clamped to the merchant's max_discount_percent ceiling
+    (interceptor Layer 2) — never a magic hardcoded cap."""
+    try:
+        d = float(payload.get("discount_percent") or default)
+    except (TypeError, ValueError):
+        d = float(default)
+    return max(1.0, min(float(ceiling), d))
+
+
+def _payload_duration_ms(payload: dict, default_minutes: int | None = None) -> int:
+    default_minutes = default_minutes or get_settings().agent_action_duration_minutes
+    try:
+        minutes = int(payload.get("duration_minutes") or default_minutes)
+    except (TypeError, ValueError):
+        minutes = default_minutes
+    return int(time.time() * 1000) + minutes * 60 * 1000
+
+
+async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db: AsyncSession) -> None:
     """Create an attributable Promo in live state for a revenue action.
 
     Targets the first product (matches the demo's abandoned-product scenario and
@@ -148,6 +172,7 @@ async def _register_promo(row: AgentActionDB, cfg: dict, payload: dict, db: Asyn
     the approval; it just means no promo was applied.
     """
     from app.services import delta as delta_svc
+    from app.services.profile import load_constraints
     from app.models.schemas import Promo
 
     state = await delta_svc.load_state(row.merchant_id)
@@ -158,28 +183,16 @@ async def _register_promo(row: AgentActionDB, cfg: dict, payload: dict, db: Asyn
         )
         return
 
-    # Qwen may supply its own discount; otherwise use the per-type default.
-    try:
-        discount = float(payload.get("discount_percent") or cfg["discount"])
-    except (TypeError, ValueError):
-        discount = float(cfg["discount"])
-    discount = max(1.0, min(90.0, discount))  # keep it real + attributable (>0)
+    # Qwen's discount, floored >0 and clamped to the merchant's discount ceiling.
+    constraints = await load_constraints(db, row.merchant_id)
+    discount = _payload_discount(payload, _default_discount(row.action_type), constraints.max_discount_percent)
+    expires_at = _payload_duration_ms(payload)
 
-    try:
-        duration = int(payload.get("duration_minutes") or 30)
-    except (TypeError, ValueError):
-        duration = 30
-    expires_at = int(time.time() * 1000) + duration * 60 * 1000
-
-    # NOTE: a recovery offer *should* target the abandoning shopper's cart items
-    # (per-customer). That needs customer-scoped promos (promos are global today).
-    # Until then we discount the featured/first product so the money-shot is
-    # visible without falsely blanket-discounting the whole store. See handoff.
     promo = Promo(
         id=row.promo_id,
         product_id=list(state.products.keys())[0] if state.products else "all",
         discount_percent=discount,
-        label=cfg["label"].format(d=int(discount)),
+        label=label_tmpl.format(d=int(discount)),
         expires_at=expires_at,
         triggered_by="auto",
     )
@@ -188,15 +201,51 @@ async def _register_promo(row: AgentActionDB, cfg: dict, payload: dict, db: Asyn
     logger.info("[agent] %s registered promo %s (%d%%)", row.action_type, row.promo_id, int(discount))
 
 
+async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession) -> None:
+    """Set the merchant's active ORDER-LEVEL cart-recovery discount.
+
+    This is the correct shape for a cart-abandon recovery: it discounts the
+    shopper's existing cart total (applied in cart._apply_recovery), and leaves
+    every product on the browse grid at full price. It still carries this action's
+    promo_id so a checkout under the offer attributes to it in the dashboard.
+    """
+    from app.services import delta as delta_svc
+    from app.services.profile import load_constraints
+    from app.models.schemas import RecoveryOffer
+
+    state = await delta_svc.load_state(row.merchant_id)
+    if not state:
+        logger.warning(
+            "[agent] recovery_offer: state not found for merchant %s — recovery not applied",
+            row.merchant_id,
+        )
+        return
+
+    # Qwen chooses the depth; clamp to the merchant's discount ceiling (Layer 2).
+    constraints = await load_constraints(db, row.merchant_id)
+    discount = _payload_discount(payload, _default_discount("recovery_offer"), constraints.max_discount_percent)
+    state.recovery = RecoveryOffer(
+        percent=discount,
+        label=f"Complete your order — {int(discount)}% off",
+        expires_at=_payload_duration_ms(payload),
+        promo_id=row.promo_id,
+        triggered_by="auto",
+    )
+    await delta_svc.save_state(row.merchant_id, state)
+    logger.info("[agent] recovery_offer set order-level recovery %d%% (promo %s)", int(discount), row.promo_id)
+
+
 async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
     """Apply the action's payload to the live store state."""
     from app.services import delta as delta_svc
 
     payload = row.payload or {}
 
-    cfg = _PROMO_ACTIONS.get(row.action_type)
-    if cfg:
-        await _register_promo(row, cfg, payload, db)
+    if row.action_type == "recovery_offer":
+        await _register_recovery(row, payload, db)
+
+    elif row.action_type in _PROMO_LABELS:
+        await _register_promo(row, _PROMO_LABELS[row.action_type], payload, db)
 
     elif row.action_type == "layout_morph":
         state = await delta_svc.load_state(row.merchant_id)

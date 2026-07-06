@@ -142,13 +142,25 @@ async def checkout(
             promo_ids.append(promo.id)
 
     subtotal = round(sum(i.line_total for i in order_items), 2)
+
+    # Order-level cart-recovery discount (set when a recovery_offer was approved).
+    # It drops the order total and, crucially, attributes the sale to that action
+    # so the dashboard money-shot reads the AI-driven revenue instead of $0.
+    recovery = state.recovery if state else None
+    discount_amount = 0.0
+    if recovery and recovery.percent > 0 and recovery.expires_at > _now():
+        discount_amount = round(subtotal * recovery.percent / 100, 2)
+        if recovery.promo_id:
+            promo_ids.append(recovery.promo_id)
+    total = round(subtotal - discount_amount, 2)
+
     order = OrderDB(
         id=f"ord_{uuid.uuid4().hex[:12]}",
         merchant_id=merchant_id,
         session_id=session_id,
         items=[i.model_dump() for i in order_items],
         subtotal=subtotal,
-        total=subtotal,  # no shipping/tax in the demo
+        total=total,  # subtotal minus any recovery discount; no shipping/tax in the demo
         status=OrderStatus.PAID.value,  # payment is simulated as successful
         customer_name=customer.name,
         customer_email=customer.email,
