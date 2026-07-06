@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     flash_sale_default_discount_percent: float = 15.0
     scarcity_default_discount_percent: float = 10.0
     agent_action_duration_minutes: int = 30
+    # Grounded revenue-impact estimate = anomaly_count × avg catalog price × rate.
+    # These replace Qwen's ungrounded guess so the number is real + explainable.
+    recovery_gmv_rate: float = 0.5   # expected recovered $ per abandoned cart
+    flash_gmv_rate: float = 0.15     # expected uplift $ per surged view
 
     # ── App ───────────────────────────────────────────────
     app_env: str = "development"

@@ -66,6 +66,25 @@ The merchant approves before execution. Make it compelling.
 Return ONLY JSON."""
 
 
+def _extract_count(anomaly_desc: str) -> int:
+    """The anomaly magnitude captured at trigger time (e.g. '5 abandons', '24
+    views') — the honest basis for a revenue estimate. 0 if none found."""
+    import re
+    m = re.search(r"\d+", anomaly_desc or "")
+    return int(m.group()) if m else 0
+
+
+def grounded_gmv(action_type: str, anomaly_count: int, avg_price: float) -> float:
+    """A revenue-impact estimate tied to REAL signals instead of a Qwen guess:
+    the anomaly magnitude × the catalog's average price × a tunable per-type rate.
+    Returns 0.0 when we can't ground it (caller then falls back to Qwen's number)."""
+    if avg_price <= 0 or anomaly_count <= 0:
+        return 0.0
+    s = get_settings()
+    rate = s.recovery_gmv_rate if action_type == "recovery_offer" else s.flash_gmv_rate
+    return round(anomaly_count * avg_price * rate, 2)
+
+
 def compose_decision_prompt(
     *,
     store_name: str,
@@ -144,6 +163,16 @@ async def run_decision_cycle(
         f"{p.name} (${p.price}, stock: {p.stock})" for p in products
     ) or "no products yet"
 
+    # Catalog-wide average price (not just the 10-row prompt sample) — the honest
+    # basis for the grounded revenue estimate below.
+    from sqlalchemy import func
+    avg_price = float(await db.scalar(
+        select(func.avg(ProductDB.price))
+        .where(ProductDB.merchant_id == merchant_id)
+        .where(ProductDB.is_active == True)
+        .where(ProductDB.price > 0)
+    ) or 0.0)
+
     # Pull prior-outcome memory and inject it — the cognitive loop closes here.
     from app.services.memory import get_memory, build_memory_context
     try:
@@ -188,6 +217,14 @@ async def run_decision_cycle(
         logger.warning(f"[decision] unknown action_type '{raw_type}', defaulting to flash_sale")
         action_type_enum = AgentActionType.FLASH_SALE
 
+    # Ground the revenue estimate in the real anomaly magnitude + catalog price,
+    # rather than trusting Qwen's fabricated number (which swings wildly per call).
+    # Fall back to Qwen's figure only when we have nothing to ground it on.
+    anomaly_count = _extract_count(anomaly_desc)
+    est_gmv = grounded_gmv(action_type_enum.value, anomaly_count, avg_price)
+    if est_gmv <= 0:
+        est_gmv = float(data.get("estimated_gmv", 0) or 0)
+
     action_db = AgentActionDB(
         id=str(uuid4()),
         merchant_id=merchant_id,
@@ -196,7 +233,7 @@ async def run_decision_cycle(
         trigger=str(data.get("trigger", anomaly_desc))[:500],
         title=str(data.get("title", "Action ready"))[:200],
         description=str(data.get("description", ""))[:500],
-        estimated_gmv=float(data.get("estimated_gmv", 0) or 0),
+        estimated_gmv=est_gmv,
         estimated_confidence=min(1.0, float(data.get("estimated_confidence", 0.7) or 0.7)),
         payload=data.get("payload") or {},
         brand_check=str(data.get("brand_check", ""))[:500],
