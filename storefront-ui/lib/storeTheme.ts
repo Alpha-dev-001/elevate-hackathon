@@ -45,6 +45,8 @@ export function storeThemeVars(store: PublicStore): React.CSSProperties {
     '--s-text-subtle': textSubtle,
     '--s-accent': palette.accent,
     '--s-accent-text': accentText,
+    '--s-cta': accentText,                                     // button fill: accent, darkened if it can't be seen on the page
+    '--s-on-cta': readableOn(palette.background, accentText),  // label that reads on that fill
     '--s-primary': palette.primary,
     '--s-secondary': palette.secondary,
     '--s-surface': blendHex(palette.background, palette.text, 0.05),
@@ -108,10 +110,13 @@ export function resolveTheme(store: PublicStore): ResolvedTheme {
         ? '2.5rem'
         : '1.5rem'
 
+    const ctaFill = readableOn(bt.colors.accent, bt.colors.background)
     const cssVars = {
       '--s-primary': bt.colors.primary,
       '--s-accent': bt.colors.accent,
-      '--s-accent-text': readableOn(bt.colors.accent, bt.colors.background),
+      '--s-accent-text': ctaFill,
+      '--s-cta': ctaFill,                                          // button fill: accent, darkened until legible on the page
+      '--s-on-cta': readableOn(bt.colors.background, ctaFill),     // label that reads on that fill
       '--s-bg': bt.colors.background,
       '--s-surface': bt.colors.surface,
       '--s-text': bt.colors.text,
@@ -155,6 +160,8 @@ export function resolveTheme(store: PublicStore): ResolvedTheme {
     '--s-primary': store.palette.primary,
     '--s-accent': store.palette.accent,
     '--s-accent-text': accentText,
+    '--s-cta': accentText,                                          // button fill: accent, darkened if unreadable on the page
+    '--s-on-cta': readableOn(store.palette.background, accentText), // label that reads on that fill
     '--s-bg': store.palette.background,
     '--s-surface': blendHex(store.palette.background, store.palette.text, 0.05),
     '--s-text': store.palette.text,

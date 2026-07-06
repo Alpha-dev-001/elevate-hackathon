@@ -39,7 +39,7 @@ export function FallbackStorefront({ store, slug }: { store: PublicStore; slug: 
     <main data-testid="fallback-storefront" style={theme.cssVars}>
       {store.promos.length > 0 && (
         <div className="w-full text-center py-2.5 text-sm font-medium"
-             style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}>
+             style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
           {store.promos[0].label}
         </div>
       )}
@@ -48,7 +48,7 @@ export function FallbackStorefront({ store, slug }: { store: PublicStore; slug: 
         onClick={() => openCart(true)}
         aria-label={`Open cart (${cartCount} items)`}
         className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
-        style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+        style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
       >
         <span aria-hidden className="text-lg">🛒</span>
         {cartCount > 0 && (
@@ -123,7 +123,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
       className="text-xs font-mono uppercase tracking-wide px-3 py-1.5 rounded-full transition-colors"
       style={
         active
-          ? { background: 'var(--s-accent)', color: 'var(--s-bg)' }
+          ? { background: 'var(--s-cta)', color: 'var(--s-on-cta)' }
           : {
               background: 'transparent',
               color: 'var(--s-text-muted)',

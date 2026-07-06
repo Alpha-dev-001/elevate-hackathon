@@ -49,7 +49,20 @@ export function ProductDrawer({
           style={{ fontFamily: 'var(--s-display)' }}>
         {p.name}
       </h2>
-      <p className={big ? 'text-2xl' : 'text-lg'} style={{ color: ctaBg }}>${p.price}</p>
+      <div className="flex items-baseline flex-wrap gap-x-3 gap-y-1">
+        <p className={big ? 'text-2xl' : 'text-lg'} style={{ color: ctaBg }}>${p.price}</p>
+        {p.compare_at_price != null && (
+          <span className={big ? 'text-xl line-through' : 'text-base line-through'} style={{ color: 'var(--s-text-subtle)' }}>
+            ${p.compare_at_price.toFixed(2)}
+          </span>
+        )}
+        {p.promo_label && (
+          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: ctaBg, color: ctaText }}>
+            {p.promo_label}
+          </span>
+        )}
+      </div>
       {p.description && (
         <p className="max-w-prose leading-relaxed" style={{ color: 'var(--s-text-muted)' }}>{p.description}</p>
       )}

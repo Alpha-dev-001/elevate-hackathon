@@ -12,7 +12,7 @@ export function PillNav({ store, activeCategory, onSelect }: NavProps) {
                   className="whitespace-nowrap px-4 py-1.5 rounded-full transition-colors"
                   style={
                     active
-                      ? { background: 'var(--s-accent)', color: 'var(--s-bg)' }
+                      ? { background: 'var(--s-cta)', color: 'var(--s-on-cta)' }
                       : { color: 'var(--s-text-muted)', border: '1px solid color-mix(in srgb, var(--s-text) 18%, transparent)' }
                   }>
             {c ?? 'All'}

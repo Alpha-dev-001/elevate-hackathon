@@ -85,7 +85,7 @@ export function DSLRenderer({
     <StoreShell brandToken={store.brand_token} cssVars={theme.cssVars}>
       {showPromoBar && (
         <div className="w-full text-center py-2.5 text-sm font-medium"
-             style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}>
+             style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
           {store.promos[0].label}
         </div>
       )}
@@ -104,7 +104,7 @@ export function DSLRenderer({
             onClick={() => openCart(true)}
             aria-label={`Open cart (${cartCount} items)`}
             className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
-            style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+            style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
           >
             <span aria-hidden className="text-lg">🛒</span>
             {cartCount > 0 && (

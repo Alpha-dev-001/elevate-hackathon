@@ -15,7 +15,7 @@ export function ImageBelowTextCard({ product, cornerRadius, onOpen }: CardProps)
       <span className="block text-lg font-medium" style={{ fontFamily: 'var(--s-display)', color: 'var(--s-text)' }}>
         {product.name}
       </span>
-      <span className="block text-xs mb-2" style={{ color: 'var(--s-accent)' }}>${product.price}</span>
+      <span className="block text-xs mb-2" style={{ color: 'var(--s-cta)' }}>${product.price}</span>
       <div className="w-full aspect-[3/4] overflow-hidden" style={{ borderRadius: RADIUS[cornerRadius], background: 'var(--s-surface)' }}>
         <ProductImage src={product.image_url} alt={product.name} initial={product.name} className="w-full h-full object-cover" />
       </div>

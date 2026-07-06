@@ -31,7 +31,7 @@ export function CardAddToCart({
           ? 'opacity-0 translate-y-1 group-hover:opacity-100 group-hover:translate-y-0 [@media(hover:none)]:opacity-100 [@media(hover:none)]:translate-y-0'
           : 'opacity-100',
       ].join(' ')}
-      style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+      style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
     >
       {product.available ? (
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"

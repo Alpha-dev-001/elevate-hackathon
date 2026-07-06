@@ -63,7 +63,7 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
         onClick={() => openCart(true)}
         aria-label={`Open cart (${cartCount} items)`}
         className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg"
-        style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+        style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
       >
         <span aria-hidden className="text-lg">🛒</span>
         {cartCount > 0 && (
@@ -100,7 +100,7 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
               <div className="w-20 h-20 [&>svg]:w-full [&>svg]:h-full" style={{ opacity: 0.2 }} dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }} />
             )}
             {product.promo_label && (
-              <span className="absolute top-3 left-3 text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}>
+              <span className="absolute top-3 left-3 text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
                 {product.promo_label}
               </span>
             )}
@@ -142,7 +142,7 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
                   disabled={busy}
                   onClick={() => add(product.id, qty)}
                   className="flex-1 rounded-md py-3 text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-                  style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+                  style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
                 >
                   Add to cart
                 </button>

@@ -12,7 +12,7 @@ export function EditorialHorizontalCard({ product, onOpen }: CardProps) {
       </div>
       <div className="flex flex-col justify-center gap-1 p-4">
         <span className="font-medium" style={{ fontFamily: 'var(--s-display)', color: 'var(--s-text)' }}>{product.name}</span>
-        <span className="text-sm font-mono" style={{ color: 'var(--s-accent)' }}>${product.price}</span>
+        <span className="text-sm font-mono" style={{ color: 'var(--s-cta)' }}>${product.price}</span>
         {product.description && <span className="text-xs line-clamp-2" style={{ color: 'var(--s-text-muted)' }}>{product.description}</span>}
       </div>
     </button>

@@ -139,7 +139,7 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                     <button
                       onClick={() => setView('checkout')}
                       className="w-full rounded-md py-3 text-sm font-semibold hover:opacity-90 transition-opacity"
-                      style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+                      style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
                     >
                       Checkout →
                     </button>
@@ -163,7 +163,7 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                   type="submit"
                   disabled={placing}
                   className="w-full rounded-md py-3 text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-50"
-                  style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+                  style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
                 >
                   {placing ? 'Placing order…' : 'Place order'}
                 </button>
@@ -190,7 +190,7 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                 <button
                   onClick={() => { setView('cart'); setOpen(false); setOrder(null) }}
                   className="mt-4 rounded-md py-2.5 px-8 text-sm font-semibold hover:opacity-90 transition-opacity"
-                  style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+                  style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
                 >
                   Keep shopping
                 </button>

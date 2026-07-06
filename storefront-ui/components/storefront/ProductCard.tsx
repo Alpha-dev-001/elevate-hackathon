@@ -109,7 +109,7 @@ export function ProductCard({
           {product.promo_label && (
             <span
               className="absolute top-2 left-2 text-[10px] font-semibold px-2 py-0.5 rounded-full z-10"
-              style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}
+              style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
             >
               {product.promo_label}
             </span>
@@ -211,8 +211,8 @@ export function ProductCard({
           onClick={() => add(product.id)}
           className="mt-3 w-full py-2 text-sm font-semibold transition-opacity hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
-            background: 'var(--s-accent)',
-            color: 'var(--s-bg)',
+            background: 'var(--s-cta)',
+            color: 'var(--s-on-cta)',
             borderRadius: radius,
           }}
         >

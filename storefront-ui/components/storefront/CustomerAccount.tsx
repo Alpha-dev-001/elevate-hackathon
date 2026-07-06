@@ -78,7 +78,7 @@ export function CustomerAccount({ slug }: { slug: string }) {
         {customer ? (
           <div className="flex flex-col gap-3">
             <a href={`/s/${slug}`} className="w-full text-center py-3 rounded-full font-medium"
-               style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}>Continue shopping →</a>
+               style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>Continue shopping →</a>
             <button onClick={() => logout()} className="text-sm underline self-center" style={{ color: 'var(--s-text-muted)' }}>Sign out</button>
           </div>
         ) : (
@@ -87,7 +87,7 @@ export function CustomerAccount({ slug }: { slug: string }) {
               {(['login', 'register'] as Mode[]).map((m) => (
                 <button key={m} onClick={() => { setMode(m); setErr(null) }}
                         className="flex-1 py-2 rounded-full text-sm font-medium transition-colors capitalize"
-                        style={mode === m ? { background: 'var(--s-accent)', color: 'var(--s-bg)' } : { color: 'var(--s-text-muted)' }}>
+                        style={mode === m ? { background: 'var(--s-cta)', color: 'var(--s-on-cta)' } : { color: 'var(--s-text-muted)' }}>
                   {m === 'login' ? 'Sign in' : 'Register'}
                 </button>
               ))}
@@ -103,7 +103,7 @@ export function CustomerAccount({ slug }: { slug: string }) {
               {err && <p className="text-sm" style={{ color: 'var(--s-danger, #FF6B6B)' }}>{err}</p>}
               <button type="submit" disabled={busy}
                       className="w-full py-3 rounded-full font-medium disabled:opacity-50 transition-opacity"
-                      style={{ background: 'var(--s-accent)', color: 'var(--s-bg)' }}>
+                      style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
                 {busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
               </button>
             </form>

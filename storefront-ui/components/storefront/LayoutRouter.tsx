@@ -78,8 +78,8 @@ export function LayoutRouter({ store, slug }: { store: PublicStore; slug: string
       aria-label={`Open cart (${cartCount} item${cartCount === 1 ? '' : 's'})`}
       className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
       style={{
-        background: 'var(--s-accent)',
-        color: 'var(--s-bg)',
+        background: 'var(--s-cta)',
+        color: 'var(--s-on-cta)',
       }}
     >
       <span aria-hidden className="text-lg">🛒</span>
@@ -223,7 +223,7 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
       className="text-xs font-mono uppercase tracking-wide px-3 py-1.5 rounded-full transition-colors"
       style={
         active
-          ? { background: 'var(--s-accent)', color: 'var(--s-bg)' }
+          ? { background: 'var(--s-cta)', color: 'var(--s-on-cta)' }
           : {
               background: 'transparent',
               color: 'var(--s-text-muted)',
