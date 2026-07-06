@@ -63,7 +63,10 @@ async def save_dsl(
     if merchant.slug != slug:
         raise HTTPException(status_code=403, detail="Not your store")
     profile, token = await _load_token(merchant.id, db)
-    normalized = normalize_dsl(dsl.model_dump())
+    # mode="json" so SectionType enums serialize to their string values ("hero"),
+    # not enum members — str(SectionType.hero) is "SectionType.hero", which the
+    # cleaner can't parse and would silently drop the whole layout.
+    normalized = normalize_dsl(dsl.model_dump(mode="json"))
     await _persist_dsl(profile, token, normalized, merchant.id, db)
     return normalized.model_dump()
 

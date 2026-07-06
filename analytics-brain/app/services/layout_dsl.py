@@ -105,10 +105,19 @@ def _clean_sections(raw_sections: object) -> list[LayoutSection]:
         for s in raw_sections:
             if not isinstance(s, dict):
                 continue
-            try:
-                st = SectionType(str(s.get("type", "")).strip().replace("-", "_"))
-            except ValueError:
-                continue
+            raw_type = s.get("type", "")
+            if isinstance(raw_type, SectionType):
+                st = raw_type
+            else:
+                # Accept "hero", "product-grid", and even a stringified enum
+                # member ("SectionType.hero") — never silently drop a real section.
+                t = str(raw_type).strip().replace("-", "_")
+                if "." in t:
+                    t = t.rsplit(".", 1)[-1]
+                try:
+                    st = SectionType(t)
+                except ValueError:
+                    continue
             variant = coerce_variant(st, str(s.get("variant", "")))
             props = s.get("props") if isinstance(s.get("props"), dict) else {}
             out.append(LayoutSection(type=st, variant=variant, props=props))
