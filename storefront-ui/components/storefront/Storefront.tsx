@@ -50,10 +50,14 @@ export function Storefront({ slug, initialProductId }: { slug: string; initialPr
     const conn = connectStorefront(mid, {
       onStateUpdated: () => {
         api.getStore(slug).then(setStore).catch(() => {})
+        // Refetch the cart too: an approved recovery offer discounts the OPEN
+        // cart's total (and availability may flip after a sale). Without this the
+        // banner morphs but the cart the shopper is staring at stays stale.
+        initCart(slug)
       },
     })
     return () => conn.close()
-  }, [store?.merchant_id, slug])
+  }, [store?.merchant_id, slug, initCart])
 
   // Load the brand's Google Fonts. Prefer brand_token fonts when present —
   // they may differ from the legacy typography object.

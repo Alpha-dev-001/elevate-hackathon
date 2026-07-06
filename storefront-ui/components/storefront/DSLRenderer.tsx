@@ -79,11 +79,25 @@ export function DSLRenderer({
 
   const theme = resolveTheme(store)
   const hasAnnounce = parsed.sections[0]?.variant === 'announcement-bar'
-  // Promo bar is redundant when an announcement-bar section already leads.
-  const showPromoBar = store.promos.length > 0 && !hasAnnounce
+  // An active cart-recovery offer takes the top banner: it's the live nudge to
+  // finish an abandoned cart. It's order-level (the browse grid stays full price)
+  // so it reads as an announcement, not a store-wide sale.
+  const rec = store.recovery
+  const recoveryActive = !!rec && rec.percent > 0 && rec.expires_at > Date.now()
+  // Promo bar is redundant when an announcement-bar section or the recovery
+  // banner already leads.
+  const showPromoBar = store.promos.length > 0 && !hasAnnounce && !recoveryActive
 
   return (
     <StoreShell brandToken={store.brand_token} cssVars={theme.cssVars}>
+      {recoveryActive && rec && (
+        <div className="w-full text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2 flex-wrap px-4"
+             style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
+          <span aria-hidden>🛒</span>
+          <span>{rec.label}</span>
+          <PromoCountdown expiresAt={rec.expires_at} />
+        </div>
+      )}
       {showPromoBar && (
         <div className="w-full text-center py-2.5 text-sm font-medium flex items-center justify-center gap-2 flex-wrap px-4"
              style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>

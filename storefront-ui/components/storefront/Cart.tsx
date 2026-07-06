@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
 import { useCart, getSessionId } from '@/lib/cart'
 import { ProductImage } from '@/components/storefront/ProductImage'
+import { PromoCountdown } from './PromoCountdown'
 import type { Order } from '@/types/schemas'
 
 /**
@@ -25,6 +26,11 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
   const [order, setOrder] = useState<Order | null>(null)
 
   const items = cart?.items ?? []
+  const subtotal = cart?.subtotal ?? 0
+  const discountPct = cart?.discount_percent ?? 0
+  const discountAmt = cart?.discount_amount ?? 0
+  const hasDiscount = discountPct > 0 && discountAmt > 0
+  const total = hasDiscount ? (cart?.total ?? subtotal) : subtotal
   const close = () => {
     setOpen(false)
     // Reset to cart view next time it opens (unless an order is showing).
@@ -132,10 +138,40 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                 </div>
                 {items.length > 0 && (
                   <footer className="px-5 py-4" style={{ borderTop: '1px solid color-mix(in srgb, var(--s-text) 12%, transparent)' }}>
-                    <div className="flex justify-between mb-3">
-                      <span style={{ color: 'var(--s-text-muted)' }}>Subtotal</span>
-                      <span className="font-semibold">${(cart?.subtotal ?? 0).toFixed(2)}</span>
-                    </div>
+                    {hasDiscount && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
+                        className="mb-3 rounded-md px-3 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 flex-wrap text-center"
+                        style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
+                      >
+                        <span aria-hidden>🛒</span>
+                        <span>{cart?.discount_label ?? `Complete your order — ${Math.round(discountPct)}% off`}</span>
+                        {cart?.discount_expires_at ? <PromoCountdown expiresAt={cart.discount_expires_at} /> : null}
+                      </motion.div>
+                    )}
+                    {hasDiscount ? (
+                      <>
+                        <div className="flex justify-between mb-1 text-sm">
+                          <span style={{ color: 'var(--s-text-muted)' }}>Subtotal</span>
+                          <span className="line-through" style={{ color: 'var(--s-text-muted)' }}>${subtotal.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between mb-2 text-sm">
+                          <span style={{ color: 'var(--s-text-muted)' }}>Recovery discount ({Math.round(discountPct)}%)</span>
+                          <span className="font-semibold" style={{ color: 'var(--s-cta)' }}>−${discountAmt.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between mb-3">
+                          <span className="font-semibold">Total</span>
+                          <span className="font-semibold text-base">${total.toFixed(2)}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between mb-3">
+                        <span style={{ color: 'var(--s-text-muted)' }}>Subtotal</span>
+                        <span className="font-semibold">${subtotal.toFixed(2)}</span>
+                      </div>
+                    )}
                     <button
                       onClick={() => setView('checkout')}
                       className="w-full rounded-md py-3 text-sm font-semibold hover:opacity-90 transition-opacity"
@@ -154,9 +190,15 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                 <Field label="Name" value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
                 <Field label="Email" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
                 <Field label="Order note (optional)" value={form.note} onChange={(v) => setForm({ ...form, note: v })} />
+                {hasDiscount && (
+                  <div className="flex justify-between mt-2 text-xs">
+                    <span style={{ color: 'var(--s-cta)' }}>{cart?.discount_label ?? 'Recovery discount'}</span>
+                    <span style={{ color: 'var(--s-cta)' }}>−${discountAmt.toFixed(2)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between mt-2 text-sm">
                   <span style={{ color: 'var(--s-text-muted)' }}>Total</span>
-                  <span className="font-semibold">${(cart?.subtotal ?? 0).toFixed(2)}</span>
+                  <span className="font-semibold">${total.toFixed(2)}</span>
                 </div>
                 {checkoutErr && <p className="text-sm" style={{ color: 'var(--s-accent-text)' }}>{checkoutErr}</p>}
                 <button
