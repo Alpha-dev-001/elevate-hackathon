@@ -7,6 +7,7 @@ import { api, ApiError } from '@/lib/api'
 import { parseProductCsv } from '@/lib/csv'
 import { useStore } from '@/lib/store'
 import { ProductImage } from '@/components/storefront/ProductImage'
+import { CatalogReview } from '@/components/onboarding/CatalogReview'
 import type { Product } from '@/types/schemas'
 
 /**
@@ -137,6 +138,14 @@ export default function ProductsPage() {
       </div>
 
       {error && <p className="text-danger text-sm font-mono max-w-2xl w-full">{error}</p>}
+
+      {/* Qwen reviews the import and surfaces only the products that need a human
+          decision — fix, hide, or keep. */}
+      <CatalogReview
+        products={products}
+        onProductUpdated={(p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)))}
+        onProductHidden={(id) => setProducts((prev) => prev.filter((x) => x.id !== id))}
+      />
 
       {/* product list */}
       {products.length > 0 && (
