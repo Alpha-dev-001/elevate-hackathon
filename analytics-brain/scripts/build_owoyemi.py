@@ -47,8 +47,10 @@ STORE_NAME = "Owoyemi of Offa"
 SLUG = "owoyemi-of-offa"
 CATEGORY = "fashion"
 DESCRIPTION = "Curated designer footwear and accessories."
-EMAIL = "owoyemi@demo.elevate"
-PASSWORD = "owoyemi123"
+EMAIL = os.getenv("DEMO_MERCHANT_EMAIL", "owoyemi@demo.elevate")
+# Never hard-code a working credential in a public repo. Set DEMO_MERCHANT_PASSWORD
+# when (re)building the demo store; the fallback is a placeholder, not a real login.
+PASSWORD = os.getenv("DEMO_MERCHANT_PASSWORD", "change-me-before-use")
 BASELINE_PRICE = float(os.getenv("BASELINE_PRICE", "25"))
 DEFAULT_STOCK = 25
 VL_CONCURRENCY = int(os.getenv("VL_CONCURRENCY", "4"))
