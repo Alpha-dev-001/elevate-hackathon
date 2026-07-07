@@ -6,6 +6,7 @@ import { api, ApiError } from '@/lib/api'
 import { useCart, getSessionId } from '@/lib/cart'
 import { ProductImage } from '@/components/storefront/ProductImage'
 import { PromoCountdown } from './PromoCountdown'
+import { IconCart } from '@/components/icons'
 import type { Order } from '@/types/schemas'
 
 /**
@@ -146,7 +147,7 @@ export function Cart({ variant = 'slide-panel' }: { variant?: CartVariant } = {}
                         className="mb-3 rounded-md px-3 py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 flex-wrap text-center"
                         style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
                       >
-                        <span aria-hidden>🛒</span>
+                        <IconCart size={14} />
                         <span>{cart?.discount_label ?? `Complete your order — ${Math.round(discountPct)}% off`}</span>
                         {cart?.discount_expires_at ? <PromoCountdown expiresAt={cart.discount_expires_at} /> : null}
                       </motion.div>

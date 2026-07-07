@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { IconCart } from '@/components/icons'
 import { motion, useReducedMotion } from 'framer-motion'
 import type { PublicStore } from '@/types/schemas'
 import { resolveTheme } from '@/lib/storeTheme'
@@ -50,7 +51,7 @@ export function FallbackStorefront({ store, slug }: { store: PublicStore; slug: 
         className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
         style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
       >
-        <span aria-hidden className="text-lg">🛒</span>
+        <IconCart size={20} />
         {cartCount > 0 && (
           <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center"
                 style={{ background: 'var(--s-bg)', color: 'var(--s-text)', border: '1px solid var(--s-accent)' }}>

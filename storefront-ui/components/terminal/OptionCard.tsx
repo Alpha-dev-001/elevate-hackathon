@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { api } from '@/lib/api'
+import { IconBolt } from '@/components/icons'
 import type { AgentAction } from '@/types/schemas'
 
 // ── Reduced-motion hook ──────────────────────────────────────────────────────
@@ -136,8 +137,8 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
       </div>
 
       {/* Trigger */}
-      <p className="text-xs font-mono mb-3" style={{ color: 'var(--color-warning)' }}>
-        ⚡ {action.trigger}
+      <p className="text-xs font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-warning)' }}>
+        <IconBolt size={13} /> {action.trigger}
       </p>
 
       {/* Title */}

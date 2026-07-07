@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
+import { IconCart, IconTrend } from '@/components/icons'
 import type { Merchant } from '@/types/schemas'
 
 // ── Reduced-motion hook ──────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: Sto
               className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
               style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
             >
-              🛒 Cart-abandon surge
+              <span className="inline-flex items-center justify-center gap-2"><IconCart size={16} /> Cart-abandon surge</span>
             </motion.button>
             <motion.button
               onClick={() => onSimulate('velocity_spike')}
@@ -125,7 +126,7 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: Sto
               className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
               style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
             >
-              📈 Traffic spike
+              <span className="inline-flex items-center justify-center gap-2"><IconTrend size={16} /> Traffic spike</span>
             </motion.button>
           </div>
         )}

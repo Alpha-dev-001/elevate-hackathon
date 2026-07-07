@@ -87,7 +87,7 @@ export function StoreBuilder({ slug }: { slug: string }) {
           <div className="rounded-2xl p-6 max-w-sm w-full mx-4 text-center"
                style={{ background: 'var(--color-surface, #111113)', border: '1px solid var(--color-border, #2A2A30)' }}
                onClick={(e) => e.stopPropagation()}>
-            <p className="text-lg font-semibold mb-1">Your store is live ✨</p>
+            <p className="text-lg font-semibold mb-1">Your store is live</p>
             <p className="text-sm mb-5" style={{ color: 'var(--color-text-muted, #9AA0A8)' }}>
               Do you want to view your store now?
             </p>

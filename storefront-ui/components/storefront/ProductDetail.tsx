@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { IconCart } from '@/components/icons'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
@@ -65,7 +66,7 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
         className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg"
         style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
       >
-        <span aria-hidden className="text-lg">🛒</span>
+        <IconCart size={20} />
         {cartCount > 0 && (
           <span
             className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center"

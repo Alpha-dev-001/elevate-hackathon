@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { IconCart } from '@/components/icons'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import type { PublicProduct, PublicStore } from '@/types/schemas'
 import { resolveTheme } from '@/lib/storeTheme'
@@ -82,7 +83,7 @@ export function LayoutRouter({ store, slug }: { store: PublicStore; slug: string
         color: 'var(--s-on-cta)',
       }}
     >
-      <span aria-hidden className="text-lg">🛒</span>
+      <IconCart size={20} />
       {cartCount > 0 && (
         <span
           className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center"

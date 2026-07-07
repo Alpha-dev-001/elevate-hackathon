@@ -16,6 +16,7 @@ import { PromoCountdown } from './PromoCountdown'
 import { useCart } from '@/lib/cart'
 import { useCustomer } from '@/lib/customerAuth'
 import { useEffect } from 'react'
+import { IconCart, IconUser } from '@/components/icons'
 
 import type { EditTarget } from '@/lib/dslRegistry'
 
@@ -93,7 +94,7 @@ export function DSLRenderer({
       {recoveryActive && rec && (
         <div className="w-full text-center py-2.5 text-sm font-semibold flex items-center justify-center gap-2 flex-wrap px-4"
              style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
-          <span aria-hidden>🛒</span>
+          <IconCart size={16} />
           <span>{rec.label}</span>
           <PromoCountdown expiresAt={rec.expires_at} />
         </div>
@@ -113,7 +114,7 @@ export function DSLRenderer({
             className="fixed top-4 right-20 z-30 h-10 px-3 rounded-full flex items-center gap-1.5 text-sm font-medium shadow-lg hover:opacity-90 transition-opacity"
             style={{ background: 'var(--s-surface)', color: 'var(--s-text)' }}
           >
-            <span aria-hidden>{customer ? '👤' : '↪'}</span>
+            {customer ? <IconUser size={16} /> : <span aria-hidden>↪</span>}
             <span className="hidden sm:inline">{customer ? customer.name.split(' ')[0] : 'Sign in'}</span>
           </a>
           <button
@@ -122,7 +123,7 @@ export function DSLRenderer({
             className="fixed top-4 right-4 z-30 rounded-full w-12 h-12 flex items-center justify-center shadow-lg hover:opacity-90 transition-opacity"
             style={{ background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}
           >
-            <span aria-hidden className="text-lg">🛒</span>
+            <IconCart size={20} />
             {cartCount > 0 && (
               <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center"
                     style={{ background: 'var(--s-bg)', color: 'var(--s-text)', border: '1px solid var(--s-accent)' }}>
