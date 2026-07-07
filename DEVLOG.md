@@ -949,3 +949,36 @@ live. Grounded estimate confirmed against a real Qwen decision cycle.
 
 **Next:** the same live-push pattern for stock/availability changes; and clearing
 pre-fix "$0" executed-action rows so the attribution log stays clean for the demo.
+
+
+### Catalog review, onboarding guardrails, and the details — 2026-07-07
+
+**Catalog review — the autopilot's human-in-the-loop for onboarding.** Qwen
+catalogs your products; this new step has it *review* the import and surface only
+the ones a human should decide on — a dead/missing image, no price. Each is an
+option card: fix inline, hide from the store, or keep. Broken-image detection runs
+in the browser (a real load test), so it catches dead links the server never sees —
+exactly what a customer's browser would hit. Nothing is auto-changed; the merchant
+decides. Verified end-to-end: two products, one with a broken image URL → only the
+broken one is flagged → Hide clears it.
+
+**A guardrail learned the hard way.** A signed-in *live* merchant could re-run
+onboarding with a new logo — which regenerated and **overwrote** their brand, logo,
+and layout (the catalog survived). `/onboarding/start` and `/publish` now hard-block
+(409) for a live store, and the setup screen redirects a live merchant to their
+terminal. There was no way to *leave* a session either, so a fresh logo appeared to
+"do nothing" — added a `/logout` (clears the cookie, drops client state) with a Sign
+out link. Recovery for the store that got clobbered: re-derive its brand from the
+real logo, keep the catalog, lock the intended layout + accent.
+
+**The details that decide whether a demo lands.** The onboarding product list used a
+raw `<img>` — a dead URL showed the browser's broken-image glyph on camera; it now
+uses the same branded-fallback tile as the storefront. And the color emoji sprinkled
+across the terminal and storefront (cart, user, bolt, trend) were replaced with
+monochrome line icons that inherit the UI's color, so they read as part of the
+interface instead of mismatched multicolor glyphs.
+
+**Why these matter for the story:** the catalog review is the onboarding half of the
+same idea the decision loop shows — Qwen does the work, the human approves the
+exceptions. The guardrail is the unglamorous truth of "Qwen builds the store": if it
+can build it, a wrong session can rebuild it, so the seams have to hold.
