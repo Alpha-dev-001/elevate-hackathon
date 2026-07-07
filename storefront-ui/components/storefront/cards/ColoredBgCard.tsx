@@ -2,6 +2,7 @@
 import type { CardProps } from '@/lib/dslRegistry'
 import { RADIUS } from './radius'
 import { ProductImage } from '@/components/storefront/ProductImage'
+import { CardPrice } from './CardPrice'
 
 export function ColoredBgCard({ product, cornerRadius, onOpen }: CardProps) {
   return (
@@ -12,7 +13,7 @@ export function ColoredBgCard({ product, cornerRadius, onOpen }: CardProps) {
         <ProductImage src={product.image_url} alt={product.name} initial={product.name} className="w-full h-full object-contain" />
       </div>
       <span className="block mt-3 font-medium">{product.name}</span>
-      <span className="block text-sm opacity-80">${product.price}</span>
+      <span className="block text-sm opacity-80"><CardPrice product={product} /></span>
     </button>
   )
 }

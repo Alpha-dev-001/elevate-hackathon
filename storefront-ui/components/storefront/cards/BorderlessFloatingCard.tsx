@@ -1,6 +1,7 @@
 'use client'
 import type { CardProps } from '@/lib/dslRegistry'
 import { ProductImage } from '@/components/storefront/ProductImage'
+import { CardPrice } from './CardPrice'
 
 export function BorderlessFloatingCard({ product, onOpen }: CardProps) {
   return (
@@ -11,7 +12,7 @@ export function BorderlessFloatingCard({ product, onOpen }: CardProps) {
                className="w-full h-full object-cover transition-transform duration-[400ms] ease-out group-hover:scale-[1.03]" />
       </div>
       <span className="block mt-3 text-sm font-mono" style={{ color: 'var(--s-text)' }}>{product.name}</span>
-      <span className="block text-sm font-mono" style={{ color: 'var(--s-text-muted)' }}>${product.price}</span>
+      <span className="block text-sm font-mono" style={{ color: 'var(--s-text-muted)' }}><CardPrice product={product} /></span>
     </button>
   )
 }
