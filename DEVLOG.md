@@ -1,6 +1,15 @@
 # Elevate — Dev Log
 
-> Append-only. Never rewrite entries. This is the audit trail and the blog post.
+> ⚠️ **DISCONTINUED** — This file is no longer maintained. It contains raw
+> sprint-level notes from early development, including outdated model names
+> and internal process details that do not reflect the current architecture.
+> The accurate, up-to-date technical documentation lives in:
+> - **README.md** — system overview, guardrails, fault tolerance
+> - **QWEN_USAGE.md** — Qwen call map, token economics, fault-tolerance table
+> - **docs/ARCHITECTURE.md** — system diagrams, interceptor, distinctness guarantee
+>
+> This file is kept for historical reference only. Do not use it to evaluate
+> the current system.
 
 ---
 
