@@ -9,7 +9,7 @@ def test_prompt_includes_memory_when_present():
         memory_context="What I know about this store:\n[2026-06-27] flash_sale: spike → 8 orders, $320 (merchant: approved)",
     )
     assert "8 orders, $320" in prompt
-    assert "json" in prompt.lower()           # DashScope json_object requires the literal word
+    assert "tools" in prompt.lower()           # tool-calling prompt references available tools
     assert "Haree" in prompt
 
 
@@ -21,4 +21,4 @@ def test_prompt_omits_memory_block_when_empty():
         memory_context="",
     )
     assert "What I know about this store" not in prompt
-    assert "json" in prompt.lower()
+    assert "tools" in prompt.lower()

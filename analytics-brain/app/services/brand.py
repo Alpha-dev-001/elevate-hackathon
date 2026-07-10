@@ -273,11 +273,17 @@ async def _qwen_chat(
     json_mode: bool = True,
     timeout: float = 30.0,
     attempts: int = 3,
-) -> str:
+    tools: list[dict] | None = None,
+    tool_choice: str = "auto",
+) -> str | dict:
     """One Qwen chat-completion call with bounded exponential backoff.
 
-    Returns the raw assistant message string. Raises BrandGenerationError on
-    permanent failure or after exhausting transient retries.
+    Returns the raw assistant message content string by default.
+    When ``tools`` is provided, returns the full message dict (including
+    ``tool_calls``) so the caller can parse structured tool output.
+
+    Raises BrandGenerationError on permanent failure or after exhausting
+    transient retries.
     """
     settings = get_settings()
     payload: dict = {
@@ -286,7 +292,11 @@ async def _qwen_chat(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
-    if json_mode:
+    if tools:
+        # Tool calling mode — do NOT set response_format (incompatible)
+        payload["tools"] = tools
+        payload["tool_choice"] = tool_choice
+    elif json_mode:
         payload["response_format"] = {"type": "json_object"}
 
     url = f"{settings.qwen_api_base}/chat/completions"
@@ -302,7 +312,11 @@ async def _qwen_chat(
             else:
                 if resp.status_code == 200:
                     try:
-                        return resp.json()["choices"][0]["message"]["content"]
+                        message = resp.json()["choices"][0]["message"]
+                        if tools:
+                            # Return full message for tool_calls access
+                            return message
+                        return message["content"]
                     except (KeyError, IndexError, json.JSONDecodeError) as e:
                         raise BrandGenerationError(
                             f"{model} returned an unexpected envelope: {e!s}"

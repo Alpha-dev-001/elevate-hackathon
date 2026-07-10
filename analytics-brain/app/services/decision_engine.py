@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType, WSEventType
 from app.models.db_models import AgentActionDB, MerchantDB, BrandProfileDB, ProductDB
 from app.services.brand import _qwen_chat, _extract_json, BrandGenerationError
+from app.services.tools import DECISION_TOOLS, TOOL_TO_ACTION_TYPE, narrative_from_tool, parse_tool_args
 from app.core.ws_manager import manager
 from app.core.config import get_settings
 
@@ -30,41 +31,15 @@ Brand rules (never violate): {brand_rules_summary}
 Current products: {products_summary}
 Behavior anomaly: {anomaly_description}
 {memory_block}
-Decide ONE action. Return ONLY this JSON:
-{{
-  "action_type": "<flash_sale|layout_morph|scarcity_price|recovery_offer|copy_rewrite>",
-  "trigger": "<1 sentence: what caused this>",
-  "reasoning": "<your step-by-step thinking: what you observed → why this action → expected outcome. Be specific with numbers. e.g. '12 views on slides in 30s → velocity spike → flash-sale at 15% because margin floor allows it → expected ~3 conversions from current session'>",
-  "title": "<merchant-facing card title, max 8 words>",
-  "description": "<merchant-facing description, max 20 words>",
-  "estimated_gmv": <estimated revenue impact as number>,
-  "estimated_confidence": <0.0-1.0>,
-  "payload": {{
-    "flash_sale fields if action_type=flash_sale": {{
-      "discount_percent": 15,
-      "duration_minutes": 30,
-      "target": "best_seller"
-    }},
-    "layout_morph fields if action_type=layout_morph": {{
-      "new_grid": "2col-featured",
-      "reason": "highlight trending product"
-    }},
-    "recovery_offer fields if action_type=recovery_offer": {{
-      "discount_percent": 10,
-      "duration_minutes": 30,
-      "message": "Complete your order and save"
-    }}
-  }},
-  "brand_check": "<confirm this respects brand rules or flag conflict>"
-}}
+Use the available tools to propose ONE action for the merchant to review.
+Include your step-by-step reasoning in your message — explain what you observed,
+why this action makes sense, and what outcome you expect (be specific with numbers).
 
 A recovery_offer is an ORDER-LEVEL percentage discount on the shopper's existing
 cart to win back an abandoned checkout — this store has no shipping concept, so
-never propose free shipping. Title/description must describe a "% off your order",
-matching the discount_percent you choose (typically 10-15).
+never propose free shipping.
 
-The merchant approves before execution. Make it compelling.
-Return ONLY JSON."""
+The merchant approves before execution. Make it compelling."""
 
 
 def _extract_count(anomaly_desc: str) -> int:
@@ -195,50 +170,76 @@ async def run_decision_cycle(
     estimated_tokens = len(prompt) // 4  # rough char/4 heuristic for the terminal badge
 
     try:
-        raw = await _qwen_chat(
+        message = await _qwen_chat(
             model=get_settings().qwen_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1000,
             temperature=0.5,
             timeout=45.0,
+            tools=DECISION_TOOLS,
+            tool_choice="auto",
         )
-        data = _extract_json(raw)
     except BrandGenerationError as e:
         logger.error(f"[decision] Qwen failed for {merchant_id}: {e}")
         return None
 
+    # --- Parse tool-calling response ---
+    if not isinstance(message, dict):
+        logger.error("[decision] unexpected response type from _qwen_chat (tools mode)")
+        return None
+
+    tool_calls = message.get("tool_calls") or []
+    if not tool_calls:
+        # Qwen declined to propose an action (no anomaly worth acting on)
+        logger.info(f"[decision] Qwen declined to call a tool for {merchant_id}")
+        return None
+
+    # Take the first tool call (we asked for ONE action)
+    tc = tool_calls[0]
+    tool_name = tc.get("function", {}).get("name", "")
+    tool_args = parse_tool_args(tc.get("function", {}).get("arguments", "{}"))
+
+    if not tool_name:
+        logger.warning("[decision] tool call missing function name")
+        return None
+
+    # Map tool name → AgentActionType enum
+    action_type_enum = TOOL_TO_ACTION_TYPE.get(tool_name)
+    if action_type_enum is None:
+        logger.warning(f"[decision] unknown tool '{tool_name}', defaulting to flash_sale")
+        action_type_enum = AgentActionType.FLASH_SALE
+
+    # Qwen's reasoning comes from the message content (alongside tool_calls)
+    reasoning = (message.get("content") or "")[:1000]
+
+    # Narrative fields templated from tool call + context
+    first_product_name = products[0].name if products else None
+    narrative = narrative_from_tool(
+        tool_name, tool_args, first_product_name, anomaly_desc, brand_voice
+    )
+
     promo_id = f"ELEV_{merchant_id[:4].upper()}_{secrets.token_hex(3).upper()}"
     now = int(time.time() * 1000)
 
-    # Coerce action_type to a valid enum value; default to flash_sale on unknown
-    raw_type = str(data.get("action_type", "flash_sale")).strip()
-    try:
-        action_type_enum = AgentActionType(raw_type)
-    except ValueError:
-        logger.warning(f"[decision] unknown action_type '{raw_type}', defaulting to flash_sale")
-        action_type_enum = AgentActionType.FLASH_SALE
-
-    # Ground the revenue estimate in the real anomaly magnitude + catalog price,
-    # rather than trusting Qwen's fabricated number (which swings wildly per call).
-    # Fall back to Qwen's figure only when we have nothing to ground it on.
+    # Ground the revenue estimate in the real anomaly magnitude + catalog price
     anomaly_count = _extract_count(anomaly_desc)
     est_gmv = grounded_gmv(action_type_enum.value, anomaly_count, avg_price)
     if est_gmv <= 0:
-        est_gmv = float(data.get("estimated_gmv", 0) or 0)
+        est_gmv = float(tool_args.get("estimated_gmv", 0) or 0)
 
     action_db = AgentActionDB(
         id=str(uuid4()),
         merchant_id=merchant_id,
         promo_id=promo_id,
         action_type=action_type_enum.value,
-        trigger=str(data.get("trigger", anomaly_desc))[:500],
-        reasoning=str(data.get("reasoning", ""))[:1000],
-        title=str(data.get("title", "Action ready"))[:200],
-        description=str(data.get("description", ""))[:500],
+        trigger=narrative["trigger"],
+        reasoning=reasoning,
+        title=narrative["title"][:200],
+        description=narrative["description"][:500],
         estimated_gmv=est_gmv,
-        estimated_confidence=min(1.0, float(data.get("estimated_confidence", 0.7) or 0.7)),
-        payload=data.get("payload") or {},
-        brand_check=str(data.get("brand_check", ""))[:500],
+        estimated_confidence=0.75,  # tool calling = high confidence in structured output
+        payload=tool_args,  # tool args become the execution payload directly
+        brand_check=narrative["brand_check"][:500],
         status="pending",
         created_at=now,
         trigger_description=anomaly_desc[:1000],

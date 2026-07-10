@@ -1,0 +1,205 @@
+"""Tests for app.services.tools — tool definitions, narrative generation, mapping."""
+import pytest
+from app.services.tools import (
+    DECISION_TOOLS,
+    TOOL_TO_ACTION_TYPE,
+    narrative_from_tool,
+    parse_tool_args,
+)
+from app.models.schemas import AgentActionType
+
+
+# ---------------------------------------------------------------------------
+# Tool definition schema validation
+# ---------------------------------------------------------------------------
+
+
+class TestToolDefinitions:
+    """Every tool must be a valid OpenAI-compatible function definition."""
+
+    def test_five_tools_defined(self):
+        assert len(DECISION_TOOLS) == 5
+
+    def test_all_tools_have_required_fields(self):
+        for tool in DECISION_TOOLS:
+            assert tool["type"] == "function"
+            fn = tool["function"]
+            assert "name" in fn
+            assert "description" in fn
+            assert "parameters" in fn
+            assert fn["parameters"]["type"] == "object"
+            assert "properties" in fn["parameters"]
+            assert "required" in fn["parameters"]
+
+    def test_tool_names_match_mapping(self):
+        """Every defined tool name must have a mapping in TOOL_TO_ACTION_TYPE."""
+        for tool in DECISION_TOOLS:
+            name = tool["function"]["name"]
+            assert name in TOOL_TO_ACTION_TYPE, f"Missing mapping for tool: {name}"
+
+    def test_mapping_covers_all_action_types(self):
+        """Every AgentActionType must have a corresponding tool."""
+        mapped_types = set(TOOL_TO_ACTION_TYPE.values())
+        for action_type in AgentActionType:
+            assert action_type in mapped_types, f"Missing tool for action type: {action_type}"
+
+    def test_flash_sale_has_discount_percent(self):
+        """flash_sale tool must produce discount_percent (what _execute_payload reads)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_flash_sale")
+        props = tool["function"]["parameters"]["properties"]
+        assert "product_id" in props
+        assert "discount_percent" in props
+        assert "discount_percent" in tool["function"]["parameters"]["required"]
+
+    def test_layout_morph_has_new_grid(self):
+        """layout_morph tool must produce new_grid (what _execute_payload reads)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_layout_morph")
+        props = tool["function"]["parameters"]["properties"]
+        assert "new_grid" in props
+        assert "new_grid" in tool["function"]["parameters"]["required"]
+
+    def test_recovery_offer_has_discount_percent(self):
+        """recovery_offer tool must produce discount_percent (what _execute_payload reads)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_recovery_offer")
+        props = tool["function"]["parameters"]["properties"]
+        assert "discount_percent" in props
+
+
+# ---------------------------------------------------------------------------
+# Narrative generation
+# ---------------------------------------------------------------------------
+
+
+class TestNarrativeFromTool:
+    """Each tool name must produce a well-formed narrative dict."""
+
+    def test_flash_sale_narrative(self):
+        result = narrative_from_tool(
+            "propose_flash_sale",
+            {"product_id": "p1", "discount_percent": 15, "duration_minutes": 1440},
+            "Leather Slides",
+            "Velocity spike: 12 views in 30s",
+            "warm and confident",
+        )
+        assert "Flash Sale" in result["title"]
+        assert "15%" in result["title"]
+        assert "Leather Slides" in result["title"]
+        assert "24" in result["description"]  # 1440/60 = 24 hours
+        assert result["trigger"] == "Velocity spike: 12 views in 30s"
+        assert "warm and confident" in result["brand_check"]
+
+    def test_scarcity_price_narrative(self):
+        result = narrative_from_tool(
+            "propose_scarcity_price",
+            {"product_id": "p2", "discount_percent": 10},
+            "Wool Jacket",
+            "Velocity spike: 20 views",
+        )
+        assert "Scarcity" in result["title"]
+        assert "Wool Jacket" in result["title"]
+
+    def test_layout_morph_narrative(self):
+        result = narrative_from_tool(
+            "propose_layout_morph",
+            {"new_grid": "masonry-4col"},
+            None,  # no product name for layout changes
+            "Velocity spike: 8 views",
+        )
+        assert "masonry-4col" in result["title"]
+        assert "Layout" in result["title"]
+
+    def test_recovery_offer_narrative(self):
+        result = narrative_from_tool(
+            "propose_recovery_offer",
+            {"discount_percent": 12},
+            None,
+            "Cart abandon surge: 7 abandons in 30s",
+        )
+        assert "Recovery" in result["title"]
+        assert "12%" in result["title"]
+        assert "cart abandon" in result["description"].lower()
+
+    def test_copy_rewrite_narrative(self):
+        result = narrative_from_tool(
+            "propose_copy_rewrite",
+            {"target": "hero_headline"},
+            None,
+            "Velocity spike: 10 views",
+        )
+        assert "Hero Headline" in result["title"]
+        assert "hero_headline" in result["description"]
+
+    def test_unknown_tool_fallback(self):
+        result = narrative_from_tool(
+            "propose_unknown_action",
+            {"foo": "bar"},
+            "Product X",
+            "Some anomaly",
+        )
+        assert result["title"]  # non-empty
+        assert result["trigger"] == "Some anomaly"
+
+    def test_missing_product_name_uses_default(self):
+        result = narrative_from_tool(
+            "propose_flash_sale",
+            {"discount_percent": 20},
+            None,
+            "test",
+        )
+        assert "product" in result["title"]  # falls back to "product"
+
+    def test_narrative_has_all_required_keys(self):
+        for tool in DECISION_TOOLS:
+            name = tool["function"]["name"]
+            result = narrative_from_tool(name, {}, "Test Product", "Test anomaly")
+            assert "title" in result
+            assert "description" in result
+            assert "trigger" in result
+            assert "brand_check" in result
+
+
+# ---------------------------------------------------------------------------
+# parse_tool_args
+# ---------------------------------------------------------------------------
+
+
+class TestParseToolArgs:
+    def test_valid_json(self):
+        assert parse_tool_args('{"product_id": "p1", "discount_percent": 15}') == {
+            "product_id": "p1",
+            "discount_percent": 15,
+        }
+
+    def test_invalid_json_returns_empty(self):
+        assert parse_tool_args("not json") == {}
+
+    def test_none_returns_empty(self):
+        assert parse_tool_args(None) == {}
+
+    def test_empty_string_returns_empty(self):
+        assert parse_tool_args("") == {}
+
+    def test_empty_object(self):
+        assert parse_tool_args("{}") == {}
+
+
+# ---------------------------------------------------------------------------
+# TOOL_TO_ACTION_TYPE mapping
+# ---------------------------------------------------------------------------
+
+
+class TestToolMapping:
+    def test_flash_sale_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_flash_sale"] == AgentActionType.FLASH_SALE
+
+    def test_scarcity_price_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_scarcity_price"] == AgentActionType.SCARCITY_PRICE
+
+    def test_layout_morph_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_layout_morph"] == AgentActionType.LAYOUT_MORPH
+
+    def test_recovery_offer_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_recovery_offer"] == AgentActionType.RECOVERY_OFFER
+
+    def test_copy_rewrite_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_copy_rewrite"] == AgentActionType.COPY_REWRITE
