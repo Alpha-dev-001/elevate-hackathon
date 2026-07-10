@@ -324,6 +324,25 @@ The `confident=False` flag is honesty by design. When Qwen can't clearly
 identify a product, it says so — the merchant reviews it rather than a
 silent wrong guess going live.
 
+**Human correction workflow** — when Qwen misreads a product (wrong name, bad
+price, wrong category), the merchant fixes it inline without leaving the page:
+
+1. **Pending products** land in the CatalogReview section with image, name,
+   price, category, and description — all editable inline.
+2. **`confident=False` products** get a visible "needs verification" badge so
+   the merchant's eye goes straight to uncertain guesses.
+3. **Inline editors** — every field (name, price, category, description) is
+   editable in-place. The merchant corrects the value and taps Approve.
+4. **Every correction is recorded** — the PATCH writes a `MemoryEntry` with
+   the old → new diff. Future vision calls read this memory, so Qwen stops
+   making the same mistake for this merchant.
+5. **Discard** — if the product is unsalvageable, one tap hard-deletes it
+   from the database. No orphaned pending records.
+
+The workflow is: drop photos → scan pending list → fix what Qwen got wrong
+inline → approve what's right → Qwen learns from every correction. No separate
+admin panel, no context switch, no batch re-upload.
+
 **Technical implementation:** `analyze_product_image()` in `vision.py` calls
 `qwen-vl-max` with a structured prompt that requests JSON output: product name,
 brand (only if visible), description in the store's voice, category, colorways,

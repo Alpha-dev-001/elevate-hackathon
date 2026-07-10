@@ -134,6 +134,75 @@ doing the work — not orchestrating simpler tools.
 
 ---
 
+## 2b. Memory loop — full lifecycle (auditable end-to-end)
+
+The persistent memory loop is the system's learning mechanism. Every step below
+is traceable through named functions, DB tables, and Redis keys.
+
+### Source 1: Merchant edits → memory
+
+```
+Merchant edits product (e.g. changes price from $80 → $95)
+  → PATCH /products/{id}
+  → Router detects changed fields, calls write_memory()
+  → write_memory() creates MemoryEntry:
+      action_type = "merchant_edit"
+      field = "price"
+      old_value = "80"
+      new_value = "95"
+      summary = "Merchant raised price from $80 to $95"
+  → INSERT into merchants.qwen_memory (Postgres, durable)
+  → SET merchant_memory:{id} (Redis, fast mirror)
+  → Capped at 20 entries per merchant (FIFO eviction)
+  → If write fails: caught in try/except, logged, edit still succeeds
+```
+
+### Source 2: Outcome observation → memory
+
+```
+Merchant approves Qwen action (e.g. flash_sale at 15%)
+  → AgentAction created with promo_id attached
+  → schedule_observation(action_id, expires_at_ms) fires background task
+  → On promo expiry: observe_outcome() runs
+  → Counts orders joined by promo_id (attributed conversions)
+  → summarize_outcome(count, revenue) → "flash_sale at 15% → 3 orders, $127"
+  → write_memory() creates MemoryEntry:
+      action_type = "outcome"
+      summary = "flash_sale at 15% → 3 orders, $127"
+  → Same Postgres + Redis write path as Source 1
+```
+
+### Memory → next Qwen call (the learning)
+
+```
+Any Qwen call that benefits from memory (vision, descriptions, decisions):
+  → get_memory(merchant_id) reads from Redis (O(1)), falls back to Postgres
+  → build_memory_context(entries, limit=5) formats last 5 as plain text:
+      "The merchant raised price from $80 to $95"
+      "flash_sale at 15% → 3 orders, $127 revenue"
+  → Context string injected into Qwen prompt (zero extra tokens when empty)
+  → Qwen adapts: names, prices, descriptions, decisions reflect merchant preferences
+  → The cycle closes: action → outcome → memory → better next action
+```
+
+### Where to audit each step
+
+| Step | File | Function |
+|------|------|----------|
+| Edit triggers memory | `app/routers/products.py` | PATCH handler calls `write_memory()` |
+| Memory write | `app/services/memory.py` | `write_memory()` — Postgres + Redis |
+| Memory read | `app/services/memory.py` | `get_memory()` — Redis first, Postgres fallback |
+| Prompt injection | `app/services/memory.py` | `build_memory_context()` — formats entries as text |
+| Outcome scheduling | `app/services/outcome_observer.py` | `schedule_observation()` — background task |
+| Outcome counting | `app/services/outcome_observer.py` | `observe_outcome()` — joins orders by `promo_id` |
+| Outcome summary | `app/services/outcome_observer.py` | `summarize_outcome()` — plain-text result |
+| DB table | `app/models/db.py` | `MerchantDB.qwen_memory` — JSONB column |
+| Tests | `tests/test_memory.py` | Write/read/context/failure resilience |
+| Integration tests | `tests/test_memory_live.py` | Postgres + Redis round-trip |
+| Outcome tests | `tests/test_outcome_observer.py` | Scheduling + counting + summary |
+
+---
+
 ## 3. The Subconscious Interceptor — 3 layers, immutable
 
 Every proposed action (Qwen's *or* the merchant's) passes through all three layers
