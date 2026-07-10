@@ -84,7 +84,43 @@ async def regenerate_dsl(
     from sqlalchemy import select, func
     from app.models.db_models import ProductDB
     count = await db.scalar(select(func.count()).where(ProductDB.merchant_id == merchant.id)) or 0
-    dsl = await generate_layout_dsl(token, merchant.store_name, merchant.category, count)
+    dsl = await generate_layout_dsl(token, merchant.store_name, merchant.category, count, merchant_id=merchant.id)
+    await _persist_dsl(profile, token, dsl, merchant.id, db)
+    return dsl.model_dump()
+
+
+class CreativeRequest(BaseModel):
+    direction: str  # Free-text creative direction from the merchant
+
+
+@router.post("/dsl/{slug}/creative")
+async def creative_dsl(
+    slug: str,
+    payload: CreativeRequest,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Qwen composes a new DSL guided by the merchant's free-text creative
+    vision. The defense layers (coerce → normalize → fallback) guarantee the
+    result is structurally valid even if Qwen hallucinates. This is NOT
+    unconstrained codegen — it is brand-guarded creative direction within the
+    existing DSL schema."""
+    if merchant.slug != slug:
+        raise HTTPException(status_code=403, detail="Not your store")
+    if not payload.direction.strip():
+        raise HTTPException(status_code=400, detail="Direction cannot be empty")
+    if len(payload.direction) > 500:
+        raise HTTPException(status_code=400, detail="Direction too long (max 500 chars)")
+
+    profile, token = await _load_token(merchant.id, db)
+    from sqlalchemy import select, func
+    from app.models.db_models import ProductDB
+    count = await db.scalar(select(func.count()).where(ProductDB.merchant_id == merchant.id)) or 0
+    dsl = await generate_layout_dsl(
+        token, merchant.store_name, merchant.category, count,
+        merchant_id=merchant.id,
+        creative_direction=payload.direction,
+    )
     await _persist_dsl(profile, token, dsl, merchant.id, db)
     return dsl.model_dump()
 

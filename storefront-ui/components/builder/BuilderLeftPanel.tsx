@@ -16,15 +16,19 @@ const LAYOUT_PRESETS: Record<BrandLayoutToken['style'], Partial<LayoutGlobalConf
 }
 
 export function BuilderLeftPanel({
-  guards, onPublish, onRegenerate, publishing,
+  guards, onPublish, onRegenerate, onCreativeGenerate, publishing, regenerating, creativeBusy,
 }: {
   guards: BrandGuardRules | null
   onPublish: () => void
   onRegenerate: () => void
+  onCreativeGenerate: (direction: string) => void
   publishing?: boolean
+  regenerating?: boolean
+  creativeBusy?: boolean
 }) {
   const [adding, setAdding] = useState(false)
   const [advisoryMode, setAdvisoryMode] = useState<'conversational' | 'structured'>('conversational')
+  const [creativeDir, setCreativeDir] = useState('')
   const isDirty = useBuilderStore((s) => s.isDirty)
   const updateGlobalConfig = useBuilderStore((s) => s.updateGlobalConfig)
   const gc = useBuilderStore((s) => s.draftDSL?.global_config)
@@ -87,8 +91,50 @@ export function BuilderLeftPanel({
         </div>
       </section>
 
-      <button onClick={onRegenerate} className="text-xs text-neutral-400 text-left hover:text-emerald-400">
-        ✦ Regenerate with Qwen
+      <section className="flex flex-col gap-2">
+        <span className="text-xs uppercase tracking-widest text-neutral-500">
+          ✦ Qwen Creative
+        </span>
+        <p className="text-[10px] text-neutral-600 leading-tight">
+          Tell Qwen what you envision. It designs within your brand constraints.
+        </p>
+        <textarea
+          value={creativeDir}
+          onChange={(e) => setCreativeDir(e.target.value)}
+          rows={3}
+          maxLength={500}
+          placeholder="e.g. I want a bold hero with a full-bleed image, then a story section about our craftsmanship, followed by the product grid"
+          className="w-full text-xs rounded-lg border border-neutral-700 p-2.5 resize-none focus:outline-none focus:border-emerald-400/60 transition-colors"
+          style={{ background: '#16181D', color: '#e5e5e5' }}
+        />
+        <button
+          onClick={() => { onCreativeGenerate(creativeDir); setCreativeDir('') }}
+          disabled={creativeBusy || !creativeDir.trim()}
+          className="text-xs font-medium py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{
+            background: creativeBusy ? 'transparent' : 'var(--color-accent, #6EE7B7)',
+            color: creativeBusy ? 'var(--color-accent, #6EE7B7)' : '#0A0A0B',
+            border: creativeBusy ? '1px solid var(--color-accent, #6EE7B7)' : 'none',
+          }}
+        >
+          {creativeBusy ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="inline-block w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+              Qwen is designing…
+            </span>
+          ) : '✦ Design this for me'}
+        </button>
+      </section>
+
+      <button onClick={onRegenerate} disabled={regenerating}
+              className="text-xs text-left hover:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              style={{ color: regenerating ? 'var(--color-accent, #6EE7B7)' : '#A3A3A3' }}>
+        {regenerating ? (
+          <span className="flex items-center gap-2">
+            <span className="inline-block w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+            Qwen is composing…
+          </span>
+        ) : '✦ Regenerate with Qwen'}
       </button>
 
       <footer className="mt-auto flex flex-col gap-2 pt-4">

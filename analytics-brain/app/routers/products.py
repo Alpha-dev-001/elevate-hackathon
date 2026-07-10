@@ -265,10 +265,14 @@ async def delete_product(
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft delete — keeps order history intact, removes the product from the
-    live store."""
+    """Pending products (never approved, is_active=False) are hard-deleted —
+    they were never live and no orders reference them.  Active products are
+    soft-deleted (is_active=False) to keep order history intact."""
     product = await _owned_product(db, merchant.id, product_id)
-    product.is_active = False
+    if not product.is_active:
+        await db.delete(product)
+    else:
+        product.is_active = False
     await db.flush()
     await _sync_state_if_live(db, merchant.id)
 

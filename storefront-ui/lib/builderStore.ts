@@ -9,6 +9,7 @@ interface BuilderStore {
   previewMode: boolean
 
   setFromStore: (dsl: LayoutDSL, token: BrandToken) => void
+  replaceDSL: (dsl: LayoutDSL) => void
   updateSection: (index: number, update: Partial<LayoutSection>) => void
   reorderSections: (from: number, to: number) => void
   addSection: (section: LayoutSection) => void
@@ -55,6 +56,10 @@ export const useBuilderStore = create<BuilderStore>((set, get) => {
         draftToken: clone(token),
         isDirty: false,
       })
+    },
+
+    replaceDSL: (dsl) => {
+      recompute({ draftDSL: clone(dsl) })
     },
 
     updateSection: (index, update) => {

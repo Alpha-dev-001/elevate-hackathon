@@ -236,6 +236,10 @@ export const api = {
     req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'PUT', body: JSON.stringify(dsl) }),
   regenerateDsl: (slug: string) =>
     req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}`, { method: 'POST' }),
+  creativeDsl: (slug: string, direction: string) =>
+    req<LayoutDSL>(`/api/brand/dsl/${enc(slug)}/creative`, {
+      method: 'POST', body: JSON.stringify({ direction }),
+    }),
   // Point-and-edit: Qwen maps a clicked region + free-text intent to a DSL patch.
   editIntent: (slug: string, body: { target: unknown; intent: string; dsl: LayoutDSL }) =>
     req<EditIntentResult>(`/api/brand/edit-intent/${enc(slug)}`, { method: 'POST', body: JSON.stringify(body) }),

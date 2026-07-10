@@ -18,8 +18,11 @@ export function StoreBuilder({ slug }: { slug: string }) {
   const [guards, setGuards] = useState<BrandGuardRules | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [creativeBusy, setCreativeBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const setFromStore = useBuilderStore((s) => s.setFromStore)
+  const replaceDSL = useBuilderStore((s) => s.replaceDSL)
   const markPublished = useBuilderStore((s) => s.markPublished)
 
   useEffect(() => {
@@ -62,11 +65,24 @@ export function StoreBuilder({ slug }: { slug: string }) {
   }
 
   const onRegenerate = async () => {
+    if (regenerating) return  // prevent double-click
+    setRegenerating(true)
     try {
       const dsl = await api.regenerateDsl(slug)
       const token = useBuilderStore.getState().draftToken
       if (token) setFromStore(dsl, { ...token, layout_dsl: dsl })
     } catch { setError('Regeneration failed. Try again.') }
+    finally { setRegenerating(false) }
+  }
+
+  const onCreativeGenerate = async (direction: string) => {
+    if (creativeBusy || !direction.trim()) return
+    setCreativeBusy(true)
+    try {
+      const dsl = await api.creativeDsl(slug, direction)
+      replaceDSL(dsl)
+    } catch { setError('Qwen could not build that. Try rephrasing your direction.') }
+    finally { setCreativeBusy(false) }
   }
 
   if (error) {
@@ -78,7 +94,9 @@ export function StoreBuilder({ slug }: { slug: string }) {
 
   return (
     <main className="h-screen flex" style={{ background: 'var(--color-bg, #0A0A0B)', color: '#fff' }}>
-      <BuilderLeftPanel guards={guards} onPublish={onPublish} onRegenerate={onRegenerate} publishing={publishing} />
+      <BuilderLeftPanel guards={guards} onPublish={onPublish} onRegenerate={onRegenerate}
+        onCreativeGenerate={onCreativeGenerate} publishing={publishing}
+        regenerating={regenerating} creativeBusy={creativeBusy} />
       <BuilderPreview store={store} />
 
       {published && (

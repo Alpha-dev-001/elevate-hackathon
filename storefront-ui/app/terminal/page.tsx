@@ -23,6 +23,7 @@ export default function TerminalPage() {
   const [memoryCount, setMemoryCount] = useState<number | null>(null)
   const [lastTokens, setLastTokens] = useState<number | null>(null)
   const [capabilities, setCapabilities] = useState<Capability[]>([])
+  const [qwenFallback, setQwenFallback] = useState<{ message: string; type: string } | null>(null)
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -99,6 +100,12 @@ export default function TerminalPage() {
     const conn = connectTerminal(id, {
       onOpen: () => setWsStatus('connected'),
       onClose: () => setWsStatus('disconnected'),
+      onQwenFallback: (payload) => {
+        setQwenFallback({ message: payload.message, type: payload.type })
+        // Auto-dismiss after 8 seconds — the merchant sees the transparency
+        // message, then it fades. Not a permanent error banner.
+        window.setTimeout(() => setQwenFallback(null), 8000)
+      },
       onEvent: (event, payload) => {
         if (event === 'agent_action' && payload.action) {
           const incoming = payload.action as AgentAction
@@ -252,6 +259,25 @@ export default function TerminalPage() {
           </span>
         </div>
       </header>
+
+      {/* ── Qwen fallback notification (transient, auto-dismisses) ── */}
+      {qwenFallback && (
+        <div className="px-6 pt-3 max-w-[1400px] mx-auto">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm animate-in fade-in slide-in-from-top-1 duration-300"
+               style={{
+                 background: 'rgba(255, 209, 102, 0.1)',
+                 border: '1px solid rgba(255, 209, 102, 0.25)',
+                 color: 'var(--color-warning, #FFD166)',
+               }}>
+            <span className="text-base">⚡</span>
+            <span className="flex-1 font-mono">{qwenFallback.message}</span>
+            <button onClick={() => setQwenFallback(null)}
+                    className="text-xs opacity-60 hover:opacity-100 transition-opacity">
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Qwen capability proposals (surfaces only when there are any) ── */}
       <div className="px-6 pt-6 max-w-[1400px] mx-auto">

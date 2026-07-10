@@ -75,7 +75,24 @@ export function DSLRenderer({
   }, [store.brand_token, dslOverride])
 
   if (!parsed || !store.brand_token) {
-    return <FallbackStorefront store={store} slug={slug} />
+    // Graceful degradation: FallbackStorefront renders a complete branded store
+    // without depending on the DSL. In the builder, surface a warning so the
+    // merchant knows their layout was invalid. On the live storefront, silent —
+    // the customer should never see an error state.
+    const fallback = <FallbackStorefront store={store} slug={slug} />
+    if (preview) {
+      return (
+        <div className="relative h-full">
+          <div className="absolute top-0 left-0 right-0 z-50 flex items-center gap-2 px-4 py-2 text-xs font-medium"
+               style={{ background: 'rgba(255, 209, 102, 0.15)', color: '#FFD166', borderBottom: '1px solid rgba(255, 209, 102, 0.2)' }}>
+            <span>⚠</span>
+            <span>Layout validation failed — rendering safe storefront. Publish to apply your layout.</span>
+          </div>
+          {fallback}
+        </div>
+      )
+    }
+    return fallback
   }
 
   const theme = resolveTheme(store)

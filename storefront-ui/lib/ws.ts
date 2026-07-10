@@ -10,8 +10,19 @@ import { WS_BASE } from './api'
 import { BrandReadyPayloadSchema } from '@/types/schemas'
 import type { BrandReadyPayload } from '@/types/schemas'
 
+export interface QwenFallbackPayload {
+  type: string
+  store_name: string
+  reason: string
+  message: string
+}
+
 export interface TerminalHandlers {
   onBrandReady?: (payload: BrandReadyPayload) => void
+  /** Fired when a Qwen call fails and the backend falls back to a deterministic
+   *  path (e.g. layout DSL). The merchant should see this — it's transparency
+   *  about the autopilot's degradation, not a hidden error. */
+  onQwenFallback?: (payload: QwenFallbackPayload) => void
   onOpen?: () => void
   onClose?: () => void
   /** Any event, post-parse — useful for events we don't special-case yet. */
@@ -59,6 +70,10 @@ export function connectTerminal(
           // Malformed payload — surface as an error rather than hanging.
           handlers.onBrandReady?.({ error: 'Received a malformed brand payload' })
         }
+      }
+
+      if (msg.event === 'qwen_fallback' && msg.payload) {
+        handlers.onQwenFallback?.(msg.payload as unknown as QwenFallbackPayload)
       }
     }
 

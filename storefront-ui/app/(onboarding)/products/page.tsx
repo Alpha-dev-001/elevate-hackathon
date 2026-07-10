@@ -71,8 +71,13 @@ export default function ProductsPage() {
     }
   }, [])
 
-  const discardPending = useCallback((id: string) => {
-    setPendingProducts((prev) => prev.filter((x) => x.id !== id))
+  const discardPending = useCallback(async (id: string) => {
+    try {
+      await api.deleteProduct(id)
+      setPendingProducts((prev) => prev.filter((x) => x.id !== id))
+    } catch {
+      setError('Could not discard product')
+    }
   }, [])
 
   const addSingle = async (e: React.FormEvent) => {

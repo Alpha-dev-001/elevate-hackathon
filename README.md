@@ -102,6 +102,49 @@ The interceptor is immutable. Qwen cannot override it. This is what makes
 the autopilot trustworthy — the merchant's rules are enforced regardless of
 what Qwen proposes.
 
+### Fault-Tolerant Storefront — Three Defense Layers
+
+Qwen composes every store's layout (section order, variant choices, nav style,
+card design). But Qwen can hallucinate, return malformed JSON, or time out.
+A broken Qwen response must never produce a broken store.
+
+Three defense layers guarantee a renderable, on-brand storefront regardless of
+what Qwen returns:
+
+| Layer | Name | Behavior |
+|-------|------|----------|
+| **A** | `coerce_variant` | Every section variant is validated against its type's allowed set. A hallucinated or cross-type variant (e.g. a grid variant on a hero) is coerced to the type's default. Near-miss strings are normalized and matched (`"masonry"` → `"masonry-4col"`). |
+| **B** | `normalize_dsl` | Structural rules enforced on every save and regeneration: exactly one leading hero, at least one product grid, 2–5 sections total, no adjacent banners. Violations are repaired, not rejected. |
+| **C** | `fallback_dsl_from_token` | When the Qwen call fails entirely (network, timeout, garbage), a deterministic DSL is generated from `hash(store_name + mood + industry)`. Stores stay distinct even with Qwen offline — no two brands fall back to the same template. |
+
+**Graceful degradation on the frontend**: if the Zod schema validation fails on
+the DSL received from the backend, `DSLRenderer` renders `FallbackStorefront` —
+a fully functional, brand-themed storefront (search, categories, product grid,
+cart) that uses the brand's palette and typography without relying on the DSL.
+The store never shows a blank page or an error. The customer never sees a
+broken state.
+
+### CSS Sanitization Guardrail
+
+Qwen generates scoped CSS for micro-interaction personality (hover transforms,
+letter-spacing, transitions). This CSS is injected into the live storefront.
+Unsanitized AI-generated CSS is a security and brand-integrity risk.
+
+The sanitization pipeline:
+
+1. **Property allowlist** — only 8 properties permitted: `transform`, `transition`,
+   `letter-spacing`, `line-height`, `text-decoration`, `opacity`, `border-radius`,
+   `box-shadow`. Everything else is stripped.
+2. **Forbidden patterns** — `url()`, `@import`, `@keyframes`, `position: fixed`,
+   `z-index` are rejected entirely. No external resource loading, no animation
+   keyframes, no stacking context manipulation.
+3. **Scope enforcement** — only rules scoped to `[data-store="{slug}"]` are kept.
+   Unscoped selectors are dropped. One store's CSS can never affect another.
+
+The result is injected client-side via `CustomCSSInjector` and cleaned up on
+unmount. The sanitizer runs server-side before storage — by the time CSS reaches
+the browser, it has already been validated.
+
 ### Real-Time Telemetry Pipeline
 
 ```
@@ -149,13 +192,19 @@ The `confident=False` flag is honesty by design. When Qwen can't clearly
 identify a product, it says so — the merchant reviews it rather than a
 silent wrong guess going live.
 
-### Qwen Memory (architecture — implementation in progress)
+### Qwen Memory — The Autopilot Learns
 
 Every merchant action Qwen observes is appended to `qwen_memory` on the
 Merchant record. When a merchant overrides a Qwen-suggested price, rewrites
 a description, or hides a product — Qwen learns the preference silently.
 Future vision calls and decision cycles include this memory, so the autopilot
 adapts to each merchant's style over time.
+
+The `OutcomeObserver` runs after each agent action expires, counting attributed
+orders (joined by `promo_id`) and writing `MemoryEntry` records back to both
+Postgres and Redis. The next decision cycle reads this memory first — so Qwen
+proposes differently based on what actually worked, not just what it proposed
+last time.
 
 The merchant never talks to Qwen. Qwen just learns.
 
@@ -205,7 +254,8 @@ elevate/
 │   ├── components/
 │   │   ├── onboarding/   # LogoUpload, ImageDropZone, CatalogReview
 │   │   ├── terminal/     # OptionCard, DecisionFeed, StoreSnapshot
-│   │   └── storefront/   # ProductGrid, Cart, LayoutRouter, DSLRenderer
+│   │   └── storefront/   # DSLRenderer, FallbackStorefront, CustomCSSInjector
+│   │                      # ProductGrid, Cart, LayoutRouter
 │   ├── lib/
 │   │   ├── api.ts        # REST client (credentials: include)
 │   │   ├── ws.ts         # WebSocket client
@@ -219,6 +269,8 @@ elevate/
     │   ├── models/        # Pydantic schemas (source of truth) + DB models
     │   ├── routers/       # Products, onboarding, agent, merchant, behavior
     │   └── services/      # Qwen, brand, vision, interceptor, telemetry, delta
+    │                      # layout_dsl.py (3 defense layers), css_gen.py (sanitizer)
+    │                      # memory.py + outcome_observer.py (learning loop)
     └── scripts/           # Demo store builder, data migrations
 ```
 
@@ -275,10 +327,12 @@ Built for the **Global AI Hackathon Series with Qwen Cloud** — **Track 4: Auto
 **Judging criteria alignment:**
 - **Qwen Sophistication (30%)**: Two-model architecture, vision pipeline with
   fingerprinting, three-layer interceptor, token-efficient batching, memory
-  system that learns from merchant behavior.
+  system that learns from merchant behavior, LayoutDSL composition with
+  three defense layers (coerce → normalize → deterministic fallback).
 - **Innovation (30%)**: Qwen IS the runtime (not a feature), brand guard rules
   authored by Qwen at creation time, Vision Fingerprinting for dedup, realtime
-  telemetry → decision → approve → morph cycle, option cards not chat.
+  telemetry → decision → approve → morph cycle, option cards not chat,
+  fault-tolerant storefront that gracefully degrades instead of breaking.
 
 ---
 

@@ -318,10 +318,18 @@ async def generate_layout_dsl(
     category: str,
     product_count: int,
     *,
+    merchant_id: str | None = None,
+    creative_direction: str | None = None,
     _chat=None,
 ) -> LayoutDSL:
     """qwen-max composes the store. NEVER raises — any failure (network, non-JSON,
-    garbage) falls back to the brand-seeded deterministic DSL."""
+    garbage) falls back to the brand-seeded deterministic DSL. When merchant_id
+    is provided, a qwen_fallback WS event is pushed to the terminal so the
+    merchant sees the degradation instead of a silent swap.
+
+    When creative_direction is provided, the merchant's free-text vision is
+    appended to the prompt — Qwen composes the DSL *guided* by their intent,
+    still constrained to valid section types and variants."""
     from app.services.brand import _qwen_chat, _extract_json
     import json as _json
 
@@ -333,6 +341,18 @@ async def generate_layout_dsl(
     })
     prompt = LAYOUT_DSL_PROMPT.replace("{brand_json}", brand_json).replace("{product_count}", str(product_count))
 
+    if creative_direction:
+        prompt += (
+            f"\n\nMerchant's creative direction (HONOR THIS — it is the merchant's "
+            f"explicit vision for their store, not a suggestion):\n"
+            f"\"{creative_direction}\"\n\n"
+            f"Interpret this direction within the existing section types and variants. "
+            f"If they ask for something that maps to a specific variant, use it. "
+            f"If they describe a feeling or mood, choose sections and variants that embody it. "
+            f"If they ask for a section type that doesn't exist, pick the closest match "
+            f"and set appropriate props."
+        )
+
     try:
         raw = await chat(
             model=get_settings().qwen_model,
@@ -343,4 +363,29 @@ async def generate_layout_dsl(
         return normalize_dsl(data)
     except Exception as e:  # noqa: BLE001 — fallback must be total for the demo path
         logger.warning("[dsl] generate_layout_dsl falling back to deterministic DSL: %s", e)
+        if merchant_id:
+            await _push_fallback(merchant_id, store_name, str(e))
         return fallback_dsl_from_token(token)
+
+
+async def _push_fallback(merchant_id: str, store_name: str, error: str) -> None:
+    """Emit a qwen_fallback event to the terminal so the merchant sees that Qwen
+    was unavailable and the layout was composed deterministically."""
+    try:
+        from app.core.ws_manager import manager
+        from app.models.schemas import WSEventType, WSMessage
+        import time
+        msg = WSMessage(
+            event=WSEventType.QWEN_FALLBACK,
+            payload={
+                "type": "layout_dsl",
+                "store_name": store_name,
+                "reason": error,
+                "message": "Qwen was unavailable — your layout was composed from your brand profile instead.",
+            },
+            merchant_id=merchant_id,
+            timestamp=int(time.time()),
+        )
+        await manager.push_to_terminal(merchant_id, msg.model_dump_json())
+    except Exception:  # noqa: BLE001 — notification must never break the fallback path
+        logger.debug("[dsl] failed to push qwen_fallback event", exc_info=True)

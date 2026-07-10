@@ -94,8 +94,10 @@ docs/superpowers/
 HACKATHON.md
 ALIBABA_DEPLOY.md
 OSS_SETUP.md
-# PUBLIC submission artifacts that stay tracked: README.md, DEVLOG.md,
+# PUBLIC submission artifacts that stay tracked: README.md,
 # docs/ARCHITECTURE.md, QWEN_USAGE.md, LICENSE.
+# DEVLOG.md is private (internal audit trail, stale model names, sprint process).
+DEVLOG.md
 
 # stray keys / junk
 *.pub
