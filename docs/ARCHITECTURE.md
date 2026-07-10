@@ -185,3 +185,113 @@ Three layers make a broken or templated store impossible, even with Qwen offline
 
 _Post-hackathon (designed, not built): `action_outcomes` embeddings for cross-store
 RAG — "what worked for similar brands" injected at decision time (pgvector + ivfflat)._
+
+---
+
+## 6. State machines — onboarding and live decision cycle
+
+Two state machines govern the system. Every state transition is triggered by a
+named WebSocket event or REST call — no implicit transitions.
+
+### Onboarding state machine
+
+```mermaid
+stateDiagram-v2
+    [*] --> store_info: POST /onboarding/start
+    store_info --> logo_upload: merchant enters store name
+    logo_upload --> brand_generating: STS upload → POST logo_url
+    brand_generating --> brand_review: WS: brand_ready
+    brand_review --> products: merchant approves brand
+    brand_review --> brand_generating: WS: brand_tweak (merchant modifies)
+    products --> live: POST /onboarding/publish
+    products --> products: POST /products/vision-batch (add more)
+    live --> [*]
+
+    note right of brand_generating
+        qwen-vl-max → qwen-max chain
+        StoreBirth SSE streams each step
+    end note
+```
+
+### Live store decision cycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle: store published
+    idle --> telemetry_streaming: WS: customer_event (view/hover/cart_add)
+    telemetry_streaming --> anomaly_detected: threshold exceeded (views > N in T seconds)
+    anomaly_detected --> decision_pending: qwen-max run_decision_cycle()
+    decision_pending --> approved: WS: approve_action
+    decision_pending --> dismissed: WS: dismiss_action
+    dismissed --> idle
+    approved --> delta_applied: execute_delta() → WS: state_updated
+    delta_applied --> idle: storefront morphs, all clients sync
+    telemetry_streaming --> idle: no anomaly (threshold not met)
+
+    note right of decision_pending
+        Option card surfaces in terminal
+        Merchant sees reasoning chain
+        Human-in-the-loop checkpoint
+    end note
+```
+
+### WebSocket event map
+
+```
+CLIENT → SERVER
+  customer_event      storefront browse interaction (view, hover, cart_add, purchase, abandon)
+  approve_action      merchant approves option card
+  dismiss_action      merchant dismisses option card
+  brand_tweak         merchant modifies brand (triggers guard check + regeneration)
+
+SERVER → CLIENT (terminal)
+  decision_ready      Qwen proposed actions ready (option card surfaces)
+  action_clamped      interceptor auto-corrected a value (Layer 2)
+  action_blocked      interceptor hard blocked (Layer 3)
+  brand_warning       brand guard rule triggered (Layer 1)
+
+SERVER → CLIENT (storefront)
+  state_updated       delta applied — storefront morphs
+  promo_activated     new promo live on product page
+
+SERVER → CLIENT (both)
+  anomaly_detected    telemetry spike — visible in terminal + storefront toast
+  brand_ready         brand generation complete — onboarding advances
+```
+
+---
+
+## 7. WebSocket event flow — end to end
+
+```mermaid
+sequenceDiagram
+    participant C as Customer (storefront)
+    participant FE as Next.js Frontend
+    participant WS as WebSocket
+    participant API as FastAPI
+    participant R as Redis
+    participant Q as qwen-max
+    participant M as Merchant (terminal)
+
+    C->>FE: clicks product (view event)
+    FE->>WS: customer_event {type: "view", product_id}
+    WS->>API: route to telemetry.record_event()
+    API->>R: ZADD velocity:{merchant_id}:{product_id} timestamp
+    R-->>API: count in window
+    alt threshold exceeded
+        API->>Q: run_decision_cycle(snapshot_diff)
+        Q-->>API: AgentAction JSON
+        API->>API: validate_action() → interceptor 3 layers
+        API->>WS: decision_ready {option_card}
+        WS->>M: option card surfaces
+        M->>WS: approve_action {action_id}
+        WS->>API: execute_delta()
+        API->>R: update SystemState
+        API->>WS: state_updated {patches}
+        WS->>FE: Zod safeParse → apply patches
+        FE->>C: storefront morphs (fluid Framer Motion)
+    else no anomaly
+        Note over API,R: event recorded, threshold not met
+    end
+```
+
