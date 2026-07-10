@@ -224,6 +224,13 @@ export default function TerminalPage() {
             Customize store
           </a>
           <a
+            href="/products"
+            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+          >
+            Products
+          </a>
+          <a
             href={`/s/${merchant.slug}`}
             target="_blank"
             rel="noreferrer"

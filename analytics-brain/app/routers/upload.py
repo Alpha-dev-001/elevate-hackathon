@@ -88,3 +88,44 @@ async def presign_logo_upload(
         object_key=object_key,
         required_headers=required_headers,
     )
+
+
+@router.post("/product-image-url", response_model=PresignedUploadResponse)
+async def presign_product_image_upload(
+    payload: PresignedUploadRequest,
+    merchant: MerchantDB = Depends(get_current_merchant),
+):
+    """Presigned PUT for a single product photo — same pattern as the logo
+    endpoint but under a ``products/`` prefix so the two never collide."""
+    content_type = payload.content_type.lower().strip()
+    if content_type not in _EXT:
+        raise HTTPException(
+            status_code=400,
+            detail="Product image must be PNG, JPG, WebP, GIF, or SVG.",
+        )
+
+    bucket, s = _bucket()
+    object_key = (
+        f"products/{merchant.id}/{uuid.uuid4().hex[:12]}"
+        f".{_EXT[content_type]}"
+    )
+    required_headers = {
+        "Content-Type": content_type,
+        "x-oss-object-acl": "public-read",
+    }
+
+    try:
+        upload_url = bucket.sign_url(
+            "PUT", object_key, _UPLOAD_TTL, slash_safe=True, headers=required_headers
+        )
+    except Exception as e:
+        logger.error(f"[upload] failed to sign product image URL for {merchant.id}: {e}")
+        raise HTTPException(status_code=502, detail="Could not create an upload URL.")
+
+    public_url = f"https://{s.oss_bucket}.oss-{s.oss_region}.aliyuncs.com/{object_key}"
+    return PresignedUploadResponse(
+        upload_url=upload_url,
+        public_url=public_url,
+        object_key=object_key,
+        required_headers=required_headers,
+    )

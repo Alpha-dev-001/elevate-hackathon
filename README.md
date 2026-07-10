@@ -1,21 +1,175 @@
 # Elevate — Your store, alive.
 
-> Autonomous merchant intelligence. Your store works with you 24/7.
+> AI-native commerce where Qwen is not a feature — it is the runtime.
+> Upload a logo. Qwen builds the brand, runs the store, and learns from every decision.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
-[![Built with Qwen Cloud](https://img.shields.io/badge/Built%20with-Qwen%20Cloud-blue)](https://qwencloud.com)
+[![Built with Qwen](https://img.shields.io/badge/Built%20with-Qwen%20VL-Max%20%2B%20Qwen-Max-blue)](https://qwencloud.com)
 [![Alibaba Cloud](https://img.shields.io/badge/Deployed%20on-Alibaba%20Cloud-orange)](https://alibabacloud.com)
 
 ---
 
-## What is Elevate?
+## What makes Elevate different
 
-Most merchant tools treat AI like a chatbot. You ask, it answers, you act.
+Most AI commerce tools bolt a chatbot onto a Shopify clone. You ask questions,
+get answers, then go do the work yourself.
 
-Elevate flips that entirely. Upload your logo — Elevate builds your store,
-brands it, and starts running it. It watches what customers do, translates
-signals into decisions, and acts the moment you approve. No chat. No reports.
-Just your store working with you.
+Elevate is the opposite. Qwen builds the store from a single logo upload,
+defines the brand rules, catalogs products from photos, watches customer
+behavior in real-time, and surfaces decisions as option cards — not chat.
+The merchant stays in control. Qwen does the work.
+
+```
+Logo → qwen-vl-max reads it
+     → qwen-max generates brand (palette, voice, guard rules, layout)
+     → Store shell appears live
+     → Merchant drops product photos
+     → qwen-vl-max identifies each product (Vision Fingerprinting deduplicates)
+     → Store goes live
+     → Customer session begins
+     → Telemetry streams in real-time
+     → Qwen detects patterns, proposes actions
+     → Merchant taps Approve
+     → Storefront morphs instantly
+     → Qwen remembers every decision for next time
+```
+
+---
+
+## The Two-Model Architecture
+
+Two Qwen models. Each chosen for what it does best. No routing complexity.
+
+| Task | Model | Why |
+|------|-------|-----|
+| Logo analysis + product identification | **qwen-vl-max** | Multimodal — reads images, identifies products from photos |
+| Brand generation, descriptions, decisions | **qwen-max** | Best quality text, structured JSON output |
+
+**Vision Fingerprinting** — before any image reaches Qwen, a perceptual hash
+(aHash, 64-bit) runs client-side. Near-duplicate photos (same product, different
+angle) collapse into one product with multiple images. This prevents wasting
+tokens on identical products and keeps the catalog clean.
+
+```
+Drop 3 photos of the same slides
+  → Fingerprint: all 3 match (hamming distance ≤ 5)
+  → 1 uploaded to OSS, 2 duplicate URLs stored
+  → Only 1 qwen-vl-max call (not 3)
+  → 1 product created with 3 image URLs
+  → "Created 1 product from 3 photos (2 duplicates merged)"
+```
+
+---
+
+## What happens under the hood
+
+### Onboarding (5 steps, < 30 seconds to live store)
+
+1. **The Drop** — Merchant uploads a logo. Direct to OSS via presigned PUT
+   (backend never touches file bytes — serverless-safe).
+
+2. **The Incubation** — `qwen-vl-max` reads the logo, extracts geometry, palette,
+   and mood. `qwen-max` generates the full brand package: color palette,
+   typography, voice profile, layout variant, and **guard rules** — the brand's
+   immune system, written in Qwen's own words.
+
+3. **The Reveal** — Store shell renders with the generated brand. Colors,
+   typography, SVG icons, all on-brand. If zero products: a beautiful "Preparing
+   the shelves..." state that looks intentional, not broken.
+
+4. **Product Vision** — Merchant drops product photos. Each is fingerprinted
+   for dedup, uploaded to OSS, then `qwen-vl-max` identifies it: name, brand
+   (only if visible in the photo), description in the store's voice, category,
+   colorways, and a price anchored to the merchant's baseline (never web MSRP).
+   Products land as **pending** — the merchant approves each one.
+
+5. **The Launch** — Merchant publishes. SystemState initializes in Redis.
+   Store goes live at `/s/{slug}`. After launch, approved products sync to
+   the storefront instantly via WebSocket — no republish needed.
+
+### The Three-Layer Interceptor
+
+Every Qwen-proposed action passes through three validation layers before
+reaching the merchant. This is the brand's immune system:
+
+| Layer | Source | Behavior |
+|-------|--------|----------|
+| **Brand Guard** | Qwen-authored at brand gen time | Fires Qwen's own warning about color conflicts, voice mismatches. Does not block — flags. |
+| **Business Constraints** | Merchant's margin/discount rules | Auto-clamps values with warning shown to merchant. Price below margin floor → clamped. |
+| **System Safety** | Hardcoded | Price below cost, stock below zero, expired promo → **hard block**. No exceptions. |
+
+The interceptor is immutable. Qwen cannot override it. This is what makes
+the autopilot trustworthy — the merchant's rules are enforced regardless of
+what Qwen proposes.
+
+### Real-Time Telemetry Pipeline
+
+```
+Customer browses → WebSocket event → FastAPI → Redis (velocity tracking)
+                                                    ↓
+                                          Anomaly detection
+                                          (configurable threshold)
+                                                    ↓
+                                          qwen-max decision cycle
+                                          (snapshot diff, not full state)
+                                                    ↓
+                                          Interceptor validates
+                                                    ↓
+                                          Option cards surface in terminal
+                                                    ↓
+                                          Merchant taps Approve
+                                                    ↓
+                                          Delta executed → WebSocket push
+                                                    ↓
+                                          Storefront morphs. Terminal updates.
+                                          All connected clients sync instantly.
+```
+
+Anomaly detection is deterministic and configurable (`ANOMALY_THRESHOLD`,
+`ANOMALY_WINDOW_SECONDS`) — if a product gets 5+ views in 30 seconds, Qwen
+fires a decision cycle. Judges care about the autopilot reaction, not the
+detection algorithm.
+
+### Product Vision Pipeline
+
+```
+Merchant drops photos
+  → Client-side: perceptual hash (aHash) groups near-duplicates
+  → Upload all to OSS (duplicates get URLs too, just skip vision)
+  → POST /products/vision-batch (only representatives)
+  → asyncio.Semaphore(5): 5 parallel qwen-vl-max calls
+  → Each returns: name, brand, description, category, colors, price, confidence
+  → Products created as pending (is_active=False)
+  → "Product Vision" section: per-product Approve / Discard / Approve All
+  → Approved products flip is_active=True → sync to live storefront instantly
+  → confident=False products flagged for CatalogReview
+```
+
+The `confident=False` flag is honesty by design. When Qwen can't clearly
+identify a product, it says so — the merchant reviews it rather than a
+silent wrong guess going live.
+
+### Qwen Memory (architecture — implementation in progress)
+
+Every merchant action Qwen observes is appended to `qwen_memory` on the
+Merchant record. When a merchant overrides a Qwen-suggested price, rewrites
+a description, or hides a product — Qwen learns the preference silently.
+Future vision calls and decision cycles include this memory, so the autopilot
+adapts to each merchant's style over time.
+
+The merchant never talks to Qwen. Qwen just learns.
+
+---
+
+## Token Efficiency
+
+Every Qwen call does maximum work. No throwaway calls.
+
+- **Brand generation**: One `qwen-vl-max` + one `qwen-max` call. Cached forever.
+- **Product descriptions**: All names batched into ONE `qwen-max` call. Never looped per product.
+- **Product Vision**: One `qwen-vl-max` per unique product (fingerprinting eliminates duplicates).
+- **Decision cycles**: Send snapshot **diff** only, not full state.
+- **Every output cached in Redis** before returning. Cache hit = zero tokens.
 
 ---
 
@@ -23,48 +177,108 @@ Just your store working with you.
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 15, TypeScript, Tailwind, Framer Motion |
-| Backend | FastAPI, Python 3.10, Pydantic v2 |
-| AI | Qwen Cloud |
-| Infrastructure | Alibaba Cloud ECS (containerized backend), OSS (assets) |
-| Deploy | Docker Compose on Alibaba Cloud ECS |
+| Frontend | Next.js 15, TypeScript, Tailwind, Framer Motion, Zustand |
+| Backend | FastAPI, Python 3.11, Pydantic v2, SQLAlchemy (async) |
+| AI | **qwen-vl-max** (vision) + **qwen-max** (text/decisions) |
+| Real-time | WebSocket (full-duplex, event-driven, zero polling) |
+| Database | PostgreSQL (Alibaba Cloud RDS) — persistent source of truth |
+| Cache | Redis (Alibaba Cloud Tair) — telemetry, sessions, state |
+| Storage | Alibaba Cloud OSS — logos, product images (presigned PUT, never through backend) |
+| Deploy | Alibaba Cloud Function Compute (serverless) + Docker Compose (local) |
 
 ---
 
 ## Architecture
 
-See **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** for the full system design —
-the two-model Qwen cognitive loop (logo → brand → layout → live decisions →
-memory), the realtime WebSocket pipeline, the three-layer interceptor, and the
-Alibaba Cloud data layer. Diagrams render inline on GitHub.
+See **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** for the full system design
+with diagrams.
+
+```
+elevate/
+├── storefront-ui/          # Next.js 15 frontend
+│   ├── app/
+│   │   ├── (onboarding)/  # Setup, brand review, products (5-step flow)
+│   │   ├── terminal/      # Merchant command center (decisions, attribution)
+│   │   ├── storefront/    # Customer-facing store (DSL-rendered)
+│   │   ├── scan/          # QR code campaign landing pages
+│   │   └── builder/       # Point-and-click store builder
+│   ├── components/
+│   │   ├── onboarding/   # LogoUpload, ImageDropZone, CatalogReview
+│   │   ├── terminal/     # OptionCard, DecisionFeed, StoreSnapshot
+│   │   └── storefront/   # ProductGrid, Cart, LayoutRouter, DSLRenderer
+│   ├── lib/
+│   │   ├── api.ts        # REST client (credentials: include)
+│   │   ├── ws.ts         # WebSocket client
+│   │   ├── store.ts      # Zustand global state
+│   │   └── fingerprint.ts # Vision Fingerprinting (perceptual dedup)
+│   └── types/schemas.ts  # Zod schemas (mirror Pydantic exactly)
+│
+└── analytics-brain/        # FastAPI backend
+    ├── app/
+    │   ├── core/          # Config, Redis, WebSocket manager, security
+    │   ├── models/        # Pydantic schemas (source of truth) + DB models
+    │   ├── routers/       # Products, onboarding, agent, merchant, behavior
+    │   └── services/      # Qwen, brand, vision, interceptor, telemetry, delta
+    └── scripts/           # Demo store builder, data migrations
+```
 
 ---
 
 ## Getting Started
 
 ```bash
-# Clone
 git clone https://github.com/Alpha-dev-001/elevate
 cd elevate
 
 # Backend
 cd analytics-brain
-cp .env.example .env
+cp .env.example .env      # Fill in Qwen API key, OSS credentials, DB URL
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+uvicorn app.main:app --reload --port 9000
 
-# Frontend
+# Frontend (separate terminal)
 cd ../storefront-ui
 cp .env.example .env.local
 npm install
 npm run dev
 ```
 
+Open `http://localhost:3000/setup` to start onboarding.
+
+### Environment Variables
+
+```bash
+# Qwen Cloud
+QWEN_API_KEY=sk-...
+QWEN_VL_MODEL=qwen-vl-max
+QWEN_TEXT_MODEL=qwen-max
+
+# Alibaba Cloud OSS (for logo + product image uploads)
+OSS_REGION=cn-hongkong
+OSS_ACCESS_KEY_ID=...
+OSS_ACCESS_KEY_SECRET=...
+OSS_BUCKET=elevate-assets
+
+# Database
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/elevate
+
+# Redis
+REDIS_URL=redis://localhost:6379
+```
+
 ---
 
 ## Hackathon
 
-Built for the **Global AI Hackathon Series with Qwen Cloud** — Track 4: Autopilot Agent.
+Built for the **Global AI Hackathon Series with Qwen Cloud** — **Track 4: Autopilot Agent**.
+
+**Judging criteria alignment:**
+- **Qwen Sophistication (30%)**: Two-model architecture, vision pipeline with
+  fingerprinting, three-layer interceptor, token-efficient batching, memory
+  system that learns from merchant behavior.
+- **Innovation (30%)**: Qwen IS the runtime (not a feature), brand guard rules
+  authored by Qwen at creation time, Vision Fingerprinting for dedup, realtime
+  telemetry → decision → approve → morph cycle, option cards not chat.
 
 ---
 

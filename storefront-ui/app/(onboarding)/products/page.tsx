@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
@@ -8,13 +8,15 @@ import { parseProductCsv } from '@/lib/csv'
 import { useStore } from '@/lib/store'
 import { ProductImage } from '@/components/storefront/ProductImage'
 import { CatalogReview } from '@/components/onboarding/CatalogReview'
+import { ImageDropZone } from '@/components/onboarding/ImageDropZone'
 import type { Product } from '@/types/schemas'
 
 /**
- * Step 4 — inventory. Add products one at a time or drop a CSV; qwen-max writes
- * each description (one batched call) and they flow into the list. Publish from
- * here. Zero products is allowed — the store opens in its "preparing the
- * shelves" state.
+ * Step 4 — inventory. Add products one at a time, drop a CSV, or drop product
+ * photos (qwen-vl-max identifies each product from the image). Descriptions are
+ * written in one batched qwen-max call (CSV/manual) or by the vision pipeline
+ * (photo drop). Publish from here. Zero products is allowed — the store opens
+ * in its "preparing the shelves" state.
  */
 export default function ProductsPage() {
   const router = useRouter()
@@ -23,15 +25,54 @@ export default function ProductsPage() {
   const csvInput = useRef<HTMLInputElement>(null)
 
   const [products, setProducts] = useState<Product[]>([])
+  const [pendingProducts, setPendingProducts] = useState<Product[]>([])
   const [form, setForm] = useState({ name: '', price: '', cost_price: '', stock: '', category: '', image_url: '' })
   const [adding, setAdding] = useState(false)
   const [csvBusy, setCsvBusy] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
+  const [uncertainIds, setUncertainIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     api.listProducts().then(setProducts).catch(() => {})
+    api.listPendingProducts().then(setPendingProducts).catch(() => {})
+  }, [])
+
+  const handleVisionProducts = useCallback((newProducts: Product[], uncertain: string[]) => {
+    // Vision products start as pending — merchant approves each one
+    setPendingProducts((prev) => [...prev, ...newProducts])
+    if (uncertain.length > 0) {
+      setUncertainIds((prev) => new Set([...prev, ...uncertain]))
+    }
+  }, [])
+
+  const approveProduct = useCallback(async (p: Product) => {
+    try {
+      const approved = await api.approveProduct(p.id)
+      setPendingProducts((prev) => prev.filter((x) => x.id !== p.id))
+      setProducts((prev) => [...prev, approved])
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not approve product')
+    }
+  }, [])
+
+  const [approvingAll, setApprovingAll] = useState(false)
+  const approveAll = useCallback(async () => {
+    setApprovingAll(true)
+    try {
+      const approved = await api.approveAllProducts()
+      setPendingProducts([])
+      setProducts((prev) => [...prev, ...approved])
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not approve all')
+    } finally {
+      setApprovingAll(false)
+    }
+  }, [])
+
+  const discardPending = useCallback((id: string) => {
+    setPendingProducts((prev) => prev.filter((x) => x.id !== id))
   }, [])
 
   const addSingle = async (e: React.FormEvent) => {
@@ -137,12 +178,85 @@ export default function ProductsPage() {
         {note && <p className="text-accent text-xs font-mono mt-2">{note}</p>}
       </div>
 
+      {/* Photo drop — qwen-vl-max identifies each product from the photo */}
+      <ImageDropZone onProductsCreated={handleVisionProducts} />
+
+      {/* Product Vision — pending products awaiting merchant approval */}
+      {pendingProducts.length > 0 && (
+        <div className="w-full max-w-2xl flex flex-col gap-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-mono text-xs text-accent uppercase tracking-widest mb-1">Product Vision</p>
+              <p className="text-sm text-muted">
+                Qwen identified {pendingProducts.length} product{pendingProducts.length !== 1 ? 's' : ''} from your photos.
+                Approve each to add it to your store.
+              </p>
+            </div>
+            <button
+              onClick={approveAll}
+              disabled={approvingAll}
+              className="shrink-0 bg-accent text-bg font-semibold rounded-md py-2 px-4 text-xs hover:opacity-90 disabled:opacity-50 transition-opacity"
+            >
+              {approvingAll ? 'Approving…' : `Approve all (${pendingProducts.length})`}
+            </button>
+          </div>
+          <AnimatePresence>
+            {pendingProducts.map((p) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, x: -40, transition: { duration: 0.25 } }}
+                transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
+                className="card p-4 flex gap-4 items-start"
+                style={{ borderColor: 'color-mix(in srgb, var(--color-accent) 30%, var(--color-border))' }}
+              >
+                <div className="w-14 h-14 rounded-md overflow-hidden bg-surface-2 shrink-0">
+                  <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-text font-semibold truncate">{p.name}</p>
+                    <span className="text-accent font-mono text-sm">${p.price}</span>
+                    {p.category && (
+                      <span className="text-[10px] font-mono text-muted border border-border rounded-full px-1.5 py-0.5">{p.category}</span>
+                    )}
+                    {uncertainIds.has(p.id) && (
+                      <span className="text-[10px] font-mono rounded-full px-1.5 py-0.5"
+                            style={{ background: 'color-mix(in srgb, var(--color-warning) 18%, transparent)', color: 'var(--color-warning)' }}>
+                        needs verification
+                      </span>
+                    )}
+                  </div>
+                  {p.description && <p className="text-sm text-muted mt-1 leading-relaxed">{p.description}</p>}
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={() => approveProduct(p)}
+                      className="bg-accent text-bg font-semibold rounded-md py-1.5 px-4 text-xs hover:opacity-90 transition-opacity"
+                    >
+                      Approve
+                    </button>
+                    <button
+                      onClick={() => discardPending(p.id)}
+                      className="rounded-md py-1.5 px-3 text-xs border border-border text-muted hover:text-danger hover:border-danger transition-colors"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
       {error && <p className="text-danger text-sm font-mono max-w-2xl w-full">{error}</p>}
 
       {/* Qwen reviews the import and surfaces only the products that need a human
           decision — fix, hide, or keep. */}
       <CatalogReview
         products={products}
+        uncertainIds={uncertainIds}
         onProductUpdated={(p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)))}
         onProductHidden={(id) => setProducts((prev) => prev.filter((x) => x.id !== id))}
       />
@@ -186,16 +300,23 @@ export default function ProductsPage() {
         {liveUrl ? (
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="card w-full p-6 text-center border-accent">
             <p className="font-mono text-xs text-accent uppercase tracking-widest mb-2">Live</p>
-            <p className="text-text mb-3">Your store is live.</p>
+            <p className="text-text mb-1">Your store is live.</p>
+            <p className="text-muted text-xs mb-3">Approved products sync to the storefront instantly.</p>
             <a href={liveUrl} className="text-accent font-mono text-sm underline underline-offset-4 break-all">{storeShellUrl ?? liveUrl}</a>
           </motion.div>
         ) : (
           <>
-            <button onClick={publish} disabled={publishing} className="bg-accent text-bg font-semibold rounded-md py-3 px-10 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity accent-glow">
+            <button onClick={publish} disabled={publishing || !products.length} className="bg-accent text-bg font-semibold rounded-md py-3 px-10 text-sm hover:opacity-90 disabled:opacity-50 transition-opacity accent-glow">
               {publishing ? 'Publishing…' : `Publish store${products.length ? ` (${products.length})` : ''} →`}
             </button>
+            {!products.length && pendingProducts.length > 0 && (
+              <p className="text-muted text-xs font-mono">Approve products first to publish.</p>
+            )}
             <button onClick={() => router.push('/brand-review')} className="text-muted text-xs font-mono hover:text-accent transition-colors">
               ← back to brand
+            </button>
+            <button onClick={() => router.push('/terminal')} className="text-muted text-xs font-mono hover:text-accent transition-colors">
+              ← terminal
             </button>
           </>
         )}

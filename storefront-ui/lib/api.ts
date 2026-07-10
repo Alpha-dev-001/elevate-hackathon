@@ -164,6 +164,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ content_type }),
     }),
+  presignProductImageUpload: (content_type: string) =>
+    req<PresignedUploadResponse>('/api/upload/product-image-url', {
+      method: 'POST',
+      body: JSON.stringify({ content_type }),
+    }),
 
   // ── Onboarding ──────────────────────────────────────────────────────────
   onboardingStart: (logo_oss_url: string) =>
@@ -196,6 +201,11 @@ export const api = {
       body: JSON.stringify({ products }),
     }),
   listProducts: () => req<Product[]>('/products'),
+  listPendingProducts: () => req<Product[]>('/products/pending'),
+  approveProduct: (id: string) =>
+    req<Product>(`/products/${enc(id)}/approve`, { method: 'POST' }),
+  approveAllProducts: () =>
+    req<Product[]>('/products/approve-all', { method: 'POST' }),
   updateProduct: (id: string, body: ProductUpdateInput) =>
     req<{ product: Product; violations: Violation[] }>(`/products/${enc(id)}`, {
       method: 'PATCH',
@@ -203,6 +213,11 @@ export const api = {
     }),
   deleteProduct: (id: string) =>
     req<null>(`/products/${enc(id)}`, { method: 'DELETE' }),
+  visionBatch: (image_urls: string[]) =>
+    req<{ products: Array<{ product: Product; confident: boolean }>; failed_urls: string[] }>(
+      '/products/vision-batch',
+      { method: 'POST', body: JSON.stringify({ image_urls }) },
+    ),
 
   // ── Public storefront ───────────────────────────────────────────────────
   getStore: (slug: string) => req<PublicStore>(`/api/store/${enc(slug)}`),
@@ -330,6 +345,30 @@ export async function uploadLogo(file: File): Promise<string> {
     })
   } catch (e) {
     throw new ApiError(0, 'Could not reach OSS to upload the logo', String(e))
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, 'OSS rejected the upload', await res.text())
+  }
+  return public_url
+}
+
+/**
+ * Upload a product image to OSS — same presigned-PUT flow as the logo but
+ * under a ``products/`` prefix. Returns the public URL for vision-batch.
+ */
+export async function uploadProductImage(file: File): Promise<string> {
+  const { upload_url, public_url, required_headers } = await api.presignProductImageUpload(
+    file.type || 'image/png',
+  )
+  let res: Response
+  try {
+    res = await fetch(upload_url, {
+      method: 'PUT',
+      body: file,
+      headers: required_headers,
+    })
+  } catch (e) {
+    throw new ApiError(0, 'Could not reach OSS to upload the product image', String(e))
   }
   if (!res.ok) {
     throw new ApiError(res.status, 'OSS rejected the upload', await res.text())

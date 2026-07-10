@@ -128,6 +128,7 @@ export const ProductSchema = z.object({
   category: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   qwen_generated: z.boolean().default(false),
+  is_pending: z.boolean().default(false),
 })
 
 // ─── 7. System State ──────────────────────────────────────────────────────────
