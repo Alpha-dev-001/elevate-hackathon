@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3000"
     cors_origins: list[str] = ["http://localhost:3000"]
+    # Regex for dynamic origins (e.g. Vercel preview URLs).
+    # Example: r"https://.*\.vercel\.app"
+    cors_origin_regex: str = ""
 
     class Config:
         env_file = ".env"

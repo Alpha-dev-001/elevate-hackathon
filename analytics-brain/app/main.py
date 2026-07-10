@@ -24,13 +24,17 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
-app.add_middleware(
-    CORSMiddleware,
+_cors_kwargs = dict(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Vercel preview URLs are unpredictable (elevate-abc123-user.vercel.app), so we
+# match them by regex rather than listing every deploy URL manually.
+if settings.cors_origin_regex:
+    _cors_kwargs["allow_origin_regex"] = settings.cors_origin_regex
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 app.include_router(ws.router)          # WebSocket connections
