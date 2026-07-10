@@ -348,12 +348,14 @@ detection algorithm.
 WebSocket — not video, not streams. `push_event()` in `behavior_tracker.py`
 writes to a Redis sorted set (`ZADD velocity:{merchant_id}:{product_id} timestamp event_id`) — O(log n) per insertion. `count_views_in_window()` uses
 `ZRANGEBYSCORE` to count events in the configured time window. When the
-threshold is exceeded, `run_decision_cycle()` in `decision_engine.py` composes
-a prompt from the state **diff** (not full state — token-efficient), calls
-`qwen-max` with `response_format: {type: "json_object"}`, and includes
-`compose_decision_prompt()` which injects business constraints and recent
-memory. The reasoning chain is stored alongside the action for display in the
-option card's collapsible section.
+threshold is exceeded, `run_decision_cycle()` in `decision_engine.py` uses
+**Qwen's native tool-calling API** — 5 tools defined in `tools.py` (one per
+action type: `propose_flash_sale`, `propose_scarcity_price`, `propose_layout_morph`,
+`propose_recovery_offer`, `propose_copy_rewrite`). Qwen selects which tool to
+call and fills typed parameters — no JSON output parsing needed. Tool arguments
+become the execution payload directly. Reasoning comes from Qwen's message
+content alongside the tool call. Memory context and business constraints are
+injected into the prompt.
 
 ### Product Vision Pipeline
 
@@ -504,14 +506,16 @@ by default, deep when the merchant wants to understand why Qwen proposed
 what it did. This makes the intelligence visible without overwhelming the
 decision UI.
 
-**Technical implementation:** `compose_decision_prompt()` in `decision_engine.py`
-instructs qwen-max to include a `reasoning_steps` array in its JSON response.
-Each step is a plain-string explanation (e.g., "12 views on slides in 30s →
+**Technical implementation:** When Qwen calls a tool via the decision cycle's
+tool-calling API, the response includes both `message.content` (free-text
+reasoning) and `message.tool_calls` (structured parameters). The reasoning is
+extracted from `message.content` — Qwen's natural-language explanation of why
+it chose this tool and these parameters (e.g., "12 views on slides in 30s →
 velocity spike → flash-sale at 15% because margin floor allows it"). The
 reasoning chain is stored in `agent_actions.reasoning` (JSONB in Postgres) and
 rendered in the option card's collapsible `<details>` element. No additional
-Qwen call is needed — reasoning is part of the same `run_decision_cycle()`
-response. The reasoning is also used by the `OutcomeObserver` to correlate
+Qwen call is needed — reasoning is part of the same tool-calling response.
+The reasoning is also used by the `OutcomeObserver` to correlate
 predicted outcomes with actual results for memory learning.
 
 ---
@@ -721,10 +725,11 @@ Built for the **Global AI Hackathon Series with Qwen Cloud** — **Track 4: Auto
 **Judging criteria alignment:**
 
 - **Qwen Sophistication (30%)**: Two-model architecture, vision pipeline with
-fingerprinting, three-layer interceptor, token-efficient batching, memory
-system that learns from merchant edits AND outcome observation, LayoutDSL
-composition with three defense layers, creative extension for merchant-directed
-design, transparent reasoning chains on every proposed action.
+fingerprinting, three-layer interceptor, **native tool-calling API for decision
+cycles** (5 structured tools, typed parameters, no JSON parsing), token-efficient
+batching, memory system that learns from merchant edits AND outcome observation,
+LayoutDSL composition with three defense layers, creative extension for
+merchant-directed design, transparent reasoning chains on every proposed action.
 - **Innovation (30%)**: Qwen IS the runtime (not a feature), brand guard rules
 authored by Qwen at creation time, Vision Fingerprinting for dedup, realtime
 telemetry → decision → approve → morph cycle, option cards not chat,
