@@ -153,6 +153,7 @@ class AgentActionDB(Base):
     estimated_confidence: Mapped[float] = mapped_column(Float, nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     brand_check: Mapped[str] = mapped_column(String, nullable=False)
+    reasoning: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[int] = mapped_column(
         BigInteger, default=lambda: int(time.time() * 1000)

@@ -882,7 +882,7 @@ _DESC_CHUNK_SIZE = 20
 
 
 async def _describe_chunk(
-    products: list[ProductCSVRow], brand_voice_profile: str
+    products: list[ProductCSVRow], brand_voice_profile: str, memory_context: str = ""
 ) -> dict[str, str]:
     """One qwen-max call for up to _DESC_CHUNK_SIZE products. Missing names come
     back as "" so the caller can mark them as fallbacks."""
@@ -890,10 +890,11 @@ async def _describe_chunk(
         {"name": p.name, "category": p.category or "general", "price": p.price}
         for p in products
     ]
+    memory_block = f"\n\n{memory_context}\nApply these learned preferences when writing descriptions." if memory_context else ""
     prompt = f"""You are writing product descriptions for an online store.
 
 Brand voice to match exactly:
-{brand_voice_profile}
+{brand_voice_profile}{memory_block}
 
 Write a 2-3 sentence description for each product below. Match the brand voice.
 No headers, no bullet points, no markdown — just the sentences.
@@ -923,6 +924,7 @@ Products:
 async def generate_descriptions(
     products: list[ProductCSVRow],
     brand_voice_profile: str,
+    memory_context: str = "",
 ) -> tuple[dict[str, str], set[str]]:
     """Write descriptions for a catalog, chunked and run in parallel.
 
@@ -930,6 +932,8 @@ async def generate_descriptions(
     into ~20-product chunks so the output never overflows and one bad chunk
     can't sink the whole import. Returns ({name: description}, fallback_names)
     where fallback_names are products that didn't get real Qwen copy.
+
+    memory_context: learned merchant preferences that shape description style.
     """
     if not products:
         return {}, set()
@@ -941,7 +945,7 @@ async def generate_descriptions(
 
     async def run(chunk: list[ProductCSVRow]) -> dict[str, str]:
         try:
-            return await _describe_chunk(chunk, brand_voice_profile)
+            return await _describe_chunk(chunk, brand_voice_profile, memory_context)
         except BrandGenerationError as e:
             logger.warning(f"[brand] description chunk failed ({len(chunk)} items): {e}")
             return {p.name: "" for p in chunk}

@@ -505,6 +505,7 @@ class AgentAction(BaseModel):
     estimated_confidence: float
     payload: dict[str, Any]
     brand_check: str
+    reasoning: str = ""
     status: AgentActionStatus = AgentActionStatus.PENDING
     created_at: int
     approved_at: Optional[int] = None
@@ -640,6 +641,23 @@ class VisionBatchProduct(BaseModel):
 class VisionBatchResponse(BaseModel):
     products: list[VisionBatchProduct]
     failed_urls: list[str] = []
+
+
+class DuplicateGroup(BaseModel):
+    """Products sharing the same image — grouped for dedup decisions."""
+    image_url: str
+    product_ids: list[str]
+    names: list[str]
+    qwen_generated: bool  # True if all products in the group were Qwen-created
+    auto_resolved: bool   # True if the system already handled it (Qwen dupes)
+
+
+class DeduplicateReport(BaseModel):
+    """Result of a catalog deduplication pass."""
+    auto_merged: list[DuplicateGroup]   # Qwen-generated duplicates already resolved
+    needs_review: list[DuplicateGroup]  # Merchant-written duplicates — human decides
+    total_scanned: int
+    total_duplicates: int
 
 
 class DeltaExecution(BaseModel):

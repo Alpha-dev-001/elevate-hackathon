@@ -9,7 +9,7 @@ import { useStore } from '@/lib/store'
 import { ProductImage } from '@/components/storefront/ProductImage'
 import { CatalogReview } from '@/components/onboarding/CatalogReview'
 import { ImageDropZone } from '@/components/onboarding/ImageDropZone'
-import type { Product } from '@/types/schemas'
+import type { Product, DeduplicateReport, CatalogAuditReport } from '@/types/schemas'
 
 /**
  * Step 4 — inventory. Add products one at a time, drop a CSV, or drop product
@@ -33,10 +33,15 @@ export default function ProductsPage() {
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [uncertainIds, setUncertainIds] = useState<Set<string>>(new Set())
+  const [dedupReport, setDedupReport] = useState<DeduplicateReport | null>(null)
+  const [auditReport, setAuditReport] = useState<CatalogAuditReport | null>(null)
+  const [auditing, setAuditing] = useState(false)
 
   useEffect(() => {
     api.listProducts().then(setProducts).catch(() => {})
     api.listPendingProducts().then(setPendingProducts).catch(() => {})
+    // Auto-deduplicate on page load — catches any Qwen-generated duplicates silently
+    api.deduplicateProducts().then(setDedupReport).catch(() => {})
   }, [])
 
   const handleVisionProducts = useCallback((newProducts: Product[], uncertain: string[]) => {
@@ -186,6 +191,54 @@ export default function ProductsPage() {
       {/* Photo drop — qwen-vl-max identifies each product from the photo */}
       <ImageDropZone onProductsCreated={handleVisionProducts} />
 
+      {/* Dedup report — auto-merged duplicates + merchant-written duplicates for review */}
+      {dedupReport && dedupReport.total_duplicates > 0 && (
+        <div className="w-full max-w-2xl rounded-xl border border-neutral-800 p-4" style={{ background: 'var(--color-surface, #111113)' }}>
+          <p className="font-mono text-xs text-warning uppercase tracking-widest mb-1">Catalog Cleanup</p>
+          <p className="text-sm text-muted mb-3">
+            Found {dedupReport.total_duplicates} duplicate{dedupReport.total_duplicates !== 1 ? 's' : ''} across {dedupReport.total_scanned} products.
+          </p>
+          {dedupReport.auto_merged.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs text-accent mb-1">✓ Auto-merged {dedupReport.auto_merged.length} Qwen-generated duplicate{dedupReport.auto_merged.length !== 1 ? 's' : ''}</p>
+              {dedupReport.auto_merged.map((g, i) => (
+                <p key={i} className="text-xs text-muted ml-3">
+                  Kept &ldquo;{g.names[0]}&rdquo; — removed {g.product_ids.length - 1} duplicate{g.product_ids.length - 1 !== 1 ? 's' : ''}
+                </p>
+              ))}
+            </div>
+          )}
+          {dedupReport.needs_review.length > 0 && (
+            <div>
+              <p className="text-xs text-warning mb-1">⚠ {dedupReport.needs_review.length} merchant-written duplicate{dedupReport.needs_review.length !== 1 ? 's' : ''} — please review</p>
+              {dedupReport.needs_review.map((g, i) => (
+                <div key={i} className="flex items-center gap-2 ml-3 text-xs text-muted">
+                  <span>{g.names.join(', ')}</span>
+                  <button
+                    onClick={async () => {
+                      // Discard all but the first product in the group
+                      for (const id of g.product_ids.slice(1)) {
+                        try {
+                          await api.deleteProduct(id)
+                          setProducts((prev) => prev.filter((p) => p.id !== id))
+                        } catch { /* ignore */ }
+                      }
+                      setDedupReport((prev) => prev ? {
+                        ...prev,
+                        needs_review: prev.needs_review.filter((_, j) => j !== i),
+                      } : null)
+                    }}
+                    className="text-danger hover:text-red-400 underline"
+                  >
+                    Remove duplicates
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Product Vision — pending products awaiting merchant approval */}
       {pendingProducts.length > 0 && (
         <div className="w-full max-w-2xl flex flex-col gap-3">
@@ -265,6 +318,65 @@ export default function ProductsPage() {
         onProductUpdated={(p) => setProducts((prev) => prev.map((x) => (x.id === p.id ? p : x)))}
         onProductHidden={(id) => setProducts((prev) => prev.filter((x) => x.id !== id))}
       />
+
+      {/* Qwen Catalog Audit — one-click AI review */}
+      {products.length > 0 && (
+        <div className="w-full max-w-2xl flex flex-col gap-3">
+          <button
+            onClick={async () => {
+              setAuditing(true)
+              try {
+                const report = await api.catalogAudit()
+                setAuditReport(report)
+              } catch (err) {
+                setError(err instanceof ApiError ? err.message : 'Catalog audit failed')
+              } finally {
+                setAuditing(false)
+              }
+            }}
+            disabled={auditing}
+            className="self-start text-xs font-medium py-2 px-4 rounded-lg border border-neutral-700 hover:border-emerald-400/60 disabled:opacity-40 transition-colors"
+          >
+            {auditing ? (
+              <span className="flex items-center gap-2">
+                <span className="inline-block w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />
+                Qwen is auditing…
+              </span>
+            ) : '✦ Run Qwen catalog audit'}
+          </button>
+
+          {auditReport && (
+            <div className="rounded-xl border border-neutral-800 p-4" style={{ background: 'var(--color-surface, #111113)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <p className="font-mono text-xs uppercase tracking-widest" style={{ color: auditReport.catalog_score >= 80 ? 'var(--color-accent, #6EE7B7)' : auditReport.catalog_score >= 50 ? 'var(--color-warning, #FFD166)' : 'var(--color-danger, #FF6B6B)' }}>
+                  Catalog Score: {auditReport.catalog_score}/100
+                </p>
+                <button onClick={() => setAuditReport(null)} className="text-xs text-muted hover:text-white">×</button>
+              </div>
+              <p className="text-sm text-muted mb-3">{auditReport.summary}</p>
+              {auditReport.findings.length === 0 ? (
+                <p className="text-xs text-accent">✓ No issues found — your catalog looks clean.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {auditReport.findings.map((f, i) => (
+                    <div key={i} className="text-xs border-l-2 pl-3 py-1"
+                         style={{ borderColor: f.severity === 'high' ? 'var(--color-danger, #FF6B6B)' : f.severity === 'medium' ? 'var(--color-warning, #FFD166)' : '#555' }}>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">{f.product_name}</span>
+                        <span className="text-muted px-1.5 py-0.5 rounded-full text-[10px]" style={{ background: '#1A1A1E' }}>
+                          {f.issue_type.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <p className="text-muted mt-0.5">{f.description}</p>
+                      <p className="text-accent mt-0.5">→ {f.suggested_fix}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* product list */}
       {products.length > 0 && (

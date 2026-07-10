@@ -77,12 +77,12 @@ async def _brand_voice(merchant_id: str, db: AsyncSession) -> str:
     return _NEUTRAL_VOICE
 
 
-async def _describe(rows: list[ProductCSVRow], voice: str) -> tuple[dict[str, str], set[str]]:
+async def _describe(rows: list[ProductCSVRow], voice: str, memory_ctx: str = "") -> tuple[dict[str, str], set[str]]:
     """Chunked, parallel descriptions. Returns ({name: description},
     fallback_names) — fallback_names didn't get real Qwen copy. Never raises;
     a Qwen outage degrades a chunk to neutral copy rather than blocking adds."""
     try:
-        return await brand_svc.generate_descriptions(rows, voice)
+        return await brand_svc.generate_descriptions(rows, voice, memory_ctx)
     except BrandGenerationError as e:
         logger.warning(f"[products] description generation failed, using fallback: {e}")
         return ({r.name: f"{r.name}." for r in rows}, {r.name for r in rows})
@@ -125,6 +125,10 @@ async def add_product(
     db: AsyncSession = Depends(get_db),
 ):
     voice = await _brand_voice(merchant.id, db)
+    # Load merchant memory for description personalisation.
+    from app.services.memory import get_memory, build_memory_context
+    redis = await get_redis()
+    mem_ctx = build_memory_context(await get_memory(merchant.id, db, redis))
     row_in = ProductCSVRow(
         name=payload.name,
         price=payload.price,
@@ -132,7 +136,7 @@ async def add_product(
         image_url=payload.image_url or "",
         category=payload.category or "",
     )
-    descs, fallbacks = await _describe([row_in], voice)
+    descs, fallbacks = await _describe([row_in], voice, mem_ctx)
 
     product = ProductDB(
         id=f"prod_{uuid.uuid4().hex[:12]}",
@@ -167,7 +171,11 @@ async def add_products_batch(
         raise HTTPException(status_code=400, detail="Batch capped at 200 products")
 
     voice = await _brand_voice(merchant.id, db)
-    descs, fallbacks = await _describe(rows, voice)  # chunked, parallel
+    # Load merchant memory for description personalisation.
+    from app.services.memory import get_memory, build_memory_context
+    redis = await get_redis()
+    mem_ctx = build_memory_context(await get_memory(merchant.id, db, redis))
+    descs, fallbacks = await _describe(rows, voice, mem_ctx)  # chunked, parallel
 
     created: list[ProductDB] = []
     for r in rows:
@@ -220,10 +228,20 @@ async def update_product(
 ):
     """Partial edit. A price change runs through the interceptor: below cost is
     blocked (409), below the margin floor is clamped with a warning the merchant
-    sees in `violations`. Stock/category/name/image/active update directly."""
+    sees in `violations`. Stock/category/name/image/active update directly.
+
+    Every edit is silently recorded in qwen_memory so future vision calls and
+    decision cycles learn the merchant's preferences (pricing style, naming
+    conventions, category choices)."""
     product = await _owned_product(db, merchant.id, product_id)
     data = payload.model_dump(exclude_unset=True)
     violations: list = []
+
+    # Snapshot old values for the memory entry before mutating.
+    _old: dict[str, str] = {}
+    for key in ("name", "price", "cost_price", "category", "stock", "is_active"):
+        if key in data and data[key] is not None:
+            _old[key] = str(getattr(product, key, ""))
 
     # Cost first — it's the basis for the margin check on any new price.
     if "cost_price" in data and data["cost_price"] is not None:
@@ -254,7 +272,29 @@ async def update_product(
     if "is_active" in data and data["is_active"] is not None:
         product.is_active = data["is_active"]
 
-    await db.flush()
+    # ── Memory hook: record what the merchant changed so Qwen learns ──
+    if _old:
+        changes = []
+        for key, old_val in _old.items():
+            new_val = str(getattr(product, key, ""))
+            if old_val != new_val:
+                changes.append(f"{key}: {old_val}→{new_val}")
+        if changes:
+            try:
+                from app.services.memory import write_memory
+                from app.models.schemas import MemoryEntry
+                redis = await get_redis()
+                entry = MemoryEntry(
+                    action_type="merchant_edit",
+                    trigger=f"edited '{product.name}'",
+                    outcome="; ".join(changes),
+                    merchant_behavior="edited",
+                    notes=f"merchant manually adjusted product",
+                )
+                await write_memory(merchant.id, entry, db, redis)
+            except Exception as e:  # noqa: BLE001 — memory write must never block the edit
+                logger.warning("[products] memory write failed for edit on %s: %s", product_id, e)
+
     await _sync_state_if_live(db, merchant.id)
     return {"product": db_to_product(product).model_dump(), "violations": violations}
 
@@ -317,6 +357,12 @@ async def vision_batch(
     baseline = await _baseline_price(db, merchant.id)
     store_name = merchant.store_name
 
+    # Load merchant memory — Qwen learns from past edits silently.
+    from app.services.memory import get_memory, build_memory_context
+    redis = await get_redis()
+    memories = await get_memory(merchant.id, db, redis)
+    memory_ctx = build_memory_context(memories)
+
     sem = asyncio.Semaphore(VISION_CONCURRENCY)
 
     async def analyze_one(url: str):
@@ -327,6 +373,7 @@ async def vision_batch(
                     store_name=store_name,
                     brand_voice=voice,
                     baseline_price=baseline,
+                    memory_context=memory_ctx,
                 )
                 return url, result
             except Exception as e:
@@ -418,3 +465,196 @@ async def approve_all_products(
     if approved:
         await _sync_state_if_live(db, merchant.id)
     return [db_to_product(r) for r in approved]
+
+
+# ── Duplicate detection & catalog cleanup ──────────────────────────────────────
+
+from collections import defaultdict
+from app.models.schemas import DeduplicateReport, DuplicateGroup
+
+
+@router.post("/deduplicate", response_model=DeduplicateReport)
+async def deduplicate_products(
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Scan the merchant's catalog for duplicate products (same image_url).
+
+    Qwen-generated duplicates are auto-resolved: the first product is kept,
+    extras are hard-deleted (they were never live or are redundant vision
+    duplicates). Merchant-written duplicates are flagged for review — the
+    merchant decides whether they intended two separate listings."""
+    rows = await db.scalars(
+        select(ProductDB).where(ProductDB.merchant_id == merchant.id)
+    )
+    products = list(rows)
+    total_scanned = len(products)
+
+    # Group by primary image URL (first image in the list).
+    by_image: dict[str, list[ProductDB]] = defaultdict(list)
+    for p in products:
+        if p.image_urls:
+            primary = p.image_urls[0]
+            if primary:
+                by_image[primary].append(p)
+
+    auto_merged: list[DuplicateGroup] = []
+    needs_review: list[DuplicateGroup] = []
+    total_duplicates = 0
+
+    for image_url, group in by_image.items():
+        if len(group) < 2:
+            continue
+
+        total_duplicates += len(group) - 1
+        all_qwen = all(p.qwen_generated_description for p in group)
+
+        if all_qwen:
+            # Qwen-generated: keep the first, hard-delete the rest.
+            keeper = group[0]
+            for dup in group[1:]:
+                await db.delete(dup)
+            auto_merged.append(DuplicateGroup(
+                image_url=image_url,
+                product_ids=[p.id for p in group],
+                names=[p.name for p in group],
+                qwen_generated=True,
+                auto_resolved=True,
+            ))
+        else:
+            # Merchant-written: flag for review — don't auto-delete.
+            needs_review.append(DuplicateGroup(
+                image_url=image_url,
+                product_ids=[p.id for p in group],
+                names=[p.name for p in group],
+                qwen_generated=False,
+                auto_resolved=False,
+            ))
+
+    await db.flush()
+    if auto_merged:
+        await _sync_state_if_live(db, merchant.id)
+
+    return DeduplicateReport(
+        auto_merged=auto_merged,
+        needs_review=needs_review,
+        total_scanned=total_scanned,
+        total_duplicates=total_duplicates,
+    )
+
+
+# ── Qwen-powered catalog audit ───────────────────────────────────────────────
+
+from pydantic import BaseModel as _BM
+
+class CatalogFinding(_BM):
+    """One issue Qwen found in the catalog."""
+    product_id: str
+    product_name: str
+    issue_type: str       # pricing_anomaly | missing_category | naming_issue | duplicate | description_quality
+    severity: str         # low | medium | high
+    description: str
+    suggested_fix: str    # human-readable suggestion
+
+class CatalogAuditReport(_BM):
+    findings: list[CatalogFinding]
+    catalog_score: int    # 0-100 quality score
+    summary: str          # Qwen's overall assessment
+
+
+CATALOG_AUDIT_PROMPT = """You are an expert e-commerce catalog auditor.
+Review this store's product catalog and identify quality issues.
+
+Store: {store_name} ({category})
+
+For each product, check:
+1. **Pricing anomalies**: price seems unreasonable for the product type (e.g. $500 for basic slides, $2 for a designer bag)
+2. **Missing categories**: product has no category or a vague one like "other"
+3. **Naming issues**: name is generic ("Product 1"), has typos, or doesn't match typical e-commerce naming
+4. **Description quality**: description is too short, generic, or doesn't describe the actual product
+5. **Duplicates**: products that seem to be the same item listed separately
+
+Return ONLY a JSON object:
+{{
+  "findings": [
+    {{
+      "product_id": "<id>",
+      "product_name": "<name>",
+      "issue_type": "pricing_anomaly|missing_category|naming_issue|duplicate|description_quality",
+      "severity": "low|medium|high",
+      "description": "<what's wrong>",
+      "suggested_fix": "<specific, actionable fix>"
+    }}
+  ],
+  "catalog_score": <0-100, where 100 is a perfect catalog>,
+  "summary": "<1-2 sentence overall assessment>"
+}}
+
+If the catalog is clean, return an empty findings array with a high score.
+Be honest but constructive. Only flag real issues, not stylistic preferences.
+
+Products:
+{products_json}"""
+
+
+@router.post("/catalog-audit", response_model=CatalogAuditReport)
+async def catalog_audit(
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Qwen-max reviews the entire catalog for quality issues. Returns a
+    structured report with findings and a catalog quality score. This is
+    advisory — the merchant decides which findings to act on.
+
+    Token-efficient: one qwen-max call for the entire catalog (up to 100
+    products), not per-product."""
+    from app.services.brand import _qwen_chat, _extract_json, BrandGenerationError
+    from app.core.config import get_settings
+
+    rows = await db.scalars(
+        select(ProductDB).where(ProductDB.merchant_id == merchant.id).limit(100)
+    )
+    products = list(rows)
+    if not products:
+        return CatalogAuditReport(findings=[], catalog_score=100, summary="Empty catalog — no products to audit.")
+
+    products_json = json.dumps([
+        {
+            "id": p.id, "name": p.name, "price": p.price,
+            "category": p.category or "(none)",
+            "description": (p.description or "")[:200],
+        }
+        for p in products
+    ], ensure_ascii=False)
+
+    prompt = CATALOG_AUDIT_PROMPT.format(
+        store_name=merchant.store_name,
+        category=merchant.category,
+        products_json=products_json,
+    )
+
+    try:
+        raw = await _qwen_chat(
+            model=get_settings().qwen_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000, temperature=0.3, timeout=60.0,
+        )
+        data = _extract_json(raw)
+        findings = []
+        for f in (data.get("findings") or []):
+            try:
+                findings.append(CatalogFinding(**f))
+            except Exception:
+                continue
+        return CatalogAuditReport(
+            findings=findings,
+            catalog_score=max(0, min(100, int(data.get("catalog_score", 50)))),
+            summary=str(data.get("summary", "Audit complete.")),
+        )
+    except Exception as e:
+        logger.warning("[catalog-audit] Qwen call failed: %s", e)
+        return CatalogAuditReport(
+            findings=[], catalog_score=50,
+            summary="Qwen was unavailable for the audit. Run the deduplication scan instead.",
+        )
+

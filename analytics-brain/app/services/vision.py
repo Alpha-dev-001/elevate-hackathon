@@ -35,7 +35,7 @@ class ProductVision(BaseModel):
 
 PRODUCT_VISION_PROMPT = """You are cataloguing ONE product from its photo for the fashion boutique "{store_name}".
 Brand voice: {brand_voice}
-
+{memory_block}
 Look at the image and identify the product from what you can SEE (brand markings on
 the item/box/bag, product type, colours, standout design). Return ONLY this json:
 {{
@@ -66,18 +66,24 @@ async def analyze_product_image(
     store_name: str,
     brand_voice: str,
     baseline_price: float,
+    memory_context: str = "",
 ) -> ProductVision:
     """One qwen-vl-max pass over a product photo → a validated ProductVision.
 
     Prices are clamped into [0.6×, 2×] baseline so a hallucinated MSRP can never
     leak through. Raises BrandGenerationError on transport/parse failure so the
     caller can decide to skip or retry that one image.
-    """
+
+    When memory_context is provided (built from merchant edit history), it is
+    injected into the prompt so Qwen adapts naming, pricing, and categorization
+    to the merchant's demonstrated preferences."""
     lo = round(baseline_price * 0.6, 2)
     hi = round(baseline_price * 2.0, 2)
+    memory_block = f"\n{memory_context}\n" if memory_context else ""
     prompt = PRODUCT_VISION_PROMPT.format(
         store_name=store_name,
         brand_voice=brand_voice or "clear, confident, modern",
+        memory_block=memory_block,
         baseline=baseline_price,
         lo=lo,
         hi=hi,

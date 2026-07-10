@@ -131,6 +131,46 @@ export const ProductSchema = z.object({
   is_pending: z.boolean().default(false),
 })
 
+// ─── 6b. Duplicate Detection ─────────────────────────────────────────────────
+
+export const DuplicateGroupSchema = z.object({
+  image_url: z.string(),
+  product_ids: z.array(z.string()),
+  names: z.array(z.string()),
+  qwen_generated: z.boolean(),
+  auto_resolved: z.boolean(),
+})
+
+export const DeduplicateReportSchema = z.object({
+  auto_merged: z.array(DuplicateGroupSchema),
+  needs_review: z.array(DuplicateGroupSchema),
+  total_scanned: z.number().int(),
+  total_duplicates: z.number().int(),
+})
+
+export type DuplicateGroup = z.infer<typeof DuplicateGroupSchema>
+export type DeduplicateReport = z.infer<typeof DeduplicateReportSchema>
+
+// ─── 6c. Catalog Audit (Qwen-powered review) ─────────────────────────────────
+
+export const CatalogFindingSchema = z.object({
+  product_id: z.string(),
+  product_name: z.string(),
+  issue_type: z.enum(['pricing_anomaly', 'missing_category', 'naming_issue', 'duplicate', 'description_quality']),
+  severity: z.enum(['low', 'medium', 'high']),
+  description: z.string(),
+  suggested_fix: z.string(),
+})
+
+export const CatalogAuditReportSchema = z.object({
+  findings: z.array(CatalogFindingSchema),
+  catalog_score: z.number().int().min(0).max(100),
+  summary: z.string(),
+})
+
+export type CatalogFinding = z.infer<typeof CatalogFindingSchema>
+export type CatalogAuditReport = z.infer<typeof CatalogAuditReportSchema>
+
 // ─── 7. System State ──────────────────────────────────────────────────────────
 // Used for Zod gate before applying JSON patches — prevents silent desync
 
@@ -440,6 +480,7 @@ export const AgentActionSchema = z.object({
   estimated_confidence: z.number(),
   payload: z.record(z.any()),
   brand_check: z.string(),
+  reasoning: z.string().default(''),
   status: AgentActionStatusSchema,
   created_at: z.number(),
   approved_at: z.number().nullable().optional(),

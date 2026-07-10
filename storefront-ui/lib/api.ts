@@ -28,6 +28,8 @@ import type {
   Customer,
   CustomerCreate,
   CustomerLogin,
+  DeduplicateReport,
+  CatalogAuditReport,
 } from '@/types/schemas'
 
 export interface DashboardData {
@@ -206,6 +208,10 @@ export const api = {
     req<Product>(`/products/${enc(id)}/approve`, { method: 'POST' }),
   approveAllProducts: () =>
     req<Product[]>('/products/approve-all', { method: 'POST' }),
+  deduplicateProducts: () =>
+    req<DeduplicateReport>('/products/deduplicate', { method: 'POST' }),
+  catalogAudit: () =>
+    req<CatalogAuditReport>('/products/catalog-audit', { method: 'POST' }),
   updateProduct: (id: string, body: ProductUpdateInput) =>
     req<{ product: Product; violations: Violation[] }>(`/products/${enc(id)}`, {
       method: 'PATCH',

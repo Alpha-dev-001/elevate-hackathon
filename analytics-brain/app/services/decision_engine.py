@@ -34,6 +34,7 @@ Decide ONE action. Return ONLY this JSON:
 {{
   "action_type": "<flash_sale|layout_morph|scarcity_price|recovery_offer|copy_rewrite>",
   "trigger": "<1 sentence: what caused this>",
+  "reasoning": "<your step-by-step thinking: what you observed → why this action → expected outcome. Be specific with numbers. e.g. '12 views on slides in 30s → velocity spike → flash-sale at 15% because margin floor allows it → expected ~3 conversions from current session'>",
   "title": "<merchant-facing card title, max 8 words>",
   "description": "<merchant-facing description, max 20 words>",
   "estimated_gmv": <estimated revenue impact as number>,
@@ -231,6 +232,7 @@ async def run_decision_cycle(
         promo_id=promo_id,
         action_type=action_type_enum.value,
         trigger=str(data.get("trigger", anomaly_desc))[:500],
+        reasoning=str(data.get("reasoning", ""))[:1000],
         title=str(data.get("title", "Action ready"))[:200],
         description=str(data.get("description", ""))[:500],
         estimated_gmv=est_gmv,

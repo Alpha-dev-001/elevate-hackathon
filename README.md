@@ -195,18 +195,65 @@ silent wrong guess going live.
 ### Qwen Memory — The Autopilot Learns
 
 Every merchant action Qwen observes is appended to `qwen_memory` on the
-Merchant record. When a merchant overrides a Qwen-suggested price, rewrites
-a description, or hides a product — Qwen learns the preference silently.
-Future vision calls and decision cycles include this memory, so the autopilot
-adapts to each merchant's style over time.
+Merchant record. Two memory sources feed the learning loop:
 
-The `OutcomeObserver` runs after each agent action expires, counting attributed
-orders (joined by `promo_id`) and writing `MemoryEntry` records back to both
-Postgres and Redis. The next decision cycle reads this memory first — so Qwen
-proposes differently based on what actually worked, not just what it proposed
-last time.
+1. **Merchant edits**: When a merchant changes a product's price, name, or
+   category, a `MemoryEntry` records the old → new diff. Future vision calls
+   and description generation include this memory — Qwen names, prices, and
+   describes products the way the merchant has demonstrated they prefer.
+
+2. **Outcome observation**: The `OutcomeObserver` runs after each agent action
+   expires, counting attributed orders (joined by `promo_id`) and writing
+   `MemoryEntry` records. The next decision cycle reads this memory first —
+   Qwen proposes differently based on what actually worked.
+
+Memory is stored in Postgres (durable) with Redis as a fast mirror. Capped
+at 20 entries per merchant. Memory failures are caught and logged — they
+never block a product edit, vision call, or decision cycle.
 
 The merchant never talks to Qwen. Qwen just learns.
+
+### Duplicate Detection + Catalog Audit
+
+Two-layer catalog hygiene — automatic and Qwen-powered:
+
+**Automatic deduplication** (`POST /products/deduplicate`):
+- Groups products by primary image URL
+- Qwen-generated duplicates → auto-merged (keep first, hard-delete extras)
+- Merchant-written duplicates → flagged for human review
+- Runs automatically on every products page load
+
+**Qwen catalog audit** (`POST /products/catalog-audit`):
+- One `qwen-max` call reviews up to 100 products
+- Checks: pricing anomalies, missing categories, naming issues, description
+  quality, duplicates
+- Returns `catalog_score` (0-100), individual findings with severity, and
+  specific actionable fixes
+
+### Qwen Creative Extension
+
+The store builder has a free-text creative input: "Tell Qwen what you want."
+The merchant types their vision (e.g. "I want a bold hero with a full-bleed
+image, then a story about craftsmanship") and `qwen-max` composes a new DSL
+layout guided by that direction.
+
+The output passes through the same 3-layer defense pipeline (coerce →
+normalize → fallback). This is brand-guarded creative direction within the
+existing DSL schema — never unconstrained codegen. The merchant's vision,
+Qwen's execution, brand constraints enforced.
+
+### Qwen Reasoning — Transparent Decisions
+
+Every proposed action includes Qwen's step-by-step reasoning chain, visible
+in a collapsible section on each option card:
+
+> "12 views on slides in 30s → velocity spike → flash-sale at 15% because
+> margin floor allows it → expected ~3 conversions from current session"
+
+The reasoning is stored alongside the action and surfaced on demand — subtle
+by default, deep when the merchant wants to understand why Qwen proposed
+what it did. This makes the intelligence visible without overwhelming the
+decision UI.
 
 ---
 
@@ -216,8 +263,12 @@ Every Qwen call does maximum work. No throwaway calls.
 
 - **Brand generation**: One `qwen-vl-max` + one `qwen-max` call. Cached forever.
 - **Product descriptions**: All names batched into ONE `qwen-max` call. Never looped per product.
-- **Product Vision**: One `qwen-vl-max` per unique product (fingerprinting eliminates duplicates).
-- **Decision cycles**: Send snapshot **diff** only, not full state.
+- **Product Vision**: One `qwen-vl-max` per unique product (fingerprinting eliminates duplicates). Memory-informed prompts at zero extra cost.
+- **Decision cycles**: Send snapshot **diff** only, not full state. Includes reasoning chain.
+- **Catalog audit**: ONE `qwen-max` call reviews up to 100 products.
+- **Creative DSL**: ONE `qwen-max` call reusing existing prompt infrastructure.
+- **Duplicate detection**: Zero Qwen calls — deterministic image URL comparison.
+- **Memory injection**: Zero additional tokens when memory is empty.
 - **Every output cached in Redis** before returning. Cache hit = zero tokens.
 
 ---
@@ -327,12 +378,14 @@ Built for the **Global AI Hackathon Series with Qwen Cloud** — **Track 4: Auto
 **Judging criteria alignment:**
 - **Qwen Sophistication (30%)**: Two-model architecture, vision pipeline with
   fingerprinting, three-layer interceptor, token-efficient batching, memory
-  system that learns from merchant behavior, LayoutDSL composition with
-  three defense layers (coerce → normalize → deterministic fallback).
+  system that learns from merchant edits AND outcome observation, LayoutDSL
+  composition with three defense layers, creative extension for merchant-directed
+  design, transparent reasoning chains on every proposed action.
 - **Innovation (30%)**: Qwen IS the runtime (not a feature), brand guard rules
   authored by Qwen at creation time, Vision Fingerprinting for dedup, realtime
   telemetry → decision → approve → morph cycle, option cards not chat,
-  fault-tolerant storefront that gracefully degrades instead of breaking.
+  fault-tolerant storefront, automatic catalog dedup, Qwen-powered catalog
+  audit, merchant-directed creative generation within brand constraints.
 
 ---
 

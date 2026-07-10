@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
 import { IconBolt } from '@/components/icons'
 import type { AgentAction } from '@/types/schemas'
@@ -67,6 +67,7 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
   const [isApproving, setIsApproving] = useState(false)
   const [isDismissing, setIsDismissing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showReasoning, setShowReasoning] = useState(false)
 
   const isLoading = isApproving || isDismissing
   const confidencePct = Math.round(action.estimated_confidence * 100)
@@ -150,9 +151,45 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
       </h3>
 
       {/* Description */}
-      <p className="text-sm mb-4" style={{ color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+      <p className="text-sm mb-3" style={{ color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
         {action.description}
       </p>
+
+      {/* Qwen's Reasoning — collapsible chain-of-thought */}
+      {action.reasoning && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowReasoning(!showReasoning)}
+            className="text-[10px] font-mono uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+            style={{ color: showReasoning ? 'var(--color-accent)' : 'var(--color-text-muted)' }}
+          >
+            <span style={{ transform: showReasoning ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s', display: 'inline-block' }}>▸</span>
+            ✦ Qwen&apos;s reasoning
+          </button>
+          <AnimatePresence>
+            {showReasoning && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                className="overflow-hidden"
+              >
+                <p
+                  className="text-xs font-mono leading-relaxed mt-2 pl-3 border-l-2"
+                  style={{
+                    color: 'var(--color-accent)',
+                    borderColor: 'var(--color-accent)',
+                    opacity: 0.85,
+                  }}
+                >
+                  {action.reasoning}
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
 
       {/* GMV Impact */}
       <p className="text-sm font-semibold mb-3" style={{ color: 'var(--color-accent)' }}>
