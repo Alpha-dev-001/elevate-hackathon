@@ -9,6 +9,56 @@
 
 ---
 
+## TL;DR — Three things judges should know
+
+1. **Qwen authors its own constraints.** At brand generation time, Qwen writes the
+   guard rules that govern its future behavior — color conflicts, layout coherence,
+   voice consistency. These rules are enforced by deterministic Python (Pydantic +
+   Zod + 3-layer interceptor), not by prompting. The AI literally cannot violate
+   the brand it created. This is not prompt engineering — it is schema-enforced
+   self-governance.
+
+2. **The store runs itself in real-time.** Customer browser events (click, hover,
+   cart_add) flow through WebSocket → Redis velocity tracking → anomaly detection
+   → qwen-max decision cycle → option card in the merchant terminal → approve →
+   storefront morphs. The whole cycle is under 2 seconds perceived latency.
+   Qwen learns from every approval AND every rejection — the next decision cycle
+   reads outcome memory first.
+
+3. **A broken AI response cannot produce a broken store.** Three defense layers
+   guarantee a renderable, on-brand storefront regardless of what Qwen returns:
+   variant coercion, structural normalization, and deterministic fallback. If the
+   Qwen call fails entirely, a brand-seeded hash generates a distinct layout.
+   The customer never sees a blank page.
+
+---
+
+## Contents
+
+- [What makes Elevate different](#what-makes-elevate-different)
+- [What Elevate is NOT](#what-elevate-is-not)
+- [The Two-Model Architecture](#the-two-model-architecture)
+- [What happens under the hood](#what-happens-under-the-hood)
+  - [Onboarding](#onboarding-5-steps--30-seconds-to-live-store)
+  - [The Three-Layer Interceptor](#the-three-layer-interceptor)
+  - [Validation Architecture](#validation-architecture--defense-in-depth)
+  - [Fault-Tolerant Storefront](#fault-tolerant-storefront--three-defense-layers)
+  - [CSS Sanitization](#css-sanitization-guardrail)
+  - [Real-Time Telemetry Pipeline](#real-time-telemetry-pipeline)
+  - [Product Vision Pipeline](#product-vision-pipeline)
+  - [Qwen Memory](#qwen-memory--the-autopilot-learns)
+  - [Duplicate Detection + Catalog Audit](#duplicate-detection--catalog-audit)
+  - [Creative Extension](#qwen-creative-extension)
+  - [Qwen Reasoning](#qwen-reasoning--transparent-decisions)
+- [Token Efficiency](#token-efficiency)
+- [Testing (44 files)](#testing)
+- [Stack](#stack)
+- [Architecture](#architecture)
+- [Getting Started](#getting-started)
+- [Blog Post](#blog-post)
+
+---
+
 ## What makes Elevate different
 
 Most AI commerce tools bolt a chatbot onto a Shopify clone. You ask questions,
@@ -680,6 +730,15 @@ authored by Qwen at creation time, Vision Fingerprinting for dedup, realtime
 telemetry → decision → approve → morph cycle, option cards not chat,
 fault-tolerant storefront, automatic catalog dedup, Qwen-powered catalog
 audit, merchant-directed creative generation within brand constraints.
+
+---
+
+## Blog Post
+
+[Elevate: Making Qwen the Brain of a Store That Runs Itself](https://dev.to/alpha-dev-001/elevate-making-qwen-the-brain-of-a-store-that-runs-itself-582p)
+
+The full engineering story: architectural decisions, the memory learning loop,
+the 3-layer interceptor design, and why Qwen IS the runtime — not a feature.
 
 ---
 
