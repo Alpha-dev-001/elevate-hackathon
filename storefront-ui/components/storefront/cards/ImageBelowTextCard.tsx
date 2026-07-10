@@ -6,7 +6,7 @@ import { CardPrice } from './CardPrice'
 
 export function ImageBelowTextCard({ product, cornerRadius, onOpen }: CardProps) {
   return (
-    <button data-card="image-below-text" data-product onClick={() => onOpen?.(product.id)}
+    <button data-card="image-below-text" data-product data-product-id={product.id} onClick={() => onOpen?.(product.id)}
             className="block w-full text-left">
       {product.category && (
         <span className="block text-[10px] uppercase tracking-widest" style={{ color: 'var(--s-text-muted)' }}>

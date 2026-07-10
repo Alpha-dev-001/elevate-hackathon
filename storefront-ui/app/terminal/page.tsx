@@ -62,6 +62,8 @@ export default function TerminalPage() {
     try {
       const data = await api.getDashboard(slug)
       setDashboard(data)
+      // Persist memory count from API so it survives page refresh
+      if (typeof data.memory_count === 'number') setMemoryCount(data.memory_count)
     } catch {
       // keep stale data rather than crashing
     } finally {
@@ -115,6 +117,10 @@ export default function TerminalPage() {
             if (prev.some((a) => a.id === incoming.id)) return prev
             return [incoming, ...prev]
           })
+        }
+        if (event === 'action_expired' && payload.action_id) {
+          // Backend auto-dismissed a stale action (signal expired past TTL)
+          setPendingActions((prev) => prev.filter((a) => a.id !== payload.action_id))
         }
         if (event === 'state_updated') {
           fetchDashboard(slug)

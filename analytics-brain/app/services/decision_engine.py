@@ -97,20 +97,43 @@ async def run_decision_cycle(
     """Run a full Qwen decision cycle and persist + broadcast the result.
 
     Returns the created AgentAction or None if:
-    - there is already a pending action (one at a time)
+    - there is already a pending action (one at a time, unless it's stale)
     - Qwen returns garbage we can't trust
     """
     from sqlalchemy import select
 
-    # Gate: only one pending action at a time per store
+    # Gate: only one pending action at a time per store.
+    # If the existing pending action is older than the TTL, the signal is stale —
+    # auto-dismiss it so new anomalies can trigger fresh decisions.
     existing = await db.scalar(
         select(AgentActionDB)
         .where(AgentActionDB.merchant_id == merchant_id)
         .where(AgentActionDB.status == "pending")
     )
     if existing:
-        logger.info(f"[decision] skipping cycle — pending action already exists for {merchant_id}")
-        return None
+        ttl = get_settings().pending_action_ttl_seconds
+        age_seconds = (int(time.time() * 1000) - existing.created_at) / 1000
+        if age_seconds > ttl:
+            existing.status = "dismissed"
+            await db.commit()
+            logger.info(
+                "[decision] auto-dismissed stale action %s (age: %.0fs, ttl: %ds) for %s",
+                existing.id, age_seconds, ttl, merchant_id,
+            )
+            # Notify terminal so the stale card is removed immediately
+            from app.models.schemas import WSMessage
+            await manager.push_to_terminal(
+                merchant_id,
+                WSMessage(
+                    event=WSEventType.ACTION_EXPIRED,
+                    payload={"action_id": existing.id, "reason": "signal_stale"},
+                    merchant_id=merchant_id,
+                    timestamp=int(time.time() * 1000),
+                ),
+            )
+        else:
+            logger.info(f"[decision] skipping cycle — pending action already exists for {merchant_id}")
+            return None
 
     merchant = await db.get(MerchantDB, merchant_id)
     if not merchant:
@@ -213,9 +236,17 @@ async def run_decision_cycle(
     reasoning = (message.get("content") or "")[:1000]
 
     # Narrative fields templated from tool call + context
-    first_product_name = products[0].name if products else None
+    # Use the product Qwen actually targeted, not just the first in the list
+    targeted_pid = tool_args.get("product_id")
+    targeted_product_name = None
+    if targeted_pid:
+        for p in products:
+            if p.id == targeted_pid:
+                targeted_product_name = p.name
+                break
+    product_name_for_narrative = targeted_product_name or (products[0].name if products else None)
     narrative = narrative_from_tool(
-        tool_name, tool_args, first_product_name, anomaly_desc, brand_voice
+        tool_name, tool_args, product_name_for_narrative, anomaly_desc, brand_voice
     )
 
     promo_id = f"ELEV_{merchant_id[:4].upper()}_{secrets.token_hex(3).upper()}"

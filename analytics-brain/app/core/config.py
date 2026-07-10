@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # These replace Qwen's ungrounded guess so the number is real + explainable.
     recovery_gmv_rate: float = 0.5   # expected recovered $ per abandoned cart
     flash_gmv_rate: float = 0.15     # expected uplift $ per surged view
+    # Pending action TTL — if the merchant doesn't act within this window, the
+    # signal is stale (anomaly resolved, traffic moved on). Auto-dismiss prevents
+    # one ignored card from blocking all future decisions.
+    pending_action_ttl_seconds: int = 300  # 5 minutes
 
     # ── App ───────────────────────────────────────────────
     app_env: str = "development"

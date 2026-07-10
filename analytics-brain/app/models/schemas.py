@@ -525,6 +525,7 @@ class WSEventType(str, Enum):
     BRAND_WARNING = "brand_warning"
     SNAPSHOT_UPDATE = "snapshot_update"
     AGENT_ACTION = "agent_action"
+    ACTION_EXPIRED = "action_expired"
     QWEN_FALLBACK = "qwen_fallback"
     # Client → Server
     APPROVE_ACTION = "approve_action"

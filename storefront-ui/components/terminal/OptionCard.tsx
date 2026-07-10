@@ -6,6 +6,9 @@ import { api } from '@/lib/api'
 import { IconBolt } from '@/components/icons'
 import type { AgentAction } from '@/types/schemas'
 
+// ── Pending action TTL (must match backend config: pending_action_ttl_seconds) ─
+const PENDING_ACTION_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
 // ── Reduced-motion hook ──────────────────────────────────────────────────────
 
 function useReducedMotion() {
@@ -69,6 +72,20 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
   const [error, setError] = useState<string | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
 
+  // Track card age for TTL expiry display
+  const [ageSeconds, setAgeSeconds] = useState(() =>
+    Math.max(0, Math.floor((Date.now() - action.created_at) / 1000))
+  )
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAgeSeconds(Math.max(0, Math.floor((Date.now() - action.created_at) / 1000)))
+    }, 15_000) // update every 15s
+    return () => clearInterval(interval)
+  }, [action.created_at])
+
+  const isExpired = ageSeconds >= PENDING_ACTION_TTL_MS / 1000
+  const ageLabel = ageSeconds < 60 ? `${ageSeconds}s ago` : `${Math.floor(ageSeconds / 60)}m ago`
+
   const isLoading = isApproving || isDismissing
   const confidencePct = Math.round(action.estimated_confidence * 100)
   const meta = getTypeMeta(action.action_type)
@@ -122,25 +139,54 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
         padding: '20px',
       }}
     >
-      {/* Action type badge */}
+      {/* Action type badge + age */}
       <div className="flex items-center gap-2 mb-3">
         <span
           className="text-xs font-mono font-semibold px-2 py-0.5 rounded"
           style={{
-            background: meta.badgeBg,
-            color: meta.badgeText,
+            background: isExpired ? 'var(--color-border)' : meta.badgeBg,
+            color: isExpired ? 'var(--color-text-muted)' : meta.badgeText,
             letterSpacing: '0.04em',
             textTransform: 'uppercase',
           }}
         >
-          {meta.label}
+          {isExpired ? 'Expired' : meta.label}
+        </span>
+        <span
+          className="text-[10px] font-mono"
+          style={{ color: isExpired ? 'var(--color-danger)' : 'var(--color-text-muted)' }}
+        >
+          ⏱ {ageLabel}
         </span>
       </div>
+
+      {/* Expired signal banner */}
+      {isExpired && (
+        <p className="text-xs font-mono mb-3 px-2 py-1.5 rounded" style={{
+          background: 'rgba(255, 107, 107, 0.1)',
+          color: 'var(--color-danger)',
+          border: '1px solid rgba(255, 107, 107, 0.2)',
+        }}>
+          Signal expired — the anomaly that triggered this has likely resolved. Dismiss or approve anyway.
+        </p>
+      )}
 
       {/* Trigger */}
       <p className="text-xs font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-warning)' }}>
         <IconBolt size={13} /> {action.trigger}
       </p>
+
+      {/* Targeted product — show when Qwen's tool call identified a specific product */}
+      {action.payload?.product_id && (
+        <p className="text-[10px] font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+          <span
+            className="px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+          >
+            ⎯ Target: {String(action.payload.product_id).slice(0, 12)}
+          </span>
+        </p>
+      )}
 
       {/* Title */}
       <h3
@@ -244,30 +290,36 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
           transition={{ duration: microDuration }}
           className="flex-1 py-2.5 rounded-lg text-sm font-bold cursor-pointer disabled:cursor-not-allowed"
           style={{
-            background: isLoading ? 'var(--color-accent-dim)' : 'var(--color-accent)',
-            color: 'var(--color-bg)',
+            background: isExpired
+              ? 'transparent'
+              : isLoading ? 'var(--color-accent-dim)' : 'var(--color-accent)',
+            border: isExpired ? '1px solid var(--color-border)' : 'none',
+            color: isExpired ? 'var(--color-text-muted)' : 'var(--color-bg)',
             transition: `background ${microDuration}s, opacity ${microDuration}s`,
             opacity: isLoading ? 0.7 : 1,
           }}
         >
-          {isApproving ? 'Applying…' : 'Approve'}
+          {isApproving ? 'Applying…' : isExpired ? 'Approve anyway' : 'Approve'}
         </motion.button>
 
         <motion.button
           onClick={handleDismiss}
           disabled={isLoading}
           whileTap={{ scale: reduced ? 1 : 0.96 }}
-          whileHover={{ borderColor: 'var(--color-accent)' }}
+          whileHover={{ borderColor: isExpired ? 'var(--color-danger)' : 'var(--color-accent)' }}
           transition={{ duration: microDuration }}
           className="px-5 py-2.5 rounded-lg text-sm cursor-pointer disabled:cursor-not-allowed"
           style={{
-            border: '1px solid var(--color-border)',
-            color: isLoading ? 'var(--color-text-muted)' : 'var(--color-text)',
-            background: 'transparent',
+            border: `1px solid ${isExpired ? 'var(--color-danger)' : 'var(--color-border)'}`,
+            color: isExpired
+              ? 'var(--color-danger)'
+              : isLoading ? 'var(--color-text-muted)' : 'var(--color-text)',
+            background: isExpired ? 'rgba(255, 107, 107, 0.08)' : 'transparent',
+            fontWeight: isExpired ? 600 : 400,
             transition: `color ${microDuration}s, border-color ${microDuration}s`,
           }}
         >
-          {isDismissing ? 'Dismissing…' : 'Dismiss'}
+          {isDismissing ? 'Dismissing…' : isExpired ? 'Dismiss (expired)' : 'Dismiss'}
         </motion.button>
       </div>
     </motion.div>

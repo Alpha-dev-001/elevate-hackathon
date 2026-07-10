@@ -37,6 +37,7 @@ export interface DashboardData {
   total_gmv: number
   elevate_attributed_gmv: number
   elevate_fee: number
+  memory_count: number
   actions: Array<{
     promo_id: string
     action_type: string

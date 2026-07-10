@@ -11,7 +11,7 @@ export function SingleSpotlightGrid({ store, onOpenProduct }: SectionProps) {
   const c = store.brand_token!.colors
   return (
     <section data-grid="single-spotlight" className="px-4 md:px-8 py-16 grid md:grid-cols-2 gap-8 items-center">
-      <button data-product onClick={() => onOpenProduct?.(p.id)}
+      <button data-product data-product-id={p.id} onClick={() => onOpenProduct?.(p.id)}
               className="block w-full aspect-[4/5] overflow-hidden" style={{ background: c.surface }}>
         <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
       </button>

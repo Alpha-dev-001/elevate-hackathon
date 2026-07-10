@@ -6,7 +6,7 @@ import { CardPrice } from './CardPrice'
 
 export function ColoredBgCard({ product, cornerRadius, onOpen }: CardProps) {
   return (
-    <button data-card="colored-bg-card" data-product onClick={() => onOpen?.(product.id)}
+    <button data-card="colored-bg-card" data-product data-product-id={product.id} onClick={() => onOpen?.(product.id)}
             className="block w-full text-left p-4"
             style={{ borderRadius: RADIUS[cornerRadius], background: 'var(--s-cta)', color: 'var(--s-on-cta)' }}>
       <div className="w-full aspect-square flex items-center justify-center">

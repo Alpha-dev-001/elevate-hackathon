@@ -17,7 +17,7 @@ export function Masonry4ColGrid({ store, slug, globalConfig, onOpenProduct, onAd
           {Card ? (
             <Card product={p} slug={slug} cornerRadius={radius} onOpen={onOpenProduct} />
           ) : (
-            <button data-product onClick={() => onOpenProduct?.(p.id)} className="block w-full text-left"
+            <button data-product data-product-id={p.id} onClick={() => onOpenProduct?.(p.id)} className="block w-full text-left"
                     style={{ background: 'var(--s-surface)' }}>
               <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full object-cover" />
               <span className="block p-2 text-sm" style={{ color: 'var(--s-text)' }}>{p.name} · ${p.price}</span>

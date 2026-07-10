@@ -20,6 +20,7 @@ from app.services.behavior_tracker import (
     push_event,
     count_abandons_in_window,
     count_views_in_window,
+    count_per_product_views_in_window,
     anomaly_description,
 )
 from app.services.decision_engine import run_decision_cycle
@@ -63,9 +64,18 @@ async def ingest_event(
     async def _check():
         abandons = await count_abandons_in_window(redis, merchant_id)
         views = await count_views_in_window(redis, merchant_id)
-        desc = anomaly_description(abandons, views)
+        per_product = await count_per_product_views_in_window(redis, merchant_id)
+        desc, spiking_pid = anomaly_description(abandons, views, per_product)
         if desc:
             async with AsyncSession(get_engine()) as session:
+                # Enrich with product name so Qwen sees the human-readable name
+                if spiking_pid:
+                    product = await session.get(ProductDB, spiking_pid)
+                    if product:
+                        desc = desc.replace(
+                            f"product {spiking_pid}",
+                            f'"{product.name}" ({spiking_pid})',
+                        )
                 await run_decision_cycle(merchant_id, desc, session, redis)
 
     background.add_task(_check)
@@ -138,14 +148,38 @@ async def simulate_activity(
                 "timestamp": now + ev["delay"],
             }
             await push_event(redis, merchant_id, event_data)
+            # Also push to telemetry so the product_velocity sorted set and
+            # active_sessions match what real customer traffic produces.
+            # This keeps the snapshot consistent with the anomaly detection.
+            from app.models.schemas import CustomerEvent, EventType
+            from app.services.telemetry import record_event
+            try:
+                evt_type = EventType(ev["event_type"].replace("add_to_cart", "cart_add"))
+                await record_event(merchant_id, CustomerEvent(
+                    session_id=f"demo-session-{i}",
+                    product_id=product_id,
+                    event_type=evt_type,
+                    timestamp=int((now + ev["delay"]) * 1000),
+                ))
+            except (ValueError, Exception):
+                pass  # non-critical — anomaly detection works from events list
             await asyncio.sleep(0.1)
 
         # Run anomaly check after scenario completes
         abandons = await count_abandons_in_window(redis, merchant_id)
         views = await count_views_in_window(redis, merchant_id)
-        desc = anomaly_description(abandons, views)
+        per_product = await count_per_product_views_in_window(redis, merchant_id)
+        desc, spiking_pid = anomaly_description(abandons, views, per_product)
         if desc:
             async with AsyncSession(get_engine()) as session:
+                # Enrich with product name so Qwen sees the human-readable name
+                if spiking_pid:
+                    product = await session.get(ProductDB, spiking_pid)
+                    if product:
+                        desc = desc.replace(
+                            f"product {spiking_pid}",
+                            f'"{product.name}" ({spiking_pid})',
+                        )
                 await run_decision_cycle(merchant_id, desc, session, redis)
 
     background.add_task(_run_scenario)

@@ -17,7 +17,7 @@ export function HorizontalScrollGrid({ store, slug, globalConfig, onOpenProduct,
             {Card ? (
               <Card product={p} slug={slug} cornerRadius={radius} onOpen={onOpenProduct} />
             ) : (
-              <button data-product onClick={() => onOpenProduct?.(p.id)}
+              <button data-product data-product-id={p.id} onClick={() => onOpenProduct?.(p.id)}
                       className="block w-full aspect-[3/4] text-left" style={{ background: 'var(--s-surface)' }}>
                 <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
                 <span className="block p-2 text-sm" style={{ color: 'var(--s-text)' }}>{p.name} · ${p.price}</span>

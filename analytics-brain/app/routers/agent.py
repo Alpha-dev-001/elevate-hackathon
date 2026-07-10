@@ -167,10 +167,9 @@ def _payload_duration_ms(payload: dict, default_minutes: int | None = None) -> i
 async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db: AsyncSession) -> None:
     """Create an attributable Promo in live state for a revenue action.
 
-    Targets the first product (matches the demo's abandoned-product scenario and
-    what best_active_promo needs — a product-matched promo with discount > 0).
-    Best-effort: products already live in Postgres, so a missing state can't lose
-    the approval; it just means no promo was applied.
+    Targets the product Qwen identified in its tool call (payload["product_id"]).
+    Falls back to the first product if Qwen didn't specify one or the specified
+    product isn't in the live state.
     """
     from app.services import delta as delta_svc
     from app.services.profile import load_constraints
@@ -189,9 +188,22 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
     discount = _payload_discount(payload, _default_discount(row.action_type), constraints.max_discount_percent)
     expires_at = _payload_duration_ms(payload)
 
+    # Use the product Qwen targeted. Fall back to first product if not specified
+    # or not in state (e.g. product was deactivated between decision and approval).
+    target_pid = payload.get("product_id")
+    if target_pid and target_pid in state.products:
+        product_id = target_pid
+    else:
+        product_id = list(state.products.keys())[0] if state.products else "all"
+        if target_pid:
+            logger.info(
+                "[agent] %s: Qwen targeted product %s but it's not in state, falling back to %s",
+                row.action_type, target_pid, product_id,
+            )
+
     promo = Promo(
         id=row.promo_id,
-        product_id=list(state.products.keys())[0] if state.products else "all",
+        product_id=product_id,
         discount_percent=discount,
         label=label_tmpl.format(d=int(discount)),
         expires_at=expires_at,
@@ -199,7 +211,7 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
     )
     state.active_promos[row.promo_id] = promo
     await delta_svc.save_state(row.merchant_id, state)
-    logger.info("[agent] %s registered promo %s (%d%%)", row.action_type, row.promo_id, int(discount))
+    logger.info("[agent] %s registered promo %s (%d%%) on product %s", row.action_type, row.promo_id, int(discount), product_id)
 
 
 async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession) -> None:

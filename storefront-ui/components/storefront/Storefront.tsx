@@ -5,6 +5,7 @@ import { api, ApiError } from '@/lib/api'
 import type { PublicStore } from '@/types/schemas'
 import { useCart } from '@/lib/cart'
 import { connectStorefront } from '@/lib/ws'
+import { initBehaviorTracking, cleanupBehaviorTracking } from '@/lib/behavior'
 import { DSLRenderer } from './DSLRenderer'
 
 /**
@@ -44,6 +45,9 @@ export function Storefront({ slug, initialProductId }: { slug: string; initialPr
   // in the terminal → the backend broadcasts state_updated to every connected
   // storefront → we refetch and the store morphs (promos, prices) with no reload
   // and no polling. This is the customer-facing payoff of the autopilot loop.
+  //
+  // Also initializes behavior tracking: product views, add-to-cart, and abandon
+  // events flow back through the WS into the telemetry → anomaly → decision cycle.
   useEffect(() => {
     const mid = store?.merchant_id
     if (!mid) return
@@ -56,7 +60,11 @@ export function Storefront({ slug, initialProductId }: { slug: string; initialPr
         initCart(slug)
       },
     })
-    return () => conn.close()
+    initBehaviorTracking(conn.sendEvent, mid)
+    return () => {
+      cleanupBehaviorTracking()
+      conn.close()
+    }
   }, [store?.merchant_id, slug, initCart])
 
   // Load the brand's Google Fonts. Prefer brand_token fonts when present —

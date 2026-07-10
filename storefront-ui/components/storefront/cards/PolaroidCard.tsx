@@ -5,7 +5,7 @@ import { CardPrice } from './CardPrice'
 
 export function PolaroidCard({ product, onOpen }: CardProps) {
   return (
-    <button data-card="polaroid-card" data-product onClick={() => onOpen?.(product.id)}
+    <button data-card="polaroid-card" data-product data-product-id={product.id} onClick={() => onOpen?.(product.id)}
             className="block w-full text-left bg-white pb-10 pt-2 px-2 shadow-md">
       <div className="w-full aspect-[4/3] overflow-hidden">
         <ProductImage src={product.image_url} alt={product.name} initial={product.name} className="w-full h-full object-cover" />

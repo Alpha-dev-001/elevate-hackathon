@@ -5,7 +5,7 @@ import { CardPrice } from './CardPrice'
 
 export function EditorialHorizontalCard({ product, onOpen }: CardProps) {
   return (
-    <button data-card="editorial-horizontal" data-product onClick={() => onOpen?.(product.id)}
+    <button data-card="editorial-horizontal" data-product data-product-id={product.id} onClick={() => onOpen?.(product.id)}
             className="grid grid-cols-[45%_55%] sm:grid-cols-[45%_55%] w-full text-left items-stretch"
             style={{ borderBottom: '1px solid color-mix(in srgb, var(--s-text) 12%, transparent)' }}>
       <div className="aspect-[4/5] overflow-hidden" style={{ background: 'var(--s-surface)' }}>

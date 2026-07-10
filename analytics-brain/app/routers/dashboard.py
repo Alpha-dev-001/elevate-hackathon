@@ -67,10 +67,21 @@ async def get_dashboard(slug: str, db: AsyncSession = Depends(get_db)):
             "fee": fee,
         })
 
+    # Memory count — how many decisions Qwen has learned from for this store
+    from app.services.memory import get_memory
+    from app.core.redis import get_redis
+    try:
+        redis = await get_redis()
+        entries = await get_memory(merchant.id, db, redis)
+        memory_count = len(entries)
+    except Exception:
+        memory_count = 0
+
     return {
         "store_name": merchant.store_name,
         "total_gmv": round(total_gmv, 2),
         "elevate_attributed_gmv": round(elevate_attributed_gmv, 2),
         "elevate_fee": round(elevate_attributed_gmv * ELEVATE_FEE_RATE, 2),
         "actions": action_rows,
+        "memory_count": memory_count,
     }

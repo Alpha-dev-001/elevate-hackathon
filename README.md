@@ -50,6 +50,7 @@
   - [Duplicate Detection + Catalog Audit](#duplicate-detection--catalog-audit)
   - [Creative Extension](#qwen-creative-extension)
   - [Qwen Reasoning](#qwen-reasoning--transparent-decisions)
+  - [Per-Product Targeting + Signal Freshness](#per-product-targeting--signal-freshness)
 - [Token Efficiency](#token-efficiency)
 - [Testing (44 files)](#testing)
 - [Stack](#stack)
@@ -517,6 +518,52 @@ rendered in the option card's collapsible `<details>` element. No additional
 Qwen call is needed — reasoning is part of the same tool-calling response.
 The reasoning is also used by the `OutcomeObserver` to correlate
 predicted outcomes with actual results for memory learning.
+
+### Per-Product Targeting + Signal Freshness
+
+When a velocity spike fires, Qwen targets the **specific product** that
+spiked — not the whole store. The anomaly detection pipeline identifies which
+product has disproportionate views, enriches the description with the product
+name, and passes the product ID through the tool-calling chain so the flash
+sale applies to exactly that product.
+
+```
+24 views on "Linen Blazer" in 30s
+  → per-product counter identifies the spiking product
+  → enriched anomaly: "Velocity spike: 24 views on Linen Blazer (abc-123)"
+  → Qwen calls propose_flash_sale(product_id="abc-123", discount=15%)
+  → promo applies to Linen Blazer specifically
+  → option card shows "⎯ Target: abc-123" + age timer
+```
+
+Decision cards also have a **signal freshness TTL** (5 minutes, configurable).
+If the merchant doesn't act within the window, the anomaly is considered
+stale — the card shows an "Expired" state and the backend auto-dismisses it
+to unblock future decisions. This prevents the system from getting stuck with
+one ignored card blocking the entire autopilot pipeline.
+
+**Behavior tracking from real traffic:** The storefront emits `view`,
+`add_to_cart`, and `abandon` events from real customer browsing via a
+dedicated tracking module (`lib/behavior.ts`). Product views use
+IntersectionObserver (50% visibility threshold, 30s dedup per product).
+Add-to-cart fires on every cart action. Abandon detection fires on page
+visibility change when the customer has interacted but leaves without
+purchasing. These events flow through the same WebSocket → behavior_tracker →
+anomaly detection pipeline as the demo simulation — the autopilot works
+identically with real and simulated traffic.
+
+**Technical implementation:** `count_per_product_views_in_window()` in
+`behavior_tracker.py` parses the Redis events list and returns a
+`dict[product_id, view_count]`. `anomaly_description()` returns a
+`(description, product_id)` tuple — the caller enriches the product_id with
+the human-readable name from Postgres before passing to the decision cycle.
+`_register_promo()` in `agent.py` reads `payload.get("product_id")` from
+Qwen's tool call to target the correct product, falling back to the first
+product only if the specified one was deactivated between decision and
+approval. Stale card TTL is enforced in `run_decision_cycle()` — pending
+actions older than `pending_action_ttl_seconds` are auto-dismissed and an
+`ACTION_EXPIRED` WebSocket event pushes the removal to all connected
+terminals.
 
 ---
 

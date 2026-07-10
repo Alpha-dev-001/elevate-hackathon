@@ -8,7 +8,7 @@ import { CardPrice } from './CardPrice'
 export function HoverRevealCard({ product, cornerRadius, onOpen }: CardProps) {
   const [hover, setHover] = useState(false)
   return (
-    <button data-card="hover-reveal-text" data-product onClick={() => onOpen?.(product.id)}
+    <button data-card="hover-reveal-text" data-product data-product-id={product.id} onClick={() => onOpen?.(product.id)}
             onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
             className="relative block w-full aspect-[3/4] overflow-hidden text-left"
             style={{ borderRadius: RADIUS[cornerRadius], background: 'var(--s-surface)' }}>

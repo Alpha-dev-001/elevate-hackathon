@@ -12,7 +12,7 @@ export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct, onA
   return (
     <section data-grid="featured-2col" className="px-4 md:px-8 py-12 grid gap-4 md:grid-cols-2">
       {first && (
-        <button data-product onClick={() => onOpenProduct?.(first.id)}
+        <button data-product data-product-id={first.id} onClick={() => onOpenProduct?.(first.id)}
                 className="relative block w-full aspect-[3/4] overflow-hidden text-left"
                 style={{ background: 'var(--s-surface)' }}>
           <ProductImage src={first.image_url} alt={first.name} initial={first.name} className="w-full h-full object-cover" />
@@ -28,7 +28,7 @@ export function Featured2ColGrid({ store, slug, globalConfig, onOpenProduct, onA
             {Card ? (
               <Card product={p} slug={slug} cornerRadius={radius} onOpen={onOpenProduct} />
             ) : (
-              <button data-product onClick={() => onOpenProduct?.(p.id)} className="block text-left">
+              <button data-product data-product-id={p.id} onClick={() => onOpenProduct?.(p.id)} className="block text-left">
                 {p.name} · ${p.price}
               </button>
             )}

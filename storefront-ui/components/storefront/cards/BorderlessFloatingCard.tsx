@@ -5,7 +5,7 @@ import { CardPrice } from './CardPrice'
 
 export function BorderlessFloatingCard({ product, onOpen }: CardProps) {
   return (
-    <button data-card="borderless-floating" data-product onClick={() => onOpen?.(product.id)}
+    <button data-card="borderless-floating" data-product data-product-id={product.id} onClick={() => onOpen?.(product.id)}
             className="block w-full text-left group">
       <div className="w-full aspect-[3/4] overflow-hidden">
         <ProductImage src={product.image_url} alt={product.name} initial={product.name}

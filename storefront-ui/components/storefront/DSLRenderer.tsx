@@ -15,6 +15,7 @@ import { ProductDrawer } from './ProductDrawer'
 import { PromoCountdown } from './PromoCountdown'
 import { useCart } from '@/lib/cart'
 import { useCustomer } from '@/lib/customerAuth'
+import { trackProductView, trackAddToCart, markInteracted } from '@/lib/behavior'
 import { useEffect } from 'react'
 import { IconCart, IconUser } from '@/components/icons'
 
@@ -47,9 +48,44 @@ export function DSLRenderer({
     if (!preview) initCustomer(slug)
   }, [slug, preview, initCustomer])
 
+  // Track product detail views when the drawer opens
+  useEffect(() => {
+    if (openId && !preview) {
+      trackProductView(openId)
+      markInteracted()
+    }
+  }, [openId, preview])
+
+  // Track product card views via IntersectionObserver — fires when product cards
+  // enter the viewport. Uses the [data-product] attribute present on all card variants.
+  // Deduplication is handled inside trackProductView (30s window per product).
+  useEffect(() => {
+    if (preview || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const pid = (entry.target as HTMLElement).dataset.productId
+            if (pid) {
+              trackProductView(pid)
+              markInteracted()
+            }
+          }
+        })
+      },
+      { threshold: 0.5 } // 50% visible = "viewed"
+    )
+    // Observe all product cards
+    const cards = document.querySelectorAll('[data-product]')
+    cards.forEach((card) => observer.observe(card))
+    return () => observer.disconnect()
+  }, [preview, store.products])
+
   // DSL-driven inline add-to-cart (no-op in preview). Opens the cart on success.
   const handleAddToCart = (id: string) => {
     if (preview) return
+    trackAddToCart(id)
+    markInteracted()
     void addToCartFn(id, 1).then(() => openCart(true))
   }
 
