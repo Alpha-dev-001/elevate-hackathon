@@ -320,6 +320,7 @@ async def generate_layout_dsl(
     *,
     merchant_id: str | None = None,
     creative_direction: str | None = None,
+    current_dsl: "LayoutDSL | None" = None,
     _chat=None,
 ) -> LayoutDSL:
     """qwen-max composes the store. NEVER raises — any failure (network, non-JSON,
@@ -329,7 +330,14 @@ async def generate_layout_dsl(
 
     When creative_direction is provided, the merchant's free-text vision is
     appended to the prompt — Qwen composes the DSL *guided* by their intent,
-    still constrained to valid section types and variants."""
+    still constrained to valid section types and variants.
+
+    When current_dsl is ALSO provided (the merchant is editing an existing
+    store, not composing the first one), the prompt anchors to it and is
+    told to change only what the direction actually calls for. Without this,
+    a request as narrow as "make the nav text bigger" gets treated as "start
+    over, informed by this note" — every section changes because nothing
+    told Qwen anything was supposed to stay the same."""
     from app.services.brand import _qwen_chat, _extract_json
     import json as _json
 
@@ -342,16 +350,30 @@ async def generate_layout_dsl(
     prompt = LAYOUT_DSL_PROMPT.replace("{brand_json}", brand_json).replace("{product_count}", str(product_count))
 
     if creative_direction:
-        prompt += (
-            f"\n\nMerchant's creative direction (HONOR THIS — it is the merchant's "
-            f"explicit vision for their store, not a suggestion):\n"
-            f"\"{creative_direction}\"\n\n"
-            f"Interpret this direction within the existing section types and variants. "
-            f"If they ask for something that maps to a specific variant, use it. "
-            f"If they describe a feeling or mood, choose sections and variants that embody it. "
-            f"If they ask for a section type that doesn't exist, pick the closest match "
-            f"and set appropriate props."
-        )
+        if current_dsl is not None:
+            prompt += (
+                f"\n\nThis store already has a live layout — you are EDITING it, not "
+                f"starting over:\n{_json.dumps(current_dsl.model_dump(mode='json'))}\n\n"
+                f"Merchant's requested change (HONOR THIS — it is their explicit intent, "
+                f"not a suggestion):\n\"{creative_direction}\"\n\n"
+                f"Change ONLY what this request calls for. Copy every section, variant, "
+                f"prop, and global_config value from the layout above EXACTLY as given "
+                f"unless the request specifically requires changing it. A narrow request "
+                f"(e.g. sizing, spacing, one section's tone) must produce a layout that is "
+                f"identical to the one above except for that one change — do not use this "
+                f"as an opportunity to redesign sections the request didn't mention."
+            )
+        else:
+            prompt += (
+                f"\n\nMerchant's creative direction (HONOR THIS — it is the merchant's "
+                f"explicit vision for their store, not a suggestion):\n"
+                f"\"{creative_direction}\"\n\n"
+                f"Interpret this direction within the existing section types and variants. "
+                f"If they ask for something that maps to a specific variant, use it. "
+                f"If they describe a feeling or mood, choose sections and variants that embody it. "
+                f"If they ask for a section type that doesn't exist, pick the closest match "
+                f"and set appropriate props."
+            )
 
     try:
         raw = await chat(

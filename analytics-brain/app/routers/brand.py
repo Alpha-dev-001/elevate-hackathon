@@ -77,15 +77,23 @@ async def regenerate_dsl(
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Re-ask qwen-max to compose the store layout from scratch."""
+    """Re-ask qwen-max to compose the store layout from scratch.
+
+    Returns the proposal only — does NOT persist. Every other builder edit
+    (point-and-edit, drag-reorder, color picks) is draft-only until the
+    merchant clicks Publish (PUT /dsl/{slug}); this endpoint used to be the
+    one exception, silently committing to the live store before the
+    merchant had seen the result. The builder already has a full
+    draft/dirty/"restore original" UX for exactly this — this endpoint was
+    undermining it, not using it.
+    """
     if merchant.slug != slug:
         raise HTTPException(status_code=403, detail="Not your store")
-    profile, token = await _load_token(merchant.id, db)
+    _, token = await _load_token(merchant.id, db)
     from sqlalchemy import select, func
     from app.models.db_models import ProductDB
     count = await db.scalar(select(func.count()).where(ProductDB.merchant_id == merchant.id)) or 0
     dsl = await generate_layout_dsl(token, merchant.store_name, merchant.category, count, merchant_id=merchant.id)
-    await _persist_dsl(profile, token, dsl, merchant.id, db)
     return dsl.model_dump()
 
 
@@ -104,7 +112,15 @@ async def creative_dsl(
     vision. The defense layers (coerce → normalize → fallback) guarantee the
     result is structurally valid even if Qwen hallucinates. This is NOT
     unconstrained codegen — it is brand-guarded creative direction within the
-    existing DSL schema."""
+    existing DSL schema.
+
+    Anchored to the store's CURRENT layout (if one exists) and instructed to
+    change only what the direction calls for — a narrow request like "make
+    the nav text bigger" should not redesign sections it never mentioned.
+
+    Returns the proposal only — does NOT persist. See regenerate_dsl's
+    docstring above: the builder's draft/dirty/"restore original"/Publish
+    flow is the review step, not a silent server-side commit."""
     if merchant.slug != slug:
         raise HTTPException(status_code=403, detail="Not your store")
     if not payload.direction.strip():
@@ -112,7 +128,7 @@ async def creative_dsl(
     if len(payload.direction) > 500:
         raise HTTPException(status_code=400, detail="Direction too long (max 500 chars)")
 
-    profile, token = await _load_token(merchant.id, db)
+    _, token = await _load_token(merchant.id, db)
     from sqlalchemy import select, func
     from app.models.db_models import ProductDB
     count = await db.scalar(select(func.count()).where(ProductDB.merchant_id == merchant.id)) or 0
@@ -120,8 +136,8 @@ async def creative_dsl(
         token, merchant.store_name, merchant.category, count,
         merchant_id=merchant.id,
         creative_direction=payload.direction,
+        current_dsl=token.layout_dsl,
     )
-    await _persist_dsl(profile, token, dsl, merchant.id, db)
     return dsl.model_dump()
 
 

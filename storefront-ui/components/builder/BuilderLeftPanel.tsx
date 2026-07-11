@@ -97,6 +97,7 @@ export function BuilderLeftPanel({
         </span>
         <p className="text-[10px] text-neutral-600 leading-tight">
           Tell Qwen what you envision. It designs within your brand constraints.
+          Preview only — nothing changes on your live store until you Publish.
         </p>
         <textarea
           value={creativeDir}
