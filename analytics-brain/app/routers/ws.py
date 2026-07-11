@@ -15,9 +15,12 @@ router = APIRouter()
 async def terminal_ws(ws: WebSocket, merchant_id: str):
     """
     Merchant command terminal connection.
-    
-    Receives: approve_action, reject_action, stage_preview, rollback
-    Sends:    decision_ready, action_clamped, action_blocked, state_updated
+
+    Receives: approve_action, stage_preview, rollback (dismiss is REST, see
+              PATCH /api/agent/actions/{id}/dismiss — not handled here)
+    Sends:    action_blocked, state_updated (agent_action/action_expired/
+              qwen_fallback are pushed from decision_engine.py and friends
+              via manager.push_to_terminal, not from this message loop)
     """
     await manager.connect_terminal(merchant_id, ws)
 

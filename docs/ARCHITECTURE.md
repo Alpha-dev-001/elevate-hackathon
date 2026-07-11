@@ -291,7 +291,7 @@ stateDiagram-v2
     telemetry_streaming --> anomaly_detected: threshold exceeded (views > N in T seconds)
     anomaly_detected --> decision_pending: qwen-max run_decision_cycle()
     decision_pending --> approved: WS: approve_action
-    decision_pending --> dismissed: WS: dismiss_action
+    decision_pending --> dismissed: REST: PATCH /api/agent/actions/{id}/dismiss
     dismissed --> idle
     approved --> delta_applied: execute_delta() → WS: state_updated
     delta_applied --> idle: storefront morphs, all clients sync
@@ -306,26 +306,47 @@ stateDiagram-v2
 
 ### WebSocket event map
 
+Verified against `WSEventType` (schemas.py) and every `push_to_*` call site
+— this is the wire protocol as it actually runs, not as first planned.
+
 ```
-CLIENT → SERVER
-  customer_event      storefront browse interaction (view, hover, cart_add, purchase, abandon)
-  approve_action      merchant approves option card
-  dismiss_action      merchant dismisses option card
-  brand_tweak         merchant modifies brand (triggers guard check + regeneration)
+CLIENT → SERVER (/ws/terminal/{merchant_id})
+  approve_action        merchant approves an option card — applies the
+                         patches, broadcasts state_updated to all clients
+  stage_preview         sandbox preview — returns a non-persisted state_updated
+  rollback               undo the last delta — state_updated (rollback: true)
+
+CLIENT → SERVER (/ws/storefront/{merchant_id})
+  customer_event        storefront browse interaction (view, hover, cart_add,
+                         purchase, abandon) — feeds telemetry.record_event()
 
 SERVER → CLIENT (terminal)
-  decision_ready      Qwen proposed actions ready (option card surfaces)
-  action_clamped      interceptor auto-corrected a value (Layer 2)
-  action_blocked      interceptor hard blocked (Layer 3)
-  brand_warning       brand guard rule triggered (Layer 1)
-
-SERVER → CLIENT (storefront)
-  state_updated       delta applied — storefront morphs
-  promo_activated     new promo live on product page
+  agent_action           Qwen proposed an action — option card surfaces.
+                         Pushed directly from decision_engine.run_decision_cycle
+                         (reactive / recovery / proactive-review triggers all
+                         share this one push path) — not a reply to a client
+                         message.
+  action_blocked         interceptor Layer 3 hard block, or approve_action
+                         arriving before the terminal sent its first message
+  action_expired         a pending action's TTL elapsed — auto-dismissed,
+                         card removed from the feed
+  qwen_fallback          a Qwen call failed and a deterministic fallback ran
+                         — surfaced as a transparency toast, not an error
 
 SERVER → CLIENT (both)
-  anomaly_detected    telemetry spike — visible in terminal + storefront toast
-  brand_ready         brand generation complete — onboarding advances
+  state_updated          delta applied — storefront morphs, terminal refreshes
+  brand_ready            brand generation complete — onboarding advances
+
+Dismiss is REST (`PATCH /api/agent/actions/{id}/dismiss`), not a WS event —
+the client→server map above is exhaustive for both socket routes.
+
+Declared in WSEventType but not currently pushed anywhere: decision_ready
+(superseded by agent_action), action_clamped, anomaly_detected,
+snapshot_update. brand_warning is intentionally never pushed — Layer 1
+warnings are computed client-side from the pre-generated BrandGuardRules
+at interaction time (zero round-trip, see "Brand Warning" below), not
+server-pushed. promo_activated appears in earlier planning text but was
+never added to the WSEventType enum.
 ```
 
 ---
@@ -351,7 +372,7 @@ sequenceDiagram
         API->>Q: run_decision_cycle(snapshot_diff)
         Q-->>API: AgentAction JSON
         API->>API: validate_action() → interceptor 3 layers
-        API->>WS: decision_ready {option_card}
+        API->>WS: agent_action {option_card}
         WS->>M: option card surfaces
         M->>WS: approve_action {action_id}
         WS->>API: execute_delta()

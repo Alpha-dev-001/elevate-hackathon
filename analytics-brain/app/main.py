@@ -8,10 +8,6 @@ from app.models import db_models  # noqa: F401 — registers tables on Base.meta
 from app.routers import ws, upload, auth, onboarding, products, store, shop, merchant, dev, behavior, agent, dashboard, brand, customer_auth
 import logging
 
-# Stale scaffold router still excluded until rewritten against current schemas.py:
-#   app.routers.api — imports removed QRGenerateRequest/Response; rewrite at the
-#                     QR/health step of the build order
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
