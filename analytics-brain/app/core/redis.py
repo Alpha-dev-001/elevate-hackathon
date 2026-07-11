@@ -78,6 +78,11 @@ class Keys:
     def events(merchant_id: str) -> str:
         return f"elevate:{merchant_id}:events"
 
+    @staticmethod
+    def qwen_usage(merchant_id: str) -> str:
+        """Per-call Qwen usage log — capped list, newest first."""
+        return f"elevate:{merchant_id}:qwen_usage"
+
 
 # ─── TTLs (seconds) ───────────────────────────────────────────────────────────
 
@@ -89,3 +94,4 @@ class TTL:
     CART = 86400 * 2        # 2 days — outlives a browse session but stays ephemeral
     CATALOG_REVIEW = 86400  # 1 day — cached Qwen observation, re-run on demand
     EVENTS = 3600           # 1 hour — behavior events; only need last N for decision cycle
+    QWEN_USAGE = 86400 * 7  # 7 days — token usage log per merchant

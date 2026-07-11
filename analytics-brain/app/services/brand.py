@@ -289,6 +289,86 @@ _STYLE_COERCE: dict[str, str] = {
 _VALID_STYLES: frozenset[str] = frozenset({"editorial", "bold-grid", "minimal-dark", "warm-craft"})
 
 
+# ─── Token cost tracking ─────────────────────────────────────────────────────
+# DashScope pricing (international, per 1K tokens, USD). Updated 2026-07.
+# If pricing changes, update this table — it's the single source of truth.
+_QWEN_PRICING: dict[str, tuple[float, float]] = {
+    # model_name: (input_per_1k, output_per_1k)
+    "qwen-max": (0.004, 0.012),
+    "qwen-vl-max": (0.004, 0.012),
+    "qwen-plus": (0.0008, 0.002),
+}
+_USAGE_LIST_CAP = 200  # keep last 200 calls per merchant
+
+
+async def _record_usage(
+    *,
+    merchant_id: str,
+    model: str,
+    step: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> None:
+    """Record a single Qwen call's token usage in Redis. Best-effort — never raises."""
+    try:
+        from app.core.redis import get_redis, Keys, TTL
+        rates = _QWEN_PRICING.get(model, (0.004, 0.012))
+        est_cost = (input_tokens / 1000 * rates[0]) + (output_tokens / 1000 * rates[1])
+        record = json.dumps({
+            "ts": int(__import__("time").time() * 1000),
+            "model": model,
+            "step": step,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "est_cost_usd": round(est_cost, 6),
+        })
+        redis = await get_redis()
+        key = Keys.qwen_usage(merchant_id)
+        await redis.lpush(key, record)
+        await redis.ltrim(key, 0, _USAGE_LIST_CAP - 1)
+        await redis.expire(key, TTL.QWEN_USAGE)
+    except Exception as e:
+        logger.warning("[usage] failed to record for %s: %s", merchant_id, e)
+
+
+async def get_usage_summary(merchant_id: str) -> dict:
+    """Aggregate token usage for a merchant over the last 7 days.
+
+    Returns totals and per-model breakdown. Used by the terminal feed
+    and the MCP server to surface cost data.
+    """
+    from app.core.redis import get_redis, Keys
+    redis = await get_redis()
+    raw_records = await redis.lrange(Keys.qwen_usage(merchant_id), 0, -1)
+
+    totals = {"input_tokens": 0, "output_tokens": 0, "est_cost_usd": 0.0, "call_count": 0}
+    by_model: dict[str, dict] = {}
+
+    for raw in raw_records:
+        try:
+            r = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        totals["input_tokens"] += r.get("input_tokens", 0)
+        totals["output_tokens"] += r.get("output_tokens", 0)
+        totals["est_cost_usd"] += r.get("est_cost_usd", 0.0)
+        totals["call_count"] += 1
+
+        model = r.get("model", "unknown")
+        if model not in by_model:
+            by_model[model] = {"input_tokens": 0, "output_tokens": 0, "est_cost_usd": 0.0, "calls": 0}
+        by_model[model]["input_tokens"] += r.get("input_tokens", 0)
+        by_model[model]["output_tokens"] += r.get("output_tokens", 0)
+        by_model[model]["est_cost_usd"] += r.get("est_cost_usd", 0.0)
+        by_model[model]["calls"] += 1
+
+    totals["est_cost_usd"] = round(totals["est_cost_usd"], 4)
+    for m in by_model:
+        by_model[m]["est_cost_usd"] = round(by_model[m]["est_cost_usd"], 4)
+
+    return {"totals": totals, "by_model": by_model}
+
+
 async def _qwen_chat(
     *,
     model: str,
@@ -300,12 +380,17 @@ async def _qwen_chat(
     attempts: int = 3,
     tools: list[dict] | None = None,
     tool_choice: str = "auto",
+    merchant_id: str | None = None,
+    step: str = "unknown",
 ) -> str | dict:
     """One Qwen chat-completion call with bounded exponential backoff.
 
     Returns the raw assistant message content string by default.
     When ``tools`` is provided, returns the full message dict (including
     ``tool_calls``) so the caller can parse structured tool output.
+
+    When ``merchant_id`` is provided, token usage is recorded in Redis
+    for cost tracking (visible in the terminal feed).
 
     Raises BrandGenerationError on permanent failure or after exhausting
     transient retries.
@@ -337,7 +422,18 @@ async def _qwen_chat(
         else:
             if resp.status_code == 200:
                 try:
-                    message = resp.json()["choices"][0]["message"]
+                    body = resp.json()
+                    message = body["choices"][0]["message"]
+                    # Record token usage for cost tracking (best-effort, never blocks)
+                    if merchant_id:
+                        usage = body.get("usage") or {}
+                        await _record_usage(
+                            merchant_id=merchant_id,
+                            model=model,
+                            step=step,
+                            input_tokens=usage.get("prompt_tokens", 0),
+                            output_tokens=usage.get("completion_tokens", 0),
+                        )
                     if tools:
                         # Return full message for tool_calls access
                         return message
@@ -921,7 +1017,8 @@ _DESC_CHUNK_SIZE = 20
 
 
 async def _describe_chunk(
-    products: list[ProductCSVRow], brand_voice_profile: str, memory_context: str = ""
+    products: list[ProductCSVRow], brand_voice_profile: str, memory_context: str = "",
+    merchant_id: str | None = None,
 ) -> dict[str, str]:
     """One qwen-max call for up to _DESC_CHUNK_SIZE products. Missing names come
     back as "" so the caller can mark them as fallbacks."""
@@ -951,6 +1048,8 @@ Products:
         max_tokens=min(4000, 120 * len(products) + 400),
         temperature=0.6,
         timeout=60.0,
+        merchant_id=merchant_id,
+        step="product_descriptions",
     )
     data = _extract_json(raw)
     out: dict[str, str] = {}
@@ -964,6 +1063,7 @@ async def generate_descriptions(
     products: list[ProductCSVRow],
     brand_voice_profile: str,
     memory_context: str = "",
+    merchant_id: str | None = None,
 ) -> tuple[dict[str, str], set[str]]:
     """Write descriptions for a catalog, chunked and run in parallel.
 
@@ -984,7 +1084,7 @@ async def generate_descriptions(
 
     async def run(chunk: list[ProductCSVRow]) -> dict[str, str]:
         try:
-            return await _describe_chunk(chunk, brand_voice_profile, memory_context)
+            return await _describe_chunk(chunk, brand_voice_profile, memory_context, merchant_id)
         except BrandGenerationError as e:
             logger.warning(f"[brand] description chunk failed ({len(chunk)} items): {e}")
             return {p.name: "" for p in chunk}

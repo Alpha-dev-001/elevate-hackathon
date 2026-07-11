@@ -201,6 +201,8 @@ async def run_decision_cycle(
             timeout=45.0,
             tools=DECISION_TOOLS,
             tool_choice="auto",
+            merchant_id=merchant_id,
+            step="decision_cycle",
         )
     except BrandGenerationError as e:
         logger.error(f"[decision] Qwen failed for {merchant_id}: {e}")
@@ -295,8 +297,15 @@ async def run_decision_cycle(
         created_at=action_db.created_at,
     )
 
-    # Push to merchant terminal via WebSocket
+    # Push to merchant terminal via WebSocket — include real cost data
     from app.models.schemas import WSMessage
+    usage_summary = {}
+    try:
+        from app.services.brand import get_usage_summary
+        usage_summary = await get_usage_summary(merchant_id)
+    except Exception:
+        pass  # cost tracking must never block the decision push
+
     await manager.push_to_terminal(
         merchant_id,
         WSMessage(
@@ -305,6 +314,7 @@ async def run_decision_cycle(
                 "action": action.model_dump(),
                 "estimated_tokens": estimated_tokens,
                 "memory_count": len(entries),
+                "usage": usage_summary,
             },
             merchant_id=merchant_id,
             timestamp=now,

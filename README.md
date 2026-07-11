@@ -51,7 +51,8 @@
   - [Creative Extension](#qwen-creative-extension)
   - [Qwen Reasoning](#qwen-reasoning--transparent-decisions)
   - [Per-Product Targeting + Signal Freshness](#per-product-targeting--signal-freshness)
-- [Token Efficiency](#token-efficiency)
+- [MCP Server — External Agent Integration](#mcp-server--external-agent-integration)
+- [Token Efficiency + Cost Metering](#token-efficiency--cost-metering)
 - [Testing (48 files)](#testing)
 - [Benchmarks](#benchmarks)
 - [Stack](#stack)
@@ -568,7 +569,58 @@ terminals.
 
 ---
 
-## Token Efficiency
+## MCP Server — External Agent Integration
+
+Elevate exposes its autonomous agent via the **Model Context Protocol (MCP)**,
+allowing any MCP-compatible client (Claude Desktop, Cursor, or another AI agent)
+to drive the store's autopilot programmatically.
+
+**5 tools:**
+
+| Tool | What it does |
+|------|-------------|
+| `elevate_get_store_state` | Read the live SystemState (products, promos, layout, recovery) |
+| `elevate_run_decision_cycle` | Trigger Qwen's decision engine with a custom anomaly description |
+| `elevate_approve_action` | Approve a pending agent action — executes the payload |
+| `elevate_dismiss_action` | Dismiss a pending action — Qwen learns from the rejection |
+| `elevate_get_terminal_feed` | Read recent agent actions and their statuses |
+
+**Run the MCP server:**
+
+```bash
+cd analytics-brain
+pip install -r requirements.txt
+python -m app.mcp_server
+# Or via FastMCP CLI:
+fastmcp run app/mcp_server.py:mcp
+```
+
+**Claude Desktop config** (add to `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "elevate": {
+      "command": "python",
+      "args": ["-m", "app.mcp_server"],
+      "cwd": "/path/to/elevate/analytics-brain",
+      "env": {
+        "QWEN_API_KEY": "your-key",
+        "DATABASE_URL": "postgresql+asyncpg://...",
+        "REDIS_HOST": "localhost",
+        "JWT_SECRET": "your-secret"
+      }
+    }
+  }
+}
+```
+
+The MCP server shares the same Redis and Postgres as the FastAPI backend —
+actions approved via MCP execute on the live store state.
+
+---
+
+## Token Efficiency + Cost Metering
 
 Every Qwen call does maximum work. No throwaway calls.
 
@@ -581,6 +633,14 @@ Every Qwen call does maximum work. No throwaway calls.
 - **Duplicate detection**: Zero Qwen calls — deterministic image URL comparison.
 - **Memory injection**: Zero additional tokens when memory is empty.
 - **Every output cached in Redis** before returning. Cache hit = zero tokens.
+
+**Runtime cost metering:** Every `_qwen_chat()` call extracts `usage.prompt_tokens`
+and `usage.completion_tokens` from the response and records them in Redis
+(`elevate:{merchant_id}:qwen_usage`, capped at 200 entries, 7-day TTL).
+Each record includes: model, step name, input/output tokens, and estimated USD
+cost based on DashScope pricing (qwen-max: $0.004/1k input + $0.012/1k output).
+The terminal WS feed includes a cumulative usage summary on every decision push.
+The dashboard API exposes `/api/dashboard/{slug}/usage` for aggregate cost data.
 
 **Technical implementation:** All Qwen calls go through a single `_qwen_chat()`
 wrapper in `brand.py` with connection pooling (shared `httpx.AsyncClient` with

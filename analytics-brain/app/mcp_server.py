@@ -1,0 +1,302 @@
+"""
+Elevate Autopilot — MCP (Model Context Protocol) Server
+
+Exposes the autonomous commerce agent to any MCP-compatible client
+(Claude Desktop, Cursor, or another AI agent) so external systems can:
+
+  - Read the current store state
+  - Trigger a decision cycle with a custom anomaly description
+  - Approve or dismiss pending agent actions
+  - Read the recent action feed
+
+Run standalone:
+    python -m app.mcp_server
+
+Or via FastMCP CLI:
+    fastmcp run app/mcp_server.py:mcp
+"""
+from __future__ import annotations
+
+import json
+import logging
+import time
+from typing import Any
+
+from mcp.server.fastmcp import FastMCP
+from sqlalchemy import select
+
+from app.core.config import get_settings
+from app.core.database import get_session_factory
+from app.core.redis import get_redis, Keys
+from app.models.db_models import AgentActionDB, MerchantDB
+from app.models.schemas import AgentActionType, AgentActionStatus
+
+logger = logging.getLogger(__name__)
+
+mcp = FastMCP(
+    "Elevate Autopilot",
+    instructions=(
+        "Tools for driving the Elevate autonomous commerce agent. "
+        "Use elevate_get_store_state to inspect the live store, "
+        "elevate_run_decision_cycle to trigger Qwen's decision-making, "
+        "and elevate_approve_action / elevate_dismiss_action to respond "
+        "to pending agent proposals."
+    ),
+)
+
+
+async def _get_db_session():
+    """Create a standalone DB session (outside FastAPI dependency injection)."""
+    factory = get_session_factory()
+    return factory()
+
+
+def _action_row_to_dict(row: AgentActionDB) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "merchant_id": row.merchant_id,
+        "promo_id": row.promo_id,
+        "action_type": row.action_type,
+        "trigger": row.trigger,
+        "title": row.title,
+        "description": row.description,
+        "estimated_gmv": row.estimated_gmv,
+        "estimated_confidence": row.estimated_confidence,
+        "payload": row.payload,
+        "brand_check": row.brand_check,
+        "reasoning": row.reasoning,
+        "status": row.status,
+        "created_at": row.created_at,
+        "approved_at": row.approved_at,
+        "executed_at": row.executed_at,
+    }
+
+
+async def _resolve_merchant(db, merchant_id_or_slug: str) -> str | None:
+    """Resolve either a merchant_id or a store slug to a merchant_id."""
+    # Try direct ID first
+    merchant = await db.get(MerchantDB, merchant_id_or_slug)
+    if merchant:
+        return merchant.id
+    # Try slug lookup
+    merchant = await db.scalar(
+        select(MerchantDB).where(MerchantDB.slug == merchant_id_or_slug)
+    )
+    return merchant.id if merchant else None
+
+
+# ─── Tool 1: Get Store State ─────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_get_store_state(merchant_id: str) -> str:
+    """Get the current live state of an Elevate store.
+
+    Returns the full SystemState: products, active promos, layout config,
+    recovery offers, and version info. Accepts a merchant_id or store slug.
+
+    Args:
+        merchant_id: The merchant's UUID or store slug.
+    """
+    async with await _get_db_session() as db:
+        mid = await _resolve_merchant(db, merchant_id)
+        if not mid:
+            return json.dumps({"error": "Store not found", "merchant_id": merchant_id})
+
+    redis = await get_redis()
+    raw = await redis.get(Keys.system_state(mid))
+    if not raw:
+        return json.dumps({
+            "merchant_id": mid,
+            "status": "no_state",
+            "message": "Store has not been published yet. No live state exists.",
+        })
+
+    state = json.loads(raw)
+
+    # Also grab pending actions so the caller sees the full picture
+    pending_raw = await redis.get(Keys.pending_actions(mid))
+    pending = json.loads(pending_raw) if pending_raw else []
+
+    return json.dumps({
+        "merchant_id": mid,
+        "state": state,
+        "pending_actions": pending if isinstance(pending, list) else [pending],
+    }, indent=2, default=str)
+
+
+# ─── Tool 2: Run Decision Cycle ──────────────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_run_decision_cycle(
+    merchant_id: str,
+    anomaly_description: str,
+) -> str:
+    """Trigger a Qwen decision cycle for an Elevate store.
+
+    The agent analyzes the described anomaly (e.g. 'velocity spike: 24 views
+    on product X in 30 seconds' or 'cart abandon surge: 5 abandons') and
+    proposes one action for the merchant to review.
+
+    Args:
+        merchant_id: The merchant's UUID or store slug.
+        anomaly_description: Description of the behavior anomaly to act on.
+    """
+    async with await _get_db_session() as db:
+        mid = await _resolve_merchant(db, merchant_id)
+        if not mid:
+            return json.dumps({"error": "Store not found", "merchant_id": merchant_id})
+
+        from app.services.decision_engine import run_decision_cycle
+
+        redis = await get_redis()
+        action = await run_decision_cycle(mid, anomaly_description, db, redis)
+
+        if action is None:
+            return json.dumps({
+                "merchant_id": mid,
+                "result": "no_action",
+                "message": (
+                    "Decision cycle completed but no action was proposed. "
+                    "This can mean: a pending action already exists (one at a time), "
+                    "Qwen declined to act, or the store has no products."
+                ),
+            })
+
+        return json.dumps({
+            "merchant_id": mid,
+            "result": "action_proposed",
+            "action": action.model_dump(),
+        }, indent=2, default=str)
+
+
+# ─── Tool 3: Approve Action ─────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_approve_action(action_id: str) -> str:
+    """Approve a pending agent action, executing its payload on the store.
+
+    This applies the Qwen-proposed change (flash sale, layout morph,
+    recovery offer, etc.) to the live store state and broadcasts the
+    update to connected clients.
+
+    Args:
+        action_id: The UUID of the pending action to approve.
+    """
+    async with await _get_db_session() as db:
+        row = await db.get(AgentActionDB, action_id)
+        if not row:
+            return json.dumps({"error": "Action not found", "action_id": action_id})
+        if row.status != "pending":
+            return json.dumps({
+                "error": f"Action is already {row.status}",
+                "action_id": action_id,
+            })
+
+        now = int(time.time() * 1000)
+        row.status = "approved"
+        row.approved_at = now
+        row.merchant_behavior = "approved_via_mcp"
+
+        # Execute the payload (promo registration, layout morph, etc.)
+        from app.routers.agent import _execute_payload, _broadcast_state_update
+        await _execute_payload(row, db)
+
+        row.status = "executed"
+        row.executed_at = int(time.time() * 1000)
+        await db.commit()
+
+        # Best-effort WS broadcast (only works if FastAPI is running)
+        try:
+            await _broadcast_state_update(row.merchant_id)
+        except Exception:
+            pass  # MCP server may not share WS connections with FastAPI
+
+        # Schedule outcome observation
+        try:
+            from app.services.outcome_observer import schedule_observation
+            schedule_observation(row.id, None, redis=await get_redis())
+        except Exception:
+            pass
+
+        return json.dumps({
+            "result": "approved_and_executed",
+            "action": _action_row_to_dict(row),
+        }, indent=2, default=str)
+
+
+# ─── Tool 4: Dismiss Action ──────────────────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_dismiss_action(action_id: str) -> str:
+    """Dismiss a pending agent action without executing it.
+
+    Qwen still learns from the dismissal via the memory system —
+    the outcome observer records the merchant's rejection.
+
+    Args:
+        action_id: The UUID of the pending action to dismiss.
+    """
+    async with await _get_db_session() as db:
+        row = await db.get(AgentActionDB, action_id)
+        if not row:
+            return json.dumps({"error": "Action not found", "action_id": action_id})
+
+        row.status = "dismissed"
+        row.merchant_behavior = "dismissed_via_mcp"
+        await db.commit()
+
+        # Record the outcome so Qwen learns from the rejection
+        try:
+            from app.services.outcome_observer import observe_outcome
+            await observe_outcome(row.id, db, await get_redis(), behavior="dismissed")
+        except Exception:
+            pass
+
+        return json.dumps({
+            "result": "dismissed",
+            "action": _action_row_to_dict(row),
+        }, indent=2, default=str)
+
+
+# ─── Tool 5: Get Terminal Feed ───────────────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_get_terminal_feed(merchant_id: str, limit: int = 10) -> str:
+    """Get recent agent actions and their statuses for an Elevate store.
+
+    Returns the action history: proposed, approved, executed, dismissed.
+    This is the audit trail of what the autonomous agent has been doing.
+
+    Args:
+        merchant_id: The merchant's UUID or store slug.
+        limit: Maximum number of actions to return (default 10).
+    """
+    async with await _get_db_session() as db:
+        mid = await _resolve_merchant(db, merchant_id)
+        if not mid:
+            return json.dumps({"error": "Store not found", "merchant_id": merchant_id})
+
+        result = await db.execute(
+            select(AgentActionDB)
+            .where(AgentActionDB.merchant_id == mid)
+            .order_by(AgentActionDB.created_at.desc())
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+
+        return json.dumps({
+            "merchant_id": mid,
+            "count": len(rows),
+            "actions": [_action_row_to_dict(r) for r in rows],
+        }, indent=2, default=str)
+
+
+# ─── Entry point ─────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    mcp.run()

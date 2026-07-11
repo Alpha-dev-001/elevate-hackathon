@@ -85,3 +85,15 @@ async def get_dashboard(slug: str, db: AsyncSession = Depends(get_db)):
         "actions": action_rows,
         "memory_count": memory_count,
     }
+
+
+@router.get("/{slug}/usage")
+async def get_usage(slug: str, db: AsyncSession = Depends(get_db)):
+    """Token usage and estimated cost for all Qwen calls made for this store."""
+    merchant = await db.scalar(select(MerchantDB).where(MerchantDB.slug == slug))
+    if not merchant:
+        raise HTTPException(status_code=404, detail="Store not found")
+
+    from app.services.brand import get_usage_summary
+    summary = await get_usage_summary(merchant.id)
+    return {"store_name": merchant.store_name, **summary}

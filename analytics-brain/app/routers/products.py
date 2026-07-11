@@ -77,12 +77,12 @@ async def _brand_voice(merchant_id: str, db: AsyncSession) -> str:
     return _NEUTRAL_VOICE
 
 
-async def _describe(rows: list[ProductCSVRow], voice: str, memory_ctx: str = "") -> tuple[dict[str, str], set[str]]:
+async def _describe(rows: list[ProductCSVRow], voice: str, memory_ctx: str = "", merchant_id: str | None = None) -> tuple[dict[str, str], set[str]]:
     """Chunked, parallel descriptions. Returns ({name: description},
     fallback_names) — fallback_names didn't get real Qwen copy. Never raises;
     a Qwen outage degrades a chunk to neutral copy rather than blocking adds."""
     try:
-        return await brand_svc.generate_descriptions(rows, voice, memory_ctx)
+        return await brand_svc.generate_descriptions(rows, voice, memory_ctx, merchant_id)
     except BrandGenerationError as e:
         logger.warning(f"[products] description generation failed, using fallback: {e}")
         return ({r.name: f"{r.name}." for r in rows}, {r.name for r in rows})
@@ -136,7 +136,7 @@ async def add_product(
         image_url=payload.image_url or "",
         category=payload.category or "",
     )
-    descs, fallbacks = await _describe([row_in], voice, mem_ctx)
+    descs, fallbacks = await _describe([row_in], voice, mem_ctx, merchant.id)
 
     product = ProductDB(
         id=f"prod_{uuid.uuid4().hex[:12]}",
@@ -175,7 +175,7 @@ async def add_products_batch(
     from app.services.memory import get_memory, build_memory_context
     redis = await get_redis()
     mem_ctx = build_memory_context(await get_memory(merchant.id, db, redis))
-    descs, fallbacks = await _describe(rows, voice, mem_ctx)  # chunked, parallel
+    descs, fallbacks = await _describe(rows, voice, mem_ctx, merchant.id)  # chunked, parallel
 
     created: list[ProductDB] = []
     for r in rows:
