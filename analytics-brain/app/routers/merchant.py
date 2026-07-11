@@ -22,6 +22,7 @@ from app.models.schemas import (
     BusinessConstraints,
     ConstraintsUpdate,
     CatalogReview,
+    AgentAction,
 )
 from app.services import promos as promos_svc
 from app.services import orders as orders_svc
@@ -166,3 +167,23 @@ async def run_catalog_review(
 ):
     """Run (or re-run) the qwen-max catalog pricing review."""
     return await catalog_svc.review_catalog(db, merchant.id)
+
+
+# ── Proactive store review (acts, unlike catalog-review above) ──────────────────
+
+@router.post("/store-review", response_model=AgentAction | None)
+async def run_store_review_now(
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """On-demand proactive review — the same cycle the background loop runs
+    hourly, fired immediately. Scans view-vs-order performance and, if a
+    product stands out, runs it through the real decision cycle (same
+    tool-calling path as a velocity spike or cart-abandon surge). Returns
+    null when the catalog looks healthy or a decision is already pending —
+    both are correct, quiet outcomes, not errors.
+    """
+    from app.core.redis import get_redis
+    from app.services.store_review import run_store_review
+    redis = await get_redis()
+    return await run_store_review(merchant.id, db, redis)

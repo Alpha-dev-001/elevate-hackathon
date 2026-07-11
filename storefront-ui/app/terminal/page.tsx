@@ -19,6 +19,7 @@ export default function TerminalPage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [dashboardLoading, setDashboardLoading] = useState(false)
   const [simulateState, setSimulateState] = useState<'idle' | 'sending' | 'done'>('idle')
+  const [reviewState, setReviewState] = useState<'idle' | 'sending' | 'found' | 'clean' | 'error'>('idle')
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [memoryCount, setMemoryCount] = useState<number | null>(null)
   const [lastTokens, setLastTokens] = useState<number | null>(null)
@@ -179,6 +180,23 @@ export default function TerminalPage() {
     prevActionCount.current = pendingActions.length
   }, [pendingActions.length, simulateState])
 
+  const handleReview = useCallback(async () => {
+    if (!merchant || reviewState !== 'idle') return
+    setReviewState('sending')
+    try {
+      // Unlike simulate, this call awaits the real cycle server-side and
+      // returns the result directly — no anomaly to wait on. The resulting
+      // card (if any) still arrives via the normal WS `agent_action` push.
+      const action = await api.runStoreReview()
+      setReviewState(action ? 'found' : 'clean')
+    } catch {
+      // A real request failure is not the same as "catalog looks healthy" —
+      // show it as its own state instead of a false-positive "clean".
+      setReviewState('error')
+    }
+    window.setTimeout(() => setReviewState('idle'), 4000)
+  }, [merchant, reviewState])
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (authLoading) {
@@ -299,6 +317,8 @@ export default function TerminalPage() {
             slug={merchant.slug}
             onSimulate={handleSimulate}
             simulateState={simulateState}
+            onReview={handleReview}
+            reviewState={reviewState}
           />
         </div>
 

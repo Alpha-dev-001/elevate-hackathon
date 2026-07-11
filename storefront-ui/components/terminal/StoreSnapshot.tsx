@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { IconCart, IconTrend } from '@/components/icons'
+import { IconCart, IconTrend, IconSpark } from '@/components/icons'
 import type { Merchant } from '@/types/schemas'
 
 // ── Reduced-motion hook ──────────────────────────────────────────────────────
@@ -23,14 +23,18 @@ function useReducedMotion() {
 
 type Scenario = 'cart_abandon_surge' | 'velocity_spike'
 
+type ReviewState = 'idle' | 'sending' | 'found' | 'clean' | 'error'
+
 interface StoreSnapshotProps {
   merchant: Merchant
   slug: string
   onSimulate: (scenario: Scenario) => void
   simulateState: 'idle' | 'sending' | 'done'
+  onReview: () => void
+  reviewState: ReviewState
 }
 
-export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: StoreSnapshotProps) {
+export function StoreSnapshot({ merchant, slug, onSimulate, simulateState, onReview, reviewState }: StoreSnapshotProps) {
   const prefersReduced = useReducedMotion()
 
   return (
@@ -129,6 +133,48 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState }: Sto
               <span className="inline-flex items-center justify-center gap-2"><IconTrend size={16} /> Traffic spike</span>
             </motion.button>
           </div>
+        )}
+      </div>
+
+      {/* Proactive review — Qwen looks at the catalog without waiting for an
+          anomaly (views vs. real orders). Distinct from Simulate above:
+          this reads real store data, it doesn't fake customer events. */}
+      <div className="flex flex-col gap-2">
+        <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--color-text-muted)', letterSpacing: '0.1em' }}>
+          Proactive review
+        </span>
+
+        {reviewState !== 'idle' ? (
+          <div
+            className="w-full py-3 rounded-xl text-sm font-semibold font-mono flex items-center justify-center gap-2 text-center"
+            style={{
+              border: `2px solid ${reviewState === 'found' ? '#4ade80' : reviewState === 'error' ? 'var(--color-danger)' : reviewState === 'clean' ? 'var(--color-border)' : 'var(--color-accent)'}`,
+              color: reviewState === 'found' ? '#4ade80' : reviewState === 'error' ? 'var(--color-danger)' : reviewState === 'clean' ? 'var(--color-text-muted)' : 'var(--color-accent)',
+              background: 'var(--color-surface-2)',
+            }}
+          >
+            {reviewState === 'sending' ? (
+              <>
+                <SpinnerIcon prefersReduced={prefersReduced} />
+                ✦ Qwen is reviewing the catalog…
+              </>
+            ) : reviewState === 'found' ? (
+              '✓ Decision ready — see the feed'
+            ) : reviewState === 'error' ? (
+              '⚠ Review failed — try again'
+            ) : (
+              '✓ Catalog looks healthy — nothing to flag'
+            )}
+          </div>
+        ) : (
+          <motion.button
+            onClick={onReview}
+            whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
+            style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
+          >
+            <span className="inline-flex items-center justify-center gap-2"><IconSpark size={16} /> Review store now</span>
+          </motion.button>
         )}
       </div>
 

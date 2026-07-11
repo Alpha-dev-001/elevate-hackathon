@@ -116,6 +116,9 @@ async def startup():
             f"DB bootstrap failed — auth and persistence will fail: {e}"
         )
 
+    from app.services.store_review import start_background_loop
+    start_background_loop()
+
 
 @app.get("/api/health")
 async def health():

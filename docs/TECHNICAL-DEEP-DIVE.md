@@ -447,12 +447,13 @@ Elevate exposes its autonomous agent via the **Model Context Protocol
 (MCP)**, allowing any MCP-compatible client (Claude Desktop, Cursor, or
 another AI agent) to drive the store's autopilot programmatically.
 
-**5 tools:**
+**6 tools:**
 
 | Tool | What it does |
 |------|-------------|
 | `elevate_get_store_state` | Read the live SystemState (products, promos, layout, recovery) |
 | `elevate_run_decision_cycle` | Trigger Qwen's decision engine with a custom anomaly description |
+| `elevate_run_store_review` | Trigger the proactive review — no anomaly needed, scans real view-vs-order performance itself |
 | `elevate_approve_action` | Approve a pending agent action — executes the payload |
 | `elevate_dismiss_action` | Dismiss a pending action — Qwen learns from the rejection |
 | `elevate_get_terminal_feed` | Read recent agent actions and their statuses |

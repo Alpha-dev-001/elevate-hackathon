@@ -300,6 +300,8 @@ export const api = {
   getCatalogReview: () => req<CatalogReview | null>('/merchant/catalog-review'),
   runCatalogReview: () =>
     req<CatalogReview>('/merchant/catalog-review', { method: 'POST' }),
+  runStoreReview: () =>
+    req<AgentAction | null>('/merchant/store-review', { method: 'POST' }),
 
   // ── Behavior events ─────────────────────────────────────────────────────
   ingestEvent: (slug: string, body: { event_type: string; product_id?: string; session_id: string; timestamp?: number }) =>

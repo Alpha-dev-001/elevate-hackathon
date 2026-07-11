@@ -38,9 +38,11 @@ mcp = FastMCP(
     instructions=(
         "Tools for driving the Elevate autonomous commerce agent. "
         "Use elevate_get_store_state to inspect the live store, "
-        "elevate_run_decision_cycle to trigger Qwen's decision-making, "
-        "and elevate_approve_action / elevate_dismiss_action to respond "
-        "to pending agent proposals."
+        "elevate_run_decision_cycle to trigger Qwen's decision-making from "
+        "a described anomaly, elevate_run_store_review to trigger it "
+        "proactively from real catalog performance instead (no anomaly "
+        "needed), and elevate_approve_action / elevate_dismiss_action to "
+        "respond to pending agent proposals."
     ),
 )
 
@@ -161,6 +163,52 @@ async def elevate_run_decision_cycle(
                     "Decision cycle completed but no action was proposed. "
                     "This can mean: a pending action already exists (one at a time), "
                     "Qwen declined to act, or the store has no products."
+                ),
+            })
+
+        return json.dumps({
+            "merchant_id": mid,
+            "result": "action_proposed",
+            "action": action.model_dump(),
+        }, indent=2, default=str)
+
+
+# ─── Tool 2b: Run Proactive Store Review ─────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_run_store_review(merchant_id: str) -> str:
+    """Trigger Elevate's proactive store review for a store.
+
+    Unlike elevate_run_decision_cycle (which needs a described anomaly),
+    this scans real catalog performance itself: products with real view
+    interest (Redis) but zero completed orders (Postgres) in the review
+    window. If one stands out, it runs through the same decision cycle as
+    a velocity spike or cart-abandon surge — same tools, same interceptor,
+    same memory loop. Returns no_action when the catalog looks healthy;
+    that is a correct, quiet outcome, not a failure.
+
+    Args:
+        merchant_id: The merchant's UUID or store slug.
+    """
+    async with await _get_db_session() as db:
+        mid = await _resolve_merchant(db, merchant_id)
+        if not mid:
+            return json.dumps({"error": "Store not found", "merchant_id": merchant_id})
+
+        from app.services.store_review import run_store_review
+
+        redis = await get_redis()
+        action = await run_store_review(mid, db, redis)
+
+        if action is None:
+            return json.dumps({
+                "merchant_id": mid,
+                "result": "no_action",
+                "message": (
+                    "No underperformer found — every viewed product either "
+                    "has orders or hasn't cleared the minimum view threshold, "
+                    "or a decision is already pending for this store."
                 ),
             })
 
