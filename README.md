@@ -52,7 +52,8 @@
   - [Qwen Reasoning](#qwen-reasoning--transparent-decisions)
   - [Per-Product Targeting + Signal Freshness](#per-product-targeting--signal-freshness)
 - [Token Efficiency](#token-efficiency)
-- [Testing (44 files)](#testing)
+- [Testing (48 files)](#testing)
+- [Benchmarks](#benchmarks)
 - [Stack](#stack)
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
@@ -582,11 +583,12 @@ Every Qwen call does maximum work. No throwaway calls.
 - **Every output cached in Redis** before returning. Cache hit = zero tokens.
 
 **Technical implementation:** All Qwen calls go through a single `_qwen_chat()`
-wrapper in `qwen.py` that checks Redis cache (keyed by prompt hash) before
-making the API call, and writes the response to cache before returning. Cache
-TTL: brand generation = permanent, descriptions = 24h, decisions = no cache
-(state-dependent). `generate_descriptions()` batches all product names into one
-prompt with numbered output slots — one API call regardless of catalog size.
+wrapper in `brand.py` with connection pooling (shared `httpx.AsyncClient` with
+keepalive connections — saves ~200ms TCP+TLS per call), bounded exponential
+backoff, and per-call timeout. Cache strategy: brand generation = permanent,
+descriptions = 24h, decisions = no cache (state-dependent), catalog audit = 1
+day. `generate_descriptions()` batches all product names into one prompt with
+numbered output slots — one API call regardless of catalog size.
 `run_decision_cycle()` sends only the state diff (computed by `capture_snapshot()`
 delta against the last snapshot), not the full `SystemState` — typically 60-80%
 fewer tokens per call.
@@ -595,10 +597,10 @@ fewer tokens per call.
 
 ## Testing
 
-**44 test files** (23 backend, 21 frontend) covering every Qwen output path
-and validation layer.
+**48 test files** (27 backend, 21 frontend) covering every Qwen output path,
+validation layer, and adversarial input.
 
-**Backend** (`analytics-brain/tests/`, pytest — 23 files, ~970 lines):
+**Backend** (`analytics-brain/tests/`, pytest — 27 files, ~1500+ lines):
 
 
 | File                           | What it covers                                               |
@@ -626,6 +628,10 @@ and validation layer.
 | `test_db_models_sprint3.py`    | SQLAlchemy model validation                                  |
 | `test_memory_live.py`          | Memory persistence (Postgres + Redis mirror)                 |
 | `test_storebirth_live.py`      | Store birth with real Qwen calls                             |
+| `test_adversarial_interceptor.py` | Interceptor edge cases: negative prices, NaN, Inf, multi-patch attacks |
+| `test_adversarial_css.py`      | CSS injection: `url()` exfiltration, `position:fixed` phishing, `@import` |
+| `test_adversarial_vision.py`   | Vision edge cases: selfie, landscape, blank image, garbage price |
+| `test_benchmarks.py`           | Benchmark framework: 5 scenarios, latency/quality/validity metrics |
 
 
 **Frontend** (`storefront-ui/`, Vitest — 21 files):
@@ -662,6 +668,51 @@ variant string → falls back to the type default. `normalize_dsl()` receives a
 broken structure → repairs it in-place. `LayoutDSLSchema.safeParse()` receives
 malformed DSL → `FallbackStorefront` renders. `sanitize_css()` receives CSS
 with `@import` and `url()` → strips them silently.
+
+**Adversarial testing** — the interceptor is tested with negative prices, NaN,
+Infinity, zero-cost products, and multi-patch attacks (one malicious patch
+hidden between two valid ones). CSS sanitization is tested against `url()`
+data-exfiltration, `position: fixed` phishing overlays, `@keyframes` injection,
+`z-index` stacking attacks, and `expression()` XSS. Product vision is tested
+with selfies, landscapes, blank images, and garbage price values — verifying
+that `confident=False` fires correctly and price clamping holds.
+
+---
+
+## Benchmarks
+
+Five benchmark scenarios measure Qwen call performance and output quality.
+The framework runs offline with mock data (verifying infrastructure) and live
+with real Qwen API calls when `QWEN_API_KEY` is set.
+
+| Scenario          | Model       | Max Tokens | Measures                                       |
+| ----------------- | ----------- | ---------- | ---------------------------------------------- |
+| Logo Analysis     | qwen-vl-max | 512        | Vision latency, palette/mood validity          |
+| Brand Generation  | qwen-max    | 2500       | Text latency, guard rule count, schema validity|
+| Decision Cycle    | qwen-max    | 1000       | Tool-calling latency, action validity          |
+| Product Vision    | qwen-vl-max | 400        | VL latency, confidence accuracy, price sanity  |
+| Batch Descriptions| qwen-max    | 2000       | Batch latency, per-product quality             |
+
+**Run benchmarks:**
+```bash
+# Offline (verifies framework, no API calls):
+pytest tests/test_benchmarks.py -v
+
+# Live (real Qwen calls — requires QWEN_API_KEY):
+pytest tests/test_benchmarks.py -v -k "live"
+```
+
+**Expected performance characteristics** (measured on DashScope International endpoint):
+- Logo analysis: ~10-20s (multimodal image processing)
+- Brand generation: ~35-45s (2500 tokens, heavy generation)
+- Decision cycle: ~5-15s (1000 tokens with tool-calling)
+- Product vision: ~10-20s per image (multimodal)
+- Batch descriptions: ~20-30s per chunk of 20 products (parallel chunks)
+
+**Token efficiency**: All Qwen calls go through a single shared `_qwen_chat()`
+transport with connection pooling (reuses TCP+TLS across calls), bounded
+exponential backoff, and per-call timeout. Brand generation and catalog audit
+results are cached in Redis — subsequent loads are O(1) cache hits.
 
 ---
 

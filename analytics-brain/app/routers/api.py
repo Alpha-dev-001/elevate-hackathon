@@ -89,50 +89,33 @@ async def record_scan(c: str, m: str):
 # ── Manual decision trigger (for demo / testing) ───────────────────────────────
 
 @router.post("/decision/trigger/{merchant_id}")
-async def trigger_decision(merchant_id: str, profile: dict):
+async def trigger_decision(merchant_id: str):
     """
     Manually trigger a Qwen decision cycle.
     In production this fires automatically from telemetry anomalies.
     Useful for demos — trigger it and watch the terminal light up.
     """
-    from app.models.schemas import BusinessProfile, WSMessage, WSEventType
-    from app.services import qwen as qwen_svc
-    from app.services.interceptor import validate_decision
-    from app.services.telemetry import capture_snapshot
-    from app.services.delta import load_state
-    from app.core.ws_manager import manager
-    import json
+    from app.services.decision_engine import run_decision_cycle
+    from app.core.db import get_session_factory
 
-    parsed_profile = BusinessProfile.model_validate(profile)
-    snapshot = await capture_snapshot(merchant_id)
-    current_state = await load_state(merchant_id)
+    factory = get_session_factory()
+    async with factory() as db:
+        from app.core.redis import get_redis
+        redis = await get_redis()
+        action = await run_decision_cycle(
+            merchant_id,
+            "Manual trigger — demo/testing",
+            db,
+            redis,
+        )
 
-    if not current_state:
-        raise HTTPException(status_code=404, detail="State not initialized for merchant")
-
-    decision = await qwen_svc.request_decision(snapshot, parsed_profile, current_state)
-    results = validate_decision(decision.proposed_actions, parsed_profile)
-
-    valid_actions = [r.action for r in results if r.valid]
-    clamped = [r for r in results if r.valid and r.clamped_patches]
-    blocked = [r for r in results if not r.valid]
-
-    # Push to merchant terminal via WebSocket — this is the magic moment
-    await manager.push_to_terminal(merchant_id, WSMessage(
-        event=WSEventType.DECISION_READY,
-        payload={
-            "decision": json.loads(decision.model_dump_json()),
-            "validated_actions": [json.loads(a.model_dump_json()) for a in valid_actions],
-            "clamped_count": len(clamped),
-            "blocked_count": len(blocked),
-        },
-        merchant_id=merchant_id,
-        timestamp=int(time.time() * 1000),
-    ))
+    if action is None:
+        return {"triggered": False, "reason": "no action proposed or pending action exists"}
 
     return {
         "triggered": True,
-        "actions_proposed": len(decision.proposed_actions),
-        "actions_validated": len(valid_actions),
+        "action_id": action.id,
+        "action_type": action.action_type.value,
+        "title": action.title,
         "pushed_to_terminal": True,
     }

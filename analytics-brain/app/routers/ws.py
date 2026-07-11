@@ -4,7 +4,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.ws_manager import manager
 from app.models.schemas import WSMessage, WSEventType
 from app.services import delta as delta_svc
-from app.services import qwen as qwen_svc
 from app.services.interceptor import validate_decision
 import logging
 

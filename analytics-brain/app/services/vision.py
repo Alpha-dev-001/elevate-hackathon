@@ -107,8 +107,10 @@ async def analyze_product_image(
     data = _extract_json(raw)
 
     # Coerce + clamp defensively — never trust the model's number or shape raw.
+    # Use explicit None check — `or` can't distinguish 0 from missing.
+    raw_price = data.get("suggested_price")
     try:
-        price = float(data.get("suggested_price", baseline_price) or baseline_price)
+        price = float(raw_price) if raw_price is not None else baseline_price
     except (TypeError, ValueError):
         price = baseline_price
     price = max(lo, min(hi, price))
@@ -118,9 +120,11 @@ async def analyze_product_image(
         colors = [str(colors)]
     colors = [str(c).strip().lower() for c in colors if str(c).strip()][:6]
 
+    # Strip BEFORE fallback — "   " is truthy but strips to empty.
+    raw_name = str(data.get("name") or "").strip()
     try:
         return ProductVision(
-            name=str(data.get("name") or "Unidentified item").strip()[:120],
+            name=(raw_name or "Unidentified item")[:120],
             brand=str(data.get("brand") or "").strip()[:60],
             description=str(data.get("description") or "").strip()[:400],
             category=str(data.get("category") or "other").strip().lower()[:40],

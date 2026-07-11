@@ -28,6 +28,31 @@ import logging
 
 import httpx
 
+# ─── Shared HTTP client with connection pooling ──────────────────────────────
+# Reuses TCP+TLS connections across Qwen calls instead of negotiating a fresh
+# handshake per request (~200ms saved per call).  The pool timeout is generous
+# so a slow brand-gen call never starves a concurrent decision cycle.
+_shared_client: httpx.AsyncClient | None = None
+
+def _get_qwen_client(timeout: float = 30.0) -> httpx.AsyncClient:
+    """Return (or create) a module-level async HTTP client with connection pooling.
+
+    The per-request timeout is applied at the request level, not the client
+    level, so different callers (VL 45s, brand-gen 75s, edit-intent 30s) can
+    coexist on the same pooled client.
+    """
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout, connect=10.0),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30,
+            ),
+        )
+    return _shared_client
+
 logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
@@ -303,38 +328,38 @@ async def _qwen_chat(
     headers = {"Authorization": f"Bearer {settings.qwen_api_key}"}
 
     last_err: str = "unknown error"
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        for attempt in range(attempts):
-            try:
-                resp = await client.post(url, headers=headers, json=payload)
-            except (httpx.TimeoutException, httpx.TransportError) as e:
-                last_err = f"network error: {e!s}"
-            else:
-                if resp.status_code == 200:
-                    try:
-                        message = resp.json()["choices"][0]["message"]
-                        if tools:
-                            # Return full message for tool_calls access
-                            return message
-                        return message["content"]
-                    except (KeyError, IndexError, json.JSONDecodeError) as e:
-                        raise BrandGenerationError(
-                            f"{model} returned an unexpected envelope: {e!s}"
-                        ) from e
-                # Permanent client errors: surface immediately, do not retry.
-                if resp.status_code not in _RETRYABLE_STATUS:
-                    body = resp.text
-                    # qwen-vl couldn't fetch the image — distinct, recoverable.
-                    if resp.status_code == 400 and "download" in body.lower() and "multimodal" in body.lower():
-                        raise LogoFetchError(body[:300])
+    client = _get_qwen_client(timeout)
+    for attempt in range(attempts):
+        try:
+            resp = await client.post(url, headers=headers, json=payload, timeout=timeout)
+        except (httpx.TimeoutException, httpx.TransportError) as e:
+            last_err = f"network error: {e!s}"
+        else:
+            if resp.status_code == 200:
+                try:
+                    message = resp.json()["choices"][0]["message"]
+                    if tools:
+                        # Return full message for tool_calls access
+                        return message
+                    return message["content"]
+                except (KeyError, IndexError, json.JSONDecodeError) as e:
                     raise BrandGenerationError(
-                        f"{model} call failed [{resp.status_code}]: {body[:300]}"
-                    )
-                last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        f"{model} returned an unexpected envelope: {e!s}"
+                    ) from e
+            # Permanent client errors: surface immediately, do not retry.
+            if resp.status_code not in _RETRYABLE_STATUS:
+                body = resp.text
+                # qwen-vl couldn't fetch the image — distinct, recoverable.
+                if resp.status_code == 400 and "download" in body.lower() and "multimodal" in body.lower():
+                    raise LogoFetchError(body[:300])
+                raise BrandGenerationError(
+                    f"{model} call failed [{resp.status_code}]: {body[:300]}"
+                )
+            last_err = f"HTTP {resp.status_code}: {resp.text[:200]}"
 
-            # transient — back off and retry (0.5s, 1s, ...), unless last attempt
-            if attempt < attempts - 1:
-                await asyncio.sleep(0.5 * (2 ** attempt))
+        # transient — back off and retry (0.5s, 1s, ...), unless last attempt
+        if attempt < attempts - 1:
+            await asyncio.sleep(0.5 * (2 ** attempt))
 
     raise BrandGenerationError(
         f"{model} call failed after {attempts} attempts — last: {last_err}"
