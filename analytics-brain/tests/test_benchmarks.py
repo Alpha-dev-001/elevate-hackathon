@@ -2,10 +2,15 @@
 Benchmarks — measure Qwen call performance and output quality.
 
 Run with: pytest tests/test_benchmarks.py -v
-Run live (requires QWEN_API_KEY): pytest tests/test_benchmarks.py -v -m live
 
-The offline tests use mock responses to verify the benchmark infrastructure.
-The @pytest.mark.live tests make real Qwen calls and are skipped by default.
+This file defines the BenchmarkResult/BenchmarkReport infrastructure and the
+5 scenario definitions, tested here with mock data so the harness itself is
+covered without spending tokens on every CI run.
+
+For a real run against the live Qwen API, see bench_live.py — it imports
+BenchmarkResult/BenchmarkReport from this file and drives the actual
+service functions (analyze_logo, generate_brand, decision cycle tool-calling,
+analyze_product_image, generate_descriptions).
 """
 import time
 import statistics
@@ -237,18 +242,20 @@ class TestMockBenchmarkRun:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# LIVE BENCHMARKS (require QWEN_API_KEY — skipped by default)
+# LIVE BENCHMARKS (require QWEN_API_KEY) — see bench_live.py
 # ──────────────────────────────────────────────────────────────────────────────
 #
 # To run live benchmarks:
 #   1. Set QWEN_API_KEY in your environment
-#   2. Run: pytest tests/test_benchmarks.py -v -k "live"
+#   2. Run: python -m tests.bench_live   (from analytics-brain/, or inside
+#      the api container: docker compose exec api python -m tests.bench_live)
 #
-# Live tests make real Qwen API calls and measure:
-#   - Actual latency per scenario
-#   - Token usage (from API response)
-#   - Output validity (schema validation)
-#   - Output quality (human-rated after the run)
+# bench_live.py calls the real service functions directly (no server/DB/Redis
+# needed) and measures, per scenario:
+#   - Actual latency
+#   - Token estimate (chars/4 heuristic — response usage isn't always exposed)
+#   - Output validity (did it pass Pydantic validation)
+#   - Output quality (heuristic per scenario, e.g. guard rules present)
 #
 # Results are printed as a formatted report at the end.
 # Copy the report into BENCHMARKS.md for the public repo.

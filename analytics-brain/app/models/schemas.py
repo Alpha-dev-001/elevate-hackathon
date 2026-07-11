@@ -35,7 +35,6 @@ class Urgency(str, Enum):
 
 class AnomalyType(str, Enum):
     VELOCITY_SPIKE = "velocity_spike"
-    HIGH_ABANDON = "high_abandon"
     LOW_STOCK_SURGE = "low_stock_surge"
     DEAD_PRODUCT = "dead_product"
 
@@ -395,8 +394,6 @@ class TelemetrySnapshot(BaseModel):
     captured_at: int
     active_session_count: int
     product_velocity: dict[str, float]
-    transaction_rate: float
-    abandon_rate: float
     hot_products: list[str]
     anomalies: list[Anomaly]
 

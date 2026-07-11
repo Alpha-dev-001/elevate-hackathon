@@ -39,8 +39,6 @@ async def capture_snapshot(merchant_id: str) -> TelemetrySnapshot:
         captured_at=int(time.time() * 1000),
         active_session_count=active_sessions,
         product_velocity=product_velocity,
-        transaction_rate=0.0,
-        abandon_rate=0.0,
         hot_products=hot_products,
         anomalies=anomalies,
     )
