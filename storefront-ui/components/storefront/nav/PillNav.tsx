@@ -4,12 +4,12 @@ import type { NavProps } from '@/lib/dslRegistry'
 export function PillNav({ store, activeCategory, onSelect }: NavProps) {
   const items: (string | null)[] = [null, ...store.categories]
   return (
-    <nav className="flex gap-2 overflow-x-auto px-5 md:px-10 py-4 text-sm">
+    <nav className="nav-links flex gap-2 overflow-x-auto px-5 md:px-10 py-4 text-sm">
       {items.map((c) => {
         const active = activeCategory === c
         return (
           <button key={c ?? 'all'} onClick={() => onSelect(c)}
-                  className="whitespace-nowrap px-4 py-1.5 rounded-full transition-colors"
+                  className="nav-link whitespace-nowrap px-4 py-1.5 rounded-full transition-colors"
                   style={
                     active
                       ? { background: 'var(--s-cta)', color: 'var(--s-on-cta)' }

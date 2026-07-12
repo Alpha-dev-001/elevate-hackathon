@@ -228,6 +228,7 @@ async def _run_brand_pipeline(
                     product_count = len(seed_products_raw) if isinstance(seed_products_raw, list) else 0
                     brand_token_result.layout_dsl = await generate_layout_dsl(
                         brand_token_result, store_name, category, product_count,
+                        slug=slug,
                     )
                     # Scoped micro-interaction CSS — best-effort, never blocks.
                     try:

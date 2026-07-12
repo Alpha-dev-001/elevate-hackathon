@@ -93,7 +93,7 @@ async def regenerate_dsl(
     from sqlalchemy import select, func
     from app.models.db_models import ProductDB
     count = await db.scalar(select(func.count()).where(ProductDB.merchant_id == merchant.id)) or 0
-    dsl = await generate_layout_dsl(token, merchant.store_name, merchant.category, count, merchant_id=merchant.id)
+    dsl = await generate_layout_dsl(token, merchant.store_name, merchant.category, count, merchant_id=merchant.id, slug=merchant.slug)
     return dsl.model_dump()
 
 
@@ -137,6 +137,7 @@ async def creative_dsl(
         merchant_id=merchant.id,
         creative_direction=payload.direction,
         current_dsl=token.layout_dsl,
+        slug=merchant.slug,
     )
     return dsl.model_dump()
 

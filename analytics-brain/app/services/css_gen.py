@@ -15,14 +15,23 @@ logger = logging.getLogger(__name__)
 ALLOWED_PROPS = {
     "transform", "transition", "letter-spacing", "line-height",
     "text-decoration", "opacity", "border-radius", "box-shadow",
+    "font-size", "font-weight", "color", "padding", "margin", "gap",
 }
 
 _FORBIDDEN = re.compile(r"url\(|@import|@keyframes|position\s*:\s*fixed|z-index", re.I)
+# Matches a `property:` occurrence wherever it appears on the line — the
+# expected format is one full rule per line (`selector { prop: val; }`), but
+# this also tolerates a multi-line rule's bare `prop: val;` line.
+_PROP_OCCURRENCE = re.compile(r"([a-zA-Z-]+)\s*:")
 
 
 def sanitize_css(css: str, slug: str) -> str:
-    """Keep only lines scoped to this store, drop anything forbidden. Line-based
-    (matches the spec) — generated CSS is one rule per line."""
+    """Keep only lines scoped to this store, where every declared property is
+    on ALLOWED_PROPS, with nothing forbidden. Line-based (matches the spec) —
+    generated CSS is one full rule per line. A line naming any property NOT
+    on ALLOWED_PROPS is dropped whole — this was previously declared but
+    never actually checked, so any property Qwen wrote passed through
+    untouched."""
     if not css:
         return ""
     scope = f'[data-store="{slug}"]'
@@ -33,9 +42,15 @@ def sanitize_css(css: str, slug: str) -> str:
             continue
         if _FORBIDDEN.search(stripped):
             continue
-        # Keep scoped rule lines and bare closing braces; drop unscoped selectors.
-        if scope in stripped or stripped in ("}", "{"):
+        if stripped in ("}", "{"):
             safe.append(stripped)
+            continue
+        if scope not in stripped:
+            continue  # unscoped selector/rule — drop
+        props = _PROP_OCCURRENCE.findall(stripped)
+        if props and not all(p.lower() in ALLOWED_PROPS for p in props):
+            continue
+        safe.append(stripped)
     return "\n".join(safe)
 
 
@@ -49,9 +64,19 @@ Use ONLY these selectors:
   [data-store="{slug}"] .hero-title
   [data-store="{slug}"] .section-banner
   [data-store="{slug}"] .product-price
+  [data-store="{slug}"] .nav-links
+  [data-store="{slug}"] .nav-link
 
 Use ONLY these properties: transform, transition, letter-spacing, line-height,
-text-decoration, opacity, border-radius, box-shadow.
+text-decoration, opacity, border-radius, box-shadow, font-size, font-weight,
+color, padding, margin, gap.
+
+NOTE (2026-07-12): only .nav-links/.nav-link currently exist in the real
+DOM — the product-card/hero-title/section-banner/product-price selectors
+above have never been added to any component and any CSS targeting them is
+a silent no-op. Kept in the prompt so this feature's original intended
+scope isn't silently narrowed; see UPGRADES.md for the follow-up to add
+real hooks for the rest.
 No url(), no position: fixed, no z-index, no @keyframes, no @import.
 One rule per line. Return ONLY the CSS."""
 

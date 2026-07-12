@@ -10,6 +10,7 @@ export function SidebarTextNav({ store, activeCategory, onSelect, preview }: Nav
       {items.map((c) => (
         <li key={c ?? 'all'}>
           <button onClick={() => { onSelect(c); setOpen(false) }}
+                  className="nav-link"
                   style={{ color: activeCategory === c ? 'var(--s-accent)' : 'var(--s-text-muted)' }}>
             {c ?? 'All'}
           </button>
@@ -21,8 +22,8 @@ export function SidebarTextNav({ store, activeCategory, onSelect, preview }: Nav
   // store container so it never escapes the pane and covers the builder controls.
   // (The container — the [data-store] div — is position:relative, and scrolls.)
   const railClass = preview
-    ? 'hidden md:block absolute left-0 top-0 h-full w-44 px-6 py-10 overflow-y-auto'
-    : 'hidden md:block fixed left-0 top-0 h-full w-44 px-6 py-10 overflow-y-auto'
+    ? 'nav-links hidden md:block absolute left-0 top-0 h-full w-44 px-6 py-10 overflow-y-auto'
+    : 'nav-links hidden md:block fixed left-0 top-0 h-full w-44 px-6 py-10 overflow-y-auto'
   return (
     <>
       <button className="md:hidden px-5 py-3 text-sm" aria-label="Menu" onClick={() => setOpen((o) => !o)}>☰ Menu</button>
@@ -30,7 +31,7 @@ export function SidebarTextNav({ store, activeCategory, onSelect, preview }: Nav
         {list}
       </nav>
       {open && (
-        <nav className="md:hidden px-6 py-4" style={{ background: 'var(--s-bg)' }}>{list}</nav>
+        <nav className="nav-links md:hidden px-6 py-4" style={{ background: 'var(--s-bg)' }}>{list}</nav>
       )}
     </>
   )

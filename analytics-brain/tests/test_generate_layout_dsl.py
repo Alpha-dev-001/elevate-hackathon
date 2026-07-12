@@ -120,6 +120,46 @@ class TestCreativeDirectionAnchoring:
         assert "EDITING it, not" not in prompt
         assert "bold and playful" in prompt
 
+    def test_custom_css_sanitized_when_slug_given(self):
+        """custom_css from generate_layout_dsl used to skip sanitize_css
+        entirely -- the only CSS-writing path in the codebase that did."""
+        async def fake_chat(**kw):
+            return json.dumps({
+                "sections": [{"type": "hero", "variant": "editorial-stacked"}],
+                "global_config": {"nav_style": "pill-nav"},
+                "custom_css": (
+                    '[data-store="haree"] .nav-link { font-size: 1.2em; }\n'
+                    'body { background: url(http://evil.example/x.png); }'
+                ),
+            })
+        dsl = asyncio.run(generate_layout_dsl(
+            _token(), "Haree", "beauty", 6,
+            creative_direction="bigger nav text",
+            current_dsl=_existing_dsl(),
+            slug="haree",
+            _chat=fake_chat,
+        ))
+        assert "font-size: 1.2em" in dsl.custom_css
+        assert "url(" not in dsl.custom_css
+        assert "body {" not in dsl.custom_css
+
+    def test_custom_css_dropped_entirely_without_slug(self):
+        """No slug to scope against -> drop rather than pass through
+        unsanitized. Fail-safe default, not a fail-open one."""
+        async def fake_chat(**kw):
+            return json.dumps({
+                "sections": [{"type": "hero", "variant": "editorial-stacked"}],
+                "global_config": {"nav_style": "pill-nav"},
+                "custom_css": '[data-store="haree"] .nav-link { font-size: 1.2em; }',
+            })
+        dsl = asyncio.run(generate_layout_dsl(
+            _token(), "Haree", "beauty", 6,
+            creative_direction="bigger nav text",
+            current_dsl=_existing_dsl(),
+            _chat=fake_chat,
+        ))
+        assert dsl.custom_css == ""
+
     def test_no_creative_direction_no_anchoring_text(self):
         """Plain regenerate (no direction at all) shouldn't grow either branch."""
         captured = {}

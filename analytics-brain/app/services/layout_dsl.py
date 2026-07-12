@@ -124,8 +124,14 @@ def _clean_sections(raw_sections: object) -> list[LayoutSection]:
     return out
 
 
-def normalize_dsl(raw: dict) -> LayoutDSL:
-    """Defense Layer B. Turn any raw dict into a structurally-safe LayoutDSL."""
+def normalize_dsl(raw: dict, slug: str = "") -> LayoutDSL:
+    """Defense Layer B. Turn any raw dict into a structurally-safe LayoutDSL.
+
+    slug is required to sanitize custom_css (app.services.css_gen.sanitize_css
+    scopes every rule to `[data-store="{slug}"]`) — without it, custom_css is
+    dropped entirely rather than passed through unscoped/unsanitized. This
+    used to be a silent gap: custom_css from the layout/creative-direction
+    path skipped sanitize_css entirely, the only CSS-writing path that did."""
     sections = _clean_sections(raw.get("sections"))
 
     # Rule: at most one hero, and it leads.
@@ -158,10 +164,17 @@ def normalize_dsl(raw: dict) -> LayoutDSL:
         sections.append(LayoutSection(type=SectionType.story, variant=DEFAULT_VARIANT[SectionType.story]))
     sections = sections[:5]
 
+    raw_css = str(raw.get("custom_css") or "")
+    if raw_css and slug:
+        from app.services.css_gen import sanitize_css
+        safe_css = sanitize_css(raw_css, slug)
+    else:
+        safe_css = ""  # no slug to scope against -> drop rather than pass through unsanitized
+
     return LayoutDSL(
         sections=sections,
         global_config=_coerce_global(raw.get("global_config")),
-        custom_css=str(raw.get("custom_css") or ""),
+        custom_css=safe_css,
     )
 
 
@@ -321,6 +334,7 @@ async def generate_layout_dsl(
     merchant_id: str | None = None,
     creative_direction: str | None = None,
     current_dsl: "LayoutDSL | None" = None,
+    slug: str = "",
     _chat=None,
 ) -> LayoutDSL:
     """qwen-max composes the store. NEVER raises — any failure (network, non-JSON,
@@ -361,7 +375,25 @@ async def generate_layout_dsl(
                 f"unless the request specifically requires changing it. A narrow request "
                 f"(e.g. sizing, spacing, one section's tone) must produce a layout that is "
                 f"identical to the one above except for that one change — do not use this "
-                f"as an opportunity to redesign sections the request didn't mention."
+                f"as an opportunity to redesign sections the request didn't mention.\n\n"
+                f"For a request about sizing, weight, spacing, or color of something that "
+                f"already exists (e.g. 'bigger nav text', 'bolder links'), express it as a "
+                f"custom_css rule — do NOT satisfy it by picking a different nav_style, "
+                f"product_card, or section variant. A different variant is a different "
+                f"PATTERN (e.g. pills vs. underlined tabs); only use one if the request "
+                f"explicitly asks for a different pattern, not just more emphasis on the "
+                f"current one. custom_css rules MUST use exactly this format — one rule "
+                f"per line, selector scoped with the store's data attribute:\n"
+                f'  [data-store="{slug}"] .nav-link {{ font-size: 1.15em; }}\n'
+                f"The ONLY selectors available right now: "
+                f'[data-store="{slug}"] .nav-links (the nav wrapper) and '
+                f'[data-store="{slug}"] .nav-link (each nav item). Allowed properties only: '
+                f"transform, transition, letter-spacing, line-height, text-decoration, "
+                f"opacity, border-radius, box-shadow, font-size, font-weight, color, padding, "
+                f"margin, gap. Anything outside these two selectors is silently discarded, so "
+                f"if the request is about something else entirely (a section's color, a "
+                f"product card), use the section/global_config fields instead — do not invent "
+                f"a selector for it."
             )
         else:
             prompt += (
@@ -382,7 +414,7 @@ async def generate_layout_dsl(
             max_tokens=1200, temperature=0.7, timeout=60.0,
         )
         data = _extract_json(raw)
-        return normalize_dsl(data)
+        return normalize_dsl(data, slug)
     except Exception as e:  # noqa: BLE001 — fallback must be total for the demo path
         logger.warning("[dsl] generate_layout_dsl falling back to deterministic DSL: %s", e)
         if merchant_id:
