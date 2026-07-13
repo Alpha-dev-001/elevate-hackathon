@@ -17,8 +17,8 @@ from app.models.schemas import AgentActionType
 class TestToolDefinitions:
     """Every tool must be a valid OpenAI-compatible function definition."""
 
-    def test_five_tools_defined(self):
-        assert len(DECISION_TOOLS) == 5
+    def test_six_tools_defined(self):
+        assert len(DECISION_TOOLS) == 6
 
     def test_all_tools_have_required_fields(self):
         for tool in DECISION_TOOLS:
@@ -63,6 +63,17 @@ class TestToolDefinitions:
         tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_recovery_offer")
         props = tool["function"]["parameters"]["properties"]
         assert "discount_percent" in props
+
+    def test_duplicate_merge_has_keep_and_remove_ids(self):
+        """propose_duplicate_merge tool must produce keep_product_id +
+        remove_product_ids (what agent.py's _execute_payload reads)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_duplicate_merge")
+        props = tool["function"]["parameters"]["properties"]
+        assert "keep_product_id" in props
+        assert "remove_product_ids" in props
+        required = tool["function"]["parameters"]["required"]
+        assert "keep_product_id" in required
+        assert "remove_product_ids" in required
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +139,17 @@ class TestNarrativeFromTool:
         )
         assert "Hero Headline" in result["title"]
         assert "hero_headline" in result["description"]
+
+    def test_duplicate_merge_narrative(self):
+        result = narrative_from_tool(
+            "propose_duplicate_merge",
+            {"keep_product_id": "prod_a", "remove_product_ids": ["prod_b", "prod_c"]},
+            "Alexander McQueen Logo Strap Slides",
+            'Duplicate listings: 3 entries for "Alexander McQueen Logo Strap Slides" — prod_a (...), prod_b (...), prod_c (...) — same product listed under separate entries',
+        )
+        assert "Duplicate Cleanup" in result["title"]
+        assert "Alexander McQueen Logo Strap Slides" in result["title"]
+        assert "2" in result["description"]  # 2 removed
 
     def test_unknown_tool_fallback(self):
         result = narrative_from_tool(
@@ -203,3 +225,6 @@ class TestToolMapping:
 
     def test_copy_rewrite_maps_correctly(self):
         assert TOOL_TO_ACTION_TYPE["propose_copy_rewrite"] == AgentActionType.COPY_REWRITE
+
+    def test_duplicate_merge_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_duplicate_merge"] == AgentActionType.DUPLICATE_MERGE

@@ -141,6 +141,32 @@ DECISION_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_duplicate_merge",
+            "description": (
+                "Merge duplicate product listings identified in the anomaly "
+                "description into one. Use the EXACT product IDs given in "
+                "the anomaly text — do not invent IDs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keep_product_id": {
+                        "type": "string",
+                        "description": "ID of the listing to keep — the more complete/accurate one",
+                    },
+                    "remove_product_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "IDs of the duplicate listings to remove",
+                    },
+                },
+                "required": ["keep_product_id", "remove_product_ids"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -153,6 +179,7 @@ TOOL_TO_ACTION_TYPE: dict[str, AgentActionType] = {
     "propose_layout_morph": AgentActionType.LAYOUT_MORPH,
     "propose_recovery_offer": AgentActionType.RECOVERY_OFFER,
     "propose_copy_rewrite": AgentActionType.COPY_REWRITE,
+    "propose_duplicate_merge": AgentActionType.DUPLICATE_MERGE,
 }
 
 # ---------------------------------------------------------------------------
@@ -215,6 +242,15 @@ def narrative_from_tool(
         return {
             "title": f"Copy Rewrite: {target.replace('_', ' ').title()}",
             "description": f"Rewrite {target} to better match current customer behavior",
+            "trigger": anomaly_desc[:200],
+            "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
+        }
+
+    if tool_name == "propose_duplicate_merge":
+        n_removed = len(args.get("remove_product_ids") or [])
+        return {
+            "title": f"Duplicate Cleanup: {name}",
+            "description": f"Merge {n_removed} duplicate listing(s) into one — keeps the most complete version",
             "trigger": anomaly_desc[:200],
             "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
         }

@@ -80,6 +80,7 @@ class AgentActionType(str, Enum):
     SCARCITY_PRICE = "scarcity_price"
     RECOVERY_OFFER = "recovery_offer"
     COPY_REWRITE = "copy_rewrite"
+    DUPLICATE_MERGE = "duplicate_merge"
 
 class AgentActionStatus(str, Enum):
     PENDING = "pending"
