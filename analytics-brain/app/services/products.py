@@ -28,6 +28,8 @@ def db_to_product(row: ProductDB) -> Product:
         description=row.description or None,
         qwen_generated=row.qwen_generated_description,
         is_pending=not row.is_active,
+        is_featured=row.is_featured,
+        featured_label=row.featured_label,
     )
 
 

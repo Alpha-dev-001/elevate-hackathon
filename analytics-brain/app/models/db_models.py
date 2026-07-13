@@ -58,6 +58,8 @@ class ProductDB(Base):
     image_urls: Mapped[list] = mapped_column(JSON, default=list)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     qwen_generated_description: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
+    featured_label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
     merchant: Mapped["MerchantDB"] = relationship(back_populates="products")

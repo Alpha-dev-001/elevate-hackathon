@@ -129,6 +129,8 @@ export const ProductSchema = z.object({
   description: z.string().nullable().optional(),
   qwen_generated: z.boolean().default(false),
   is_pending: z.boolean().default(false),
+  is_featured: z.boolean().default(false),
+  featured_label: z.string().nullable().optional(),
 })
 
 // ─── 6b. Duplicate Detection ─────────────────────────────────────────────────
@@ -341,6 +343,8 @@ export const PublicProductSchema = z.object({
   image_url: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
   available: z.boolean(),
+  is_featured: z.boolean().default(false),
+  featured_label: z.string().nullable().optional(),
 })
 
 export const PublicStoreSchema = z.object({
