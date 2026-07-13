@@ -18,7 +18,7 @@ import os
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
-from app.models.db_models import ProductDB, MerchantDB
+from app.models.db_models import ProductDB, MerchantDB, AgentActionDB
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -224,6 +224,20 @@ async def find_duplicate_group(
 
     remaining = [p for p in products if p.id not in auto_deleted_ids]
     if len(remaining) < 2:
+        return None
+
+    # Don't spend a Qwen call when a decision is already pending for this
+    # merchant — run_decision_cycle rejects it anyway, but only AFTER this
+    # call would already be paid for. Mirrors the same one-pending-action
+    # gate run_decision_cycle applies internally (decision_engine.py),
+    # checked here instead so the token cost is actually avoided, not just
+    # the resulting card.
+    pending = await db.scalar(
+        select(AgentActionDB)
+        .where(AgentActionDB.merchant_id == merchant_id)
+        .where(AgentActionDB.status == "pending")
+    )
+    if pending:
         return None
 
     merchant = await db.get(MerchantDB, merchant_id)

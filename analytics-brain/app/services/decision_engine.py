@@ -54,6 +54,8 @@ def grounded_gmv(action_type: str, anomaly_count: int, avg_price: float) -> floa
     """A revenue-impact estimate tied to REAL signals instead of a Qwen guess:
     the anomaly magnitude × the catalog's average price × a tunable per-type rate.
     Returns 0.0 when we can't ground it (caller then falls back to Qwen's number)."""
+    if action_type == "duplicate_merge":
+        return 0.0  # catalog-hygiene action, no grounded revenue basis
     if avg_price <= 0 or anomaly_count <= 0:
         return 0.0
     s = get_settings()
