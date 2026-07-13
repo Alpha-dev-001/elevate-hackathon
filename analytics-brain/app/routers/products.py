@@ -13,7 +13,7 @@ import time
 import uuid
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -118,9 +118,27 @@ async def _advance_to_products(merchant: MerchantDB) -> None:
         merchant.onboarding_status = OnboardingStatus.PRODUCTS.value
 
 
+def _schedule_featuring_check(background: BackgroundTasks, merchant_id: str, new_product_ids: list[str]) -> None:
+    """Fire the featuring trigger once per batch, never per product — same
+    fire-and-forget pattern behavior.py uses for the reactive trigger. Uses
+    a fresh DB session so it never races the request session's teardown."""
+    async def _check():
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from app.core.database import get_engine
+        from app.core.redis import get_redis
+        from app.services.product_featuring import evaluate_new_products
+
+        redis = await get_redis()
+        async with AsyncSession(get_engine()) as session:
+            await evaluate_new_products(merchant_id, new_product_ids, session, redis)
+
+    background.add_task(_check)
+
+
 @router.post("", response_model=Product, status_code=201)
 async def add_product(
     payload: ProductCreate,
+    background: BackgroundTasks,
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -155,12 +173,14 @@ async def add_product(
     await db.flush()
 
     await _sync_state_if_live(db, merchant.id)
+    _schedule_featuring_check(background, merchant.id, [product.id])
     return db_to_product(product)
 
 
 @router.post("/batch", response_model=list[Product], status_code=201)
 async def add_products_batch(
     payload: ProductBatchCreate,
+    background: BackgroundTasks,
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
@@ -198,6 +218,7 @@ async def add_products_batch(
     await db.flush()
 
     await _sync_state_if_live(db, merchant.id)
+    _schedule_featuring_check(background, merchant.id, [p.id for p in created])
     return [db_to_product(p) for p in created]
 
 
