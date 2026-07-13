@@ -79,3 +79,20 @@ def test_missing_discount_percent_defaults_to_zero_not_a_crash():
     )
     assert blocked is False
     assert args["discount_percent"] == 0
+
+
+def test_min_price_above_actual_price_clamps_to_zero_not_negative():
+    # Merchant misconfigured min_price ($25) above the product's actual price
+    # ($20) — floor_discount = (1 - 25/20) * 100 = -25%, which is nonsensical.
+    # Must clamp to 0% (no discount), never store a negative discount.
+    constraints = BusinessConstraints(
+        min_profit_margin_percent=20, max_discount_percent=40,
+        min_price={"p1": 25.0},
+    )
+    args, msg, blocked = enforce_action_discount(
+        AgentActionType.FLASH_SALE, {"product_id": "p1", "discount_percent": 10},
+        cost_price=10.0, price=20.0, constraints=constraints, product_id="p1",
+    )
+    assert blocked is False
+    assert args["discount_percent"] == 0.0
+    assert "0%" in msg

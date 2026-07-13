@@ -283,7 +283,7 @@ def enforce_action_discount(
             )
             discounted_price = price * (1 - final_discount / 100) if price > 0 else 0.0
             if floor > cost_price and discounted_price < floor and price > 0:
-                floor_discount = round((1 - floor / price) * 100, 2)
+                floor_discount = max(0.0, round((1 - floor / price) * 100, 2))
                 violations.append(Violation(
                     rule="min_price",
                     severity="warning",
