@@ -32,4 +32,10 @@ describe('DecisionLog', () => {
     await waitFor(() => expect(getDecisions).toHaveBeenCalled())
     expect(screen.getByText(/no decisions yet/i)).toBeTruthy()
   })
+
+  it('surfaces an error message instead of staying blank when the fetch fails', async () => {
+    getDecisions.mockRejectedValue(new Error('network error'))
+    render(<DecisionLog />)
+    await waitFor(() => expect(screen.getByText(/could not load decision history/i)).toBeTruthy())
+  })
 })

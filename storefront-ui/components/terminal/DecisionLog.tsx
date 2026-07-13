@@ -6,6 +6,7 @@ import { api, type DecisionLogEntry } from '@/lib/api'
 export function DecisionLog() {
   const [decisions, setDecisions] = useState<DecisionLogEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -14,11 +15,24 @@ export function DecisionLog() {
         setDecisions(res.decisions)
         setLoading(false)
       }
+    }).catch(() => {
+      if (!cancelled) {
+        setError('Could not load decision history')
+        setLoading(false)
+      }
     })
     return () => { cancelled = true }
   }, [])
 
   if (loading) return null
+
+  if (error) {
+    return (
+      <p className="text-xs mb-3 font-mono" style={{ color: 'var(--color-danger)' }}>
+        {error}
+      </p>
+    )
+  }
 
   if (decisions.length === 0) {
     return (
