@@ -203,6 +203,12 @@ async def find_duplicate_group(
 
     if auto_deleted_ids:
         await db.flush()
+        # Commit here, don't rely on a later run_decision_cycle() call to do
+        # it as a side effect — every real caller (store_review.py's hourly
+        # tick, the MCP tool) uses a raw session with no auto-commit, so a
+        # tick where auto-resolve is the ONLY outcome would otherwise
+        # silently roll back this delete when the session closes.
+        await db.commit()
         try:
             from app.routers.products import _sync_state_if_live
             await _sync_state_if_live(db, merchant_id)
