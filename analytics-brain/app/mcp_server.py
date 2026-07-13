@@ -290,10 +290,10 @@ async def elevate_approve_action(action_id: str, merchant_session_token: str) ->
 
         # Execute the payload (promo registration, layout morph, etc.)
         from app.routers.agent import _execute_payload, _broadcast_state_update
-        await _execute_payload(row, db)
+        applied = await _execute_payload(row, db)
 
-        row.status = "executed"
-        row.executed_at = int(time.time() * 1000)
+        row.status = "executed" if applied else "blocked_at_execution"
+        row.executed_at = int(time.time() * 1000) if applied else None
         await db.commit()
 
         # Best-effort WS broadcast (only works if FastAPI is running)
@@ -302,15 +302,16 @@ async def elevate_approve_action(action_id: str, merchant_session_token: str) ->
         except Exception:
             pass  # MCP server may not share WS connections with FastAPI
 
-        # Schedule outcome observation
-        try:
-            from app.services.outcome_observer import schedule_observation
-            schedule_observation(row.id, None, redis=await get_redis())
-        except Exception:
-            pass
+        if applied:
+            # Schedule outcome observation
+            try:
+                from app.services.outcome_observer import schedule_observation
+                schedule_observation(row.id, None, redis=await get_redis())
+            except Exception:
+                pass
 
         return json.dumps({
-            "result": "approved_and_executed",
+            "result": "approved_and_executed" if applied else "blocked_at_execution",
             "action": _action_row_to_dict(row),
         }, indent=2, default=str)
 

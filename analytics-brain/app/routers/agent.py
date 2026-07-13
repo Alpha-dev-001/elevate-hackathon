@@ -78,26 +78,31 @@ async def approve_action(
     row.merchant_behavior = "approved"
 
     # Execute payload — apply flash_sale as a promo, layout_morph updates state, etc.
-    await _execute_payload(row, db)
+    applied = await _execute_payload(row, db)
 
-    row.status = "executed"
-    row.executed_at = int(time.time() * 1000)
+    if applied:
+        row.status = "executed"
+        row.executed_at = int(time.time() * 1000)
+    else:
+        row.status = "blocked_at_execution"
     await db.commit()
 
-    # Broadcast store update to all WS connections
+    # Broadcast store update to all WS connections (even when blocked, so the
+    # terminal's status badge updates instead of showing a stale "approved")
     await _broadcast_state_update(row.merchant_id)
 
-    # Schedule the outcome observation for when this action's promo expires —
-    # closes the cognitive loop (action → outcome → memory).
-    try:
-        from app.services.outcome_observer import schedule_observation
-        from app.core.redis import get_redis
-        state = await _load_state_promo_expiry(row, db)
-        if state is not None:
-            schedule_observation(row.id, state, redis=await get_redis())
-    except Exception as e:  # noqa: BLE001 — observation scheduling must never fail the approve
-        import logging
-        logging.getLogger(__name__).warning("[agent] could not schedule observation for %s: %s", row.id, e)
+    if applied:
+        # Schedule the outcome observation for when this action's promo expires —
+        # closes the cognitive loop (action → outcome → memory).
+        try:
+            from app.services.outcome_observer import schedule_observation
+            from app.core.redis import get_redis
+            state = await _load_state_promo_expiry(row, db)
+            if state is not None:
+                schedule_observation(row.id, state, redis=await get_redis())
+        except Exception as e:  # noqa: BLE001 — observation scheduling must never fail the approve
+            import logging
+            logging.getLogger(__name__).warning("[agent] could not schedule observation for %s: %s", row.id, e)
 
     return {"action": _to_schema(row).model_dump()}
 
@@ -170,17 +175,6 @@ def _default_discount(action_type: str) -> float:
     }.get(action_type, s.recovery_default_discount_percent)
 
 
-def _payload_discount(payload: dict, default: float, ceiling: float) -> float:
-    """Qwen's chosen discount (or the config default), floored above 0 so it stays
-    attributable and clamped to the merchant's max_discount_percent ceiling
-    (interceptor Layer 2) — never a magic hardcoded cap."""
-    try:
-        d = float(payload.get("discount_percent") or default)
-    except (TypeError, ValueError):
-        d = float(default)
-    return max(1.0, min(float(ceiling), d))
-
-
 def _payload_duration_ms(payload: dict, default_minutes: int | None = None) -> int:
     default_minutes = default_minutes or get_settings().agent_action_duration_minutes
     try:
@@ -190,14 +184,11 @@ def _payload_duration_ms(payload: dict, default_minutes: int | None = None) -> i
     return int(time.time() * 1000) + minutes * 60 * 1000
 
 
-async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db: AsyncSession) -> None:
-    """Create an attributable Promo in live state for a revenue action.
-
-    Targets the product Qwen identified in its tool call (payload["product_id"]).
-    Falls back to the first product if Qwen didn't specify one or the specified
-    product isn't in the live state.
-    """
-    from app.services import delta as delta_svc
+async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db: AsyncSession) -> bool:
+    """Apply a product-scoped discount promo. Returns False (and applies
+    nothing) if the interceptor's execution-time re-check blocks it — state
+    may have drifted unsafe (e.g. cost_price edited) since proposal."""
+    from app.services import delta as delta_svc, interceptor
     from app.services.profile import load_constraints
     from app.models.schemas import Promo
 
@@ -207,12 +198,7 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
             "[agent] %s: state not found for merchant %s — promo not applied",
             row.action_type, row.merchant_id,
         )
-        return
-
-    # Qwen's discount, floored >0 and clamped to the merchant's discount ceiling.
-    constraints = await load_constraints(db, row.merchant_id)
-    discount = _payload_discount(payload, _default_discount(row.action_type), constraints.max_discount_percent)
-    expires_at = _payload_duration_ms(payload)
+        return False
 
     # Use the product Qwen targeted. Fall back to first product if not specified
     # or not in state (e.g. product was deactivated between decision and approval).
@@ -220,12 +206,34 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
     if target_pid and target_pid in state.products:
         product_id = target_pid
     else:
-        product_id = list(state.products.keys())[0] if state.products else "all"
+        product_id = list(state.products.keys())[0] if state.products else None
         if target_pid:
             logger.info(
                 "[agent] %s: Qwen targeted product %s but it's not in state, falling back to %s",
                 row.action_type, target_pid, product_id,
             )
+    if product_id is None:
+        logger.warning("[agent] %s: no products in state — promo not applied", row.action_type)
+        return False
+
+    product = state.products[product_id]
+    constraints = await load_constraints(db, row.merchant_id)
+    payload_with_default = dict(payload)
+    payload_with_default.setdefault("discount_percent", _default_discount(row.action_type))
+    clamped_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
+        AgentActionType(row.action_type), payload_with_default,
+        cost_price=product.cost_price, price=product.price,
+        constraints=constraints, product_id=product_id,
+    )
+    if is_blocked:
+        logger.warning(
+            "[agent] %s blocked at execution for %s: %s",
+            row.action_type, row.merchant_id, constraint_check,
+        )
+        return False
+
+    discount = clamped_args["discount_percent"]
+    expires_at = _payload_duration_ms(payload)
 
     promo = Promo(
         id=row.promo_id,
@@ -237,18 +245,17 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
     )
     state.active_promos[row.promo_id] = promo
     await delta_svc.save_state(row.merchant_id, state)
-    logger.info("[agent] %s registered promo %s (%d%%) on product %s", row.action_type, row.promo_id, int(discount), product_id)
+    logger.info(
+        "[agent] %s registered promo %s (%d%%) on product %s",
+        row.action_type, row.promo_id, int(discount), product_id,
+    )
+    return True
 
 
-async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession) -> None:
-    """Set the merchant's active ORDER-LEVEL cart-recovery discount.
-
-    This is the correct shape for a cart-abandon recovery: it discounts the
-    shopper's existing cart total (applied in cart._apply_recovery), and leaves
-    every product on the browse grid at full price. It still carries this action's
-    promo_id so a checkout under the offer attributes to it in the dashboard.
-    """
-    from app.services import delta as delta_svc
+async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession) -> bool:
+    """Set the merchant's active ORDER-LEVEL cart-recovery discount. Returns
+    False if the interceptor's execution-time re-check blocks it."""
+    from app.services import delta as delta_svc, interceptor
     from app.services.profile import load_constraints
     from app.models.schemas import RecoveryOffer
 
@@ -258,33 +265,49 @@ async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession
             "[agent] recovery_offer: state not found for merchant %s — recovery not applied",
             row.merchant_id,
         )
-        return
+        return False
 
-    # Qwen chooses the depth; clamp to the merchant's discount ceiling (Layer 2).
     constraints = await load_constraints(db, row.merchant_id)
-    discount = _payload_discount(payload, _default_discount("recovery_offer"), constraints.max_discount_percent)
+    payload_with_default = dict(payload)
+    payload_with_default.setdefault("discount_percent", _default_discount("recovery_offer"))
+    clamped_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
+        AgentActionType.RECOVERY_OFFER, payload_with_default,
+        cost_price=0.0, price=0.0, constraints=constraints,
+    )
+    if is_blocked:
+        logger.warning(
+            "[agent] recovery_offer blocked at execution for %s: %s",
+            row.merchant_id, constraint_check,
+        )
+        return False
+
+    discount = clamped_args["discount_percent"]
+    expires_at = _payload_duration_ms(payload)
     state.recovery = RecoveryOffer(
         percent=discount,
         label=f"Complete your order — {int(discount)}% off",
-        expires_at=_payload_duration_ms(payload),
+        expires_at=expires_at,
         promo_id=row.promo_id,
         triggered_by="auto",
     )
     await delta_svc.save_state(row.merchant_id, state)
     logger.info("[agent] recovery_offer set order-level recovery %d%% (promo %s)", int(discount), row.promo_id)
+    return True
 
 
-async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
-    """Apply the action's payload to the live store state."""
+async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> bool:
+    """Apply the action's payload to the live store state. Returns False if
+    the interceptor's execution-time re-check blocked it — the caller must
+    NOT mark the action "executed" in that case."""
     from app.services import delta as delta_svc
 
     payload = row.payload or {}
 
     if row.action_type == "recovery_offer":
-        await _register_recovery(row, payload, db)
+        return await _register_recovery(row, payload, db)
 
     elif row.action_type in _PROMO_LABELS:
-        await _register_promo(row, _PROMO_LABELS[row.action_type], payload, db)
+        return await _register_promo(row, _PROMO_LABELS[row.action_type], payload, db)
 
     elif row.action_type == "layout_morph":
         state = await delta_svc.load_state(row.merchant_id)
@@ -297,6 +320,7 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
                 except ValueError:
                     pass
             await delta_svc.save_state(row.merchant_id, state)
+        return True
 
     elif row.action_type == "duplicate_merge":
         keep_id = payload.get("keep_product_id")
@@ -329,10 +353,12 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
                     "[agent] duplicate_merge: no matching products found for %s (already removed?)",
                     row.id,
                 )
+        return True
 
     # copy_rewrite and any unknown type — not a promo/layout action; log only.
     else:
         logger.info(f"[agent] action type {row.action_type} logged but not auto-applied")
+        return True
 
 
 async def _broadcast_state_update(merchant_id: str) -> None:
