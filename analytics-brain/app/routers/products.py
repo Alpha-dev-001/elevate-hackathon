@@ -469,7 +469,7 @@ async def approve_all_products(
 
 # ── Duplicate detection & catalog cleanup ──────────────────────────────────────
 
-from collections import defaultdict
+from app.services.duplicate_scan import group_by_primary_image
 from app.models.schemas import DeduplicateReport, DuplicateGroup
 
 
@@ -490,13 +490,7 @@ async def deduplicate_products(
     products = list(rows)
     total_scanned = len(products)
 
-    # Group by primary image URL (first image in the list).
-    by_image: dict[str, list[ProductDB]] = defaultdict(list)
-    for p in products:
-        if p.image_urls:
-            primary = p.image_urls[0]
-            if primary:
-                by_image[primary].append(p)
+    by_image = group_by_primary_image(products)
 
     auto_merged: list[DuplicateGroup] = []
     needs_review: list[DuplicateGroup] = []
