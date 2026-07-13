@@ -344,6 +344,13 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
             </p>
           )}
 
+          {/* Constraint check — Layer 2/3, only shown when something was clamped */}
+          {action.constraint_check && (
+            <p className="text-xs italic mb-4" style={{ color: 'var(--color-warning)' }}>
+              Constraint check: {action.constraint_check}
+            </p>
+          )}
+
           {/* Error */}
           {error && (
             <p className="text-xs mb-3 font-mono" style={{ color: 'var(--color-danger)' }}>
