@@ -113,8 +113,15 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
     if (isLoading) return
     setIsApproving(true)
     try {
-      await api.approveAction(action.id)
-      onApprove(action.id)
+      const { action: updated } = await api.approveAction(action.id)
+      if (updated.status === 'blocked_at_execution') {
+        // State drifted unsafe between proposal and approval (e.g. cost changed) —
+        // the interceptor's execution-time re-check blocked it. Keep the card
+        // visible and tell the merchant plainly; do NOT treat this as success.
+        showError('Blocked at approval — store conditions changed, this did not go live')
+      } else {
+        onApprove(action.id)
+      }
     } catch {
       showError('Action failed — try again')
     } finally {
@@ -341,6 +348,13 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
           {action.brand_check && (
             <p className="text-xs italic mb-4" style={{ color: 'var(--color-text-muted)' }}>
               Brand alignment: {action.brand_check}
+            </p>
+          )}
+
+          {/* Constraint check — Layer 2/3, only shown when something was clamped */}
+          {action.constraint_check && (
+            <p className="text-xs italic mb-4" style={{ color: 'var(--color-warning)' }}>
+              Constraint check: {action.constraint_check}
             </p>
           )}
 

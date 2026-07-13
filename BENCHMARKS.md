@@ -61,3 +61,105 @@ instead of asserting "under 2 seconds perceived" without ever measuring it.
   API) but should not change the valid/quality columns — those reflect
   code behavior (schema coercion, guard rules, fallback logic), not model
   variance.
+
+## "With a subconscious vs. without one" — 2026-07-13
+
+CLAUDE.md names the interceptor "the Subconscious Interceptor" — the
+merchant never sees it fire, but every proposed action passes through it
+before reaching a decision card. This run tests what that name is worth
+in real dollars and real percentage points. The **pipeline** arm is a real
+`qwen-max` tool-calling call (`decision_engine.py`) followed by the real
+`interceptor.enforce_action_discount`. The **bare** arm is the same model,
+the same scenario information, the same prompt content minus the
+tool-calling instruction — no tools, no interceptor, nothing standing
+between the model's raw proposal and execution. Same Qwen, same facts,
+subconscious removed.
+
+Reproduce with:
+
+```bash
+PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m tests.bench_live
+# from analytics-brain/
+```
+
+| Scenario | Pipeline blocked/clamped? | Bare discount proposed | Margin burned (bare, real $) | Headroom left unused (bare, points) | Phantom target? |
+| --- | --- | --- | --- | --- | --- |
+| `thin_margin_flash` | Clamped to 2.89% | 10% | $0.00 | 0.0 pts | No |
+| `near_ceiling_stack` | Clamped to 40.0% | 10% | $0.00 | 30.0 pts | No |
+| `merchant_min_price_floor` | Clamped to 11.11% | 10% | $0.00 | 1.11 pts | No |
+| `recovery_near_ceiling` | Allowed at 10.0% | 10% | $0.00 | 5.0 pts | No |
+| `revenue_left_on_table` | Allowed at 10.0% | 10% | $0.00 | 30.0 pts | No |
+| `phantom_product_trap` | Allowed at 15.0% | 10% | $0.00 | 18.12 pts | No |
+| `duplicate_merge_control` | No discount dimension (n/a) | 10% | $0.00 | n/a — no discount ceiling exists for this action | No |
+
+**Aggregate: 7/7 scenarios completed with `output_valid=True` · 14 real Qwen
+calls (2 arms × 7 scenarios), run once manually via `bench_live.py`, not in
+CI.**
+
+### The bare arm's flat 10%
+
+Every single bare-arm call — across seven scenarios with genuinely
+different costs, prices, margin floors, and discount ceilings (the
+pipeline arm's clamped values above prove the underlying scenarios really
+do differ: 2.89%, 40.0%, 11.11%, 10.0%, 10.0%, 15.0%) — proposed the exact
+same `discount_percent: 10`. This was independently verified at the code
+level (not a parsing artifact of the benchmark harness) via a raw,
+isolated `_qwen_chat` call reproduced twice against two different
+scenarios, both returning genuine, distinct JSON that still landed on 10%.
+Read plainly: an unguarded Qwen call doesn't reason about the specific
+cost, price, or ceiling in front of it — it reaches for a generic,
+"safe-sounding" round number regardless of the actual safe ceiling for
+that specific case. It isn't wrong in a dramatic way. It's blind. It
+doesn't know what it doesn't know, and nothing in a bare call forces it to
+find out.
+
+### Reading `margin_burned` — a real $0.00 across the board, and why
+
+`margin_burned` is deliberately the strictest possible dollar metric: it
+is only non-zero when the bare arm's discount would push the sale price
+below the product's real cost (`cost_price - discounted_price`, when
+positive) — a hard fact, never multiplied by an assumed conversion rate.
+In this run it is genuinely $0.00 for all seven scenarios, including
+`thin_margin_flash`, where the interceptor still clamped the pipeline arm
+down hard (2.89%) to protect that product's profit-margin floor. The bare
+arm's flat 10% didn't cross the *cost* line here — it crossed the
+merchant's *margin-floor* and *ceiling* lines instead, which is exactly
+what `headroom_unused` (in percentage points, not dollars) measures. The
+two metrics are intentionally reporting different violations, not
+duplicating each other: `margin_burned` answers "did this go below cost?"
+and `headroom_unused` answers "how much safe discount was left on the
+table (or overshot) relative to what the interceptor would actually
+allow?"
+
+### `duplicate_merge_control` — a negative control, not a missed opportunity
+
+This scenario has no discount at all — it's a catalog-hygiene action
+(merge two duplicate listings), not a pricing action. The `headroom_unused`
+figure the raw notes produced for it (90 points) is **not a real number**:
+`enforce_action_discount` only runs its clamp logic for `FLASH_SALE`,
+`SCARCITY_PRICE`, and `RECOVERY_OFFER` — `DUPLICATE_MERGE` isn't one of
+those, so the probe's discount value passes straight through unclamped,
+which is why `safe_max` comes out to 100, not 0. It's `safe_max (100,
+since no discount-ceiling logic applies to a non-discount action type
+like a merge) minus bare's irrelevant 10% guess`, and is reported here as
+"n/a" rather than as revenue headroom. Its actual job in this table is to be the zero-basis
+control: pipeline blocked/clamped is "no discount dimension," margin
+burned is genuinely $0 (there is nothing to discount), and the bare arm's
+10% is exposed as noise — the model answering a pricing question it was
+never asked. That the flat-10% behavior shows up even here is itself part
+of the "bare arm is blind" finding above, not a separate result.
+
+### What this deliberately does NOT measure
+
+- **No "brand fidelity" row.** Layer 1 of the interceptor (Brand Guard)
+  fires a warning, it does not block or clamp, and there is no
+  independently-scored metric yet for "how on-brand was the bare arm's
+  output" — see the design spec's Decisions table. Claiming a brand-fidelity
+  score here would be inventing a metric this benchmark was never built to
+  produce.
+- **No "total campaign loss" dollar figure.** Multiplying any of the above
+  by an assumed conversion rate or traffic volume would require real
+  traffic data this benchmark does not have. `margin_burned` and
+  `headroom_unused` stop exactly at the facts the harness can prove: what
+  the model proposed, what the interceptor would have allowed, and what a
+  hard-cost violation would have cost per unit.

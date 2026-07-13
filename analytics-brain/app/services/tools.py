@@ -231,7 +231,7 @@ def narrative_from_tool(
         mins = args.get("duration_minutes", 1440)
         hours = round(mins / 60, 1)
         return {
-            "title": f"Flash Sale: {d}% off {name}",
+            "title": f"Flash Sale: {d:g}% off {name}",
             "description": f"{hours}-hour flash sale to capture {short_anomaly}",
             "trigger": anomaly_desc[:200],
             "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
@@ -240,7 +240,7 @@ def narrative_from_tool(
     if tool_name == "propose_scarcity_price":
         return {
             "title": f"Scarcity Price: {name} in high demand",
-            "description": f"{d}% scarcity discount to protect margin on low stock",
+            "description": f"{d:g}% scarcity discount to protect margin on low stock",
             "trigger": anomaly_desc[:200],
             "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
         }
@@ -256,7 +256,7 @@ def narrative_from_tool(
 
     if tool_name == "propose_recovery_offer":
         return {
-            "title": f"Recovery Offer: {d}% off cart",
+            "title": f"Recovery Offer: {d:g}% off cart",
             "description": f"Order-level discount to recover {short_anomaly}",
             "trigger": anomaly_desc[:200],
             "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
