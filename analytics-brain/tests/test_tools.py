@@ -17,8 +17,8 @@ from app.models.schemas import AgentActionType
 class TestToolDefinitions:
     """Every tool must be a valid OpenAI-compatible function definition."""
 
-    def test_six_tools_defined(self):
-        assert len(DECISION_TOOLS) == 6
+    def test_seven_tools_defined(self):
+        assert len(DECISION_TOOLS) == 7
 
     def test_all_tools_have_required_fields(self):
         for tool in DECISION_TOOLS:
@@ -74,6 +74,17 @@ class TestToolDefinitions:
         required = tool["function"]["parameters"]["required"]
         assert "keep_product_id" in required
         assert "remove_product_ids" in required
+
+    def test_feature_product_has_product_id_and_label(self):
+        """propose_feature_product tool must produce product_id +
+        featured_label (what agent.py's _execute_payload reads)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_feature_product")
+        props = tool["function"]["parameters"]["properties"]
+        assert "product_id" in props
+        assert "featured_label" in props
+        required = tool["function"]["parameters"]["required"]
+        assert "product_id" in required
+        assert "featured_label" in required
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +161,16 @@ class TestNarrativeFromTool:
         assert "Duplicate Cleanup" in result["title"]
         assert "Alexander McQueen Logo Strap Slides" in result["title"]
         assert "2" in result["description"]  # 2 removed
+
+    def test_feature_product_narrative(self):
+        result = narrative_from_tool(
+            "propose_feature_product",
+            {"product_id": "prod_new1", "featured_label": "New Arrival"},
+            "Leather Slides",
+            '"Leather Slides" ($40.00) enters "footwear" — 5 orders there in the last 168h, category averages $40.00',
+        )
+        assert "Leather Slides" in result["title"]
+        assert "New Arrival" in result["description"]
 
     def test_unknown_tool_fallback(self):
         result = narrative_from_tool(
@@ -228,3 +249,6 @@ class TestToolMapping:
 
     def test_duplicate_merge_maps_correctly(self):
         assert TOOL_TO_ACTION_TYPE["propose_duplicate_merge"] == AgentActionType.DUPLICATE_MERGE
+
+    def test_feature_product_maps_correctly(self):
+        assert TOOL_TO_ACTION_TYPE["propose_feature_product"] == AgentActionType.FEATURE_PRODUCT

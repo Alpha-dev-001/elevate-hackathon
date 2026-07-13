@@ -167,6 +167,30 @@ DECISION_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_feature_product",
+            "description": (
+                "Spotlight a newly-added product to customers likely to "
+                "buy it, based on how its category has been performing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_id": {
+                        "type": "string",
+                        "description": "ID of the new product to feature",
+                    },
+                    "featured_label": {
+                        "type": "string",
+                        "description": "Short badge text in brand voice, e.g. 'New Arrival' or 'Trending Pick'",
+                    },
+                },
+                "required": ["product_id", "featured_label"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -180,6 +204,7 @@ TOOL_TO_ACTION_TYPE: dict[str, AgentActionType] = {
     "propose_recovery_offer": AgentActionType.RECOVERY_OFFER,
     "propose_copy_rewrite": AgentActionType.COPY_REWRITE,
     "propose_duplicate_merge": AgentActionType.DUPLICATE_MERGE,
+    "propose_feature_product": AgentActionType.FEATURE_PRODUCT,
 }
 
 # ---------------------------------------------------------------------------
@@ -251,6 +276,15 @@ def narrative_from_tool(
         return {
             "title": f"Duplicate Cleanup: {name}",
             "description": f"Merge {n_removed} duplicate listing(s) into one — keeps the most complete version",
+            "trigger": anomaly_desc[:200],
+            "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
+        }
+
+    if tool_name == "propose_feature_product":
+        label = args.get("featured_label", "New Arrival")
+        return {
+            "title": f"Feature: {name}",
+            "description": f'Spotlight "{name}" as "{label}" — likely to convert based on category performance',
             "trigger": anomaly_desc[:200],
             "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
         }

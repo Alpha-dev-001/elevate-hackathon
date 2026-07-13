@@ -81,6 +81,7 @@ class AgentActionType(str, Enum):
     RECOVERY_OFFER = "recovery_offer"
     COPY_REWRITE = "copy_rewrite"
     DUPLICATE_MERGE = "duplicate_merge"
+    FEATURE_PRODUCT = "feature_product"
 
 class AgentActionStatus(str, Enum):
     PENDING = "pending"
