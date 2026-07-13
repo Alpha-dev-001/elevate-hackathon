@@ -62,7 +62,7 @@ Here's the feature-to-criterion map, not just a claim:
 
 | Judging criterion | Weight | Where Elevate proves it |
 | --- | --- | --- |
-| Technical Depth & Engineering | 30% | 2 models, **7 distinct Qwen call types**, native tool-calling (5 typed tools), 3-layer interceptor, Redis + Postgres two-layer state, 157 tests |
+| Technical Depth & Engineering | 30% | 2 models, **7 distinct Qwen call types**, native tool-calling (6 typed tools), 3-layer interceptor, Redis + Postgres two-layer state, 157 tests |
 | Innovation & AI Creativity | 30% | Qwen authors its own brand guard rules at creation time — not developer-written safety rules. LayoutDSL gives every store a genuinely distinct layout, not a template swap |
 | Problem Value & Impact | 25% | Every independent brand deserves a store that looks like *them*, not a Shopify theme — and the store improves itself without a merchant hiring a CRO agency |
 | Presentation & Documentation | 15% | Architecture diagram ([docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)), full test suite ([docs/TESTING.md](./docs/TESTING.md)), technical deep dive ([docs/TECHNICAL-DEEP-DIVE.md](./docs/TECHNICAL-DEEP-DIVE.md)) |
@@ -190,7 +190,7 @@ Two Qwen models. Each chosen for what it does best. No routing complexity.
 4. **Custom CSS** — scoped micro-interactions (sanitized before storage)
 5. **Product vision** (VL) — identify + describe from photo, price anchored
 6. **Batched descriptions** — 20 products per call, parallelized chunks
-7. **Decision cycles** — native tool-calling (5 typed tools), memory-informed
+7. **Decision cycles** — native tool-calling (6 typed tools), memory-informed
 
 **Vision Fingerprinting** — before any image reaches Qwen, a perceptual
 hash (aHash, 64-bit) runs client-side in `fingerprint.ts`. Near-duplicate
