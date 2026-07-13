@@ -187,3 +187,57 @@ async def run_store_review_now(
     from app.services.store_review import run_store_review
     redis = await get_redis()
     return await run_store_review(merchant.id, db, redis)
+
+
+# ── Decision log (full autopilot audit trail, all 6 triggers) ───────────────────
+
+@router.get("/decisions")
+async def get_decisions(
+    limit: int = 20,
+    offset: int = 0,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Paginated history of every autopilot decision for this store — the
+    full audit trail of what Qwen proposed and how the merchant responded.
+    Resolved actions only make sense here in roughly reverse-chronological
+    order; a still-pending action belongs on the terminal's live feed, not
+    this historical log, but is not excluded — it'll simply show status
+    'pending' until acted on."""
+    from sqlalchemy import select, func
+    from app.models.db_models import AgentActionDB
+
+    limit = max(1, min(100, limit))
+    offset = max(0, offset)
+
+    total = await db.scalar(
+        select(func.count()).select_from(AgentActionDB)
+        .where(AgentActionDB.merchant_id == merchant.id)
+    )
+
+    rows = (await db.execute(
+        select(AgentActionDB)
+        .where(AgentActionDB.merchant_id == merchant.id)
+        .order_by(AgentActionDB.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )).scalars().all()
+
+    return {
+        "decisions": [
+            {
+                "id": r.id,
+                "action_type": r.action_type,
+                "title": r.title,
+                "description": r.description,
+                "trigger": r.trigger,
+                "reasoning": r.reasoning or "",
+                "status": r.status,
+                "created_at": r.created_at,
+                "approved_at": r.approved_at,
+                "executed_at": r.executed_at,
+            }
+            for r in rows
+        ],
+        "total": total or 0,
+    }
