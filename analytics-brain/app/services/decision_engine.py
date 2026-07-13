@@ -239,18 +239,39 @@ async def run_decision_cycle(
     # Qwen's reasoning comes from the message content (alongside tool_calls)
     reasoning = (message.get("content") or "")[:1000]
 
-    # Narrative fields templated from tool call + context
     # Use the product Qwen actually targeted, not just the first in the list
     # propose_duplicate_merge uses keep_product_id, not product_id — same
     # fallback purpose (which product's name goes in the option card title).
     targeted_pid = tool_args.get("product_id") or tool_args.get("keep_product_id")
-    targeted_product_name = None
+    targeted_product = None
     if targeted_pid:
         for p in products:
             if p.id == targeted_pid:
-                targeted_product_name = p.name
+                targeted_product = p
                 break
+    targeted_product_name = targeted_product.name if targeted_product else None
     product_name_for_narrative = targeted_product_name or (products[0].name if products else None)
+
+    # Interceptor — real Layer 2/3 primitives, before this ever becomes an
+    # option card. Declining here mirrors "Qwen declined to propose an action".
+    from app.services import interceptor
+    from app.services.profile import load_constraints
+    constraints = await load_constraints(db, merchant_id)
+    cost_price = targeted_product.cost_price if targeted_product else 0.0
+    price = targeted_product.price if targeted_product else 0.0
+    tool_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
+        action_type_enum, tool_args,
+        cost_price=cost_price, price=price, constraints=constraints,
+        product_id=targeted_pid or "",
+    )
+    if is_blocked:
+        logger.info(
+            f"[decision] interceptor blocked {tool_name} for {merchant_id}: {constraint_check}"
+        )
+        return None
+
+    # Narrative fields templated from tool call + context — reflects the
+    # already-clamped tool_args, so the option card shows the real number.
     narrative = narrative_from_tool(
         tool_name, tool_args, product_name_for_narrative, anomaly_desc, brand_voice
     )
@@ -277,6 +298,7 @@ async def run_decision_cycle(
         estimated_confidence=0.75,  # tool calling = high confidence in structured output
         payload=tool_args,  # tool args become the execution payload directly
         brand_check=narrative["brand_check"][:500],
+        constraint_check=constraint_check,
         status="pending",
         created_at=now,
         trigger_description=anomaly_desc[:1000],
@@ -297,6 +319,7 @@ async def run_decision_cycle(
         estimated_confidence=action_db.estimated_confidence,
         payload=action_db.payload,
         brand_check=action_db.brand_check,
+        constraint_check=action_db.constraint_check,
         status=AgentActionStatus(action_db.status),
         created_at=action_db.created_at,
     )
