@@ -164,10 +164,9 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
   }
 
   function handleUndo() {
-    if (undoTimerRef.current) {
-      clearTimeout(undoTimerRef.current)
-      undoTimerRef.current = null
-    }
+    if (!undoTimerRef.current) return // timer already fired, commit in progress — nothing to undo
+    clearTimeout(undoTimerRef.current)
+    undoTimerRef.current = null
     setPendingUndo(false)
   }
 
@@ -196,10 +195,15 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
           </p>
           <motion.button
             onClick={handleUndo}
+            disabled={isDismissing}
             whileTap={{ scale: reduced ? 1 : 0.96 }}
             transition={{ duration: microDuration }}
-            className="text-sm font-bold cursor-pointer px-3 py-1.5 rounded-lg"
-            style={{ color: 'var(--color-accent)', border: '1px solid var(--color-accent)' }}
+            className="text-sm font-bold cursor-pointer px-3 py-1.5 rounded-lg disabled:cursor-not-allowed"
+            style={{
+              color: 'var(--color-accent)',
+              border: '1px solid var(--color-accent)',
+              opacity: isDismissing ? 0.7 : 1,
+            }}
           >
             Undo
           </motion.button>

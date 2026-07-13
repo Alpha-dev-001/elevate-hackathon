@@ -100,4 +100,34 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
 
     await waitFor(() => expect(dismissAction).toHaveBeenCalledWith('act_1'))
   })
+
+  it('Undo is a no-op once the commit is already in flight — no misleading restore', async () => {
+    const onDismiss = vi.fn()
+    const user = userEvent.setup({ delay: null })
+    let resolveDismiss: (v: unknown) => void = () => {}
+    dismissAction.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveDismiss = resolve }),
+    )
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} />)
+    await user.click(screen.getByText('Dismiss'))
+
+    // Fire the undo-window timer — commitDismiss() starts, dismissAction is
+    // in flight but its promise has not resolved yet.
+    vi.advanceTimersByTime(5100)
+    await waitFor(() => expect(dismissAction).toHaveBeenCalledWith('act_1'))
+
+    // The Undo button must reflect that the commit already started.
+    const undoBtn = screen.getByText('Undo') as HTMLButtonElement
+    expect(undoBtn.disabled).toBe(true)
+
+    // Clicking it must not resurrect the normal card state — that would be
+    // the misleading "Undo worked" UI the finding describes.
+    await user.click(undoBtn)
+    expect(screen.queryByText('Dismiss')).toBeNull()
+    expect(onDismiss).not.toHaveBeenCalled()
+
+    // The in-flight dismiss still completes regardless of the click.
+    resolveDismiss({ action: {} })
+    await waitFor(() => expect(onDismiss).toHaveBeenCalledWith('act_1'))
+  })
 })
