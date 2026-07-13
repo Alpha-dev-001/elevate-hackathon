@@ -41,8 +41,9 @@ mcp = FastMCP(
         "elevate_run_decision_cycle to trigger Qwen's decision-making from "
         "a described anomaly, elevate_run_store_review to trigger it "
         "proactively from real catalog performance instead (no anomaly "
-        "needed), and elevate_approve_action / elevate_dismiss_action to "
-        "respond to pending agent proposals."
+        "needed), elevate_run_duplicate_scan to check for duplicate "
+        "product listings specifically, and elevate_approve_action / "
+        "elevate_dismiss_action to respond to pending agent proposals."
     ),
 )
 
@@ -341,6 +342,56 @@ async def elevate_get_terminal_feed(merchant_id: str, limit: int = 10) -> str:
             "merchant_id": mid,
             "count": len(rows),
             "actions": [_action_row_to_dict(r) for r in rows],
+        }, indent=2, default=str)
+
+
+# ─── Tool 6: Run Duplicate Scan ──────────────────────────────────────────────
+
+
+@mcp.tool()
+async def elevate_run_duplicate_scan(merchant_id: str) -> str:
+    """Trigger Elevate's duplicate-detection scan for a store.
+
+    Checks for duplicate product listings — first a free exact-image-URL
+    match, then (only if that finds nothing) one narrow Qwen call for
+    semantic duplicates (same item, different photos). All-Qwen-generated
+    exact-URL duplicates are silently auto-resolved with no card; a
+    merchant-written or semantic duplicate group runs through the same
+    decision cycle as every other trigger — same tools, same interceptor,
+    same memory loop. Returns no_action when the catalog looks clean or a
+    decision is already pending; that is a correct, quiet outcome, not a
+    failure.
+
+    Args:
+        merchant_id: The merchant's UUID or store slug.
+    """
+    async with await _get_db_session() as db:
+        mid = await _resolve_merchant(db, merchant_id)
+        if not mid:
+            return json.dumps({"error": "Store not found", "merchant_id": merchant_id})
+
+        from app.services.duplicate_scan import run_duplicate_scan
+
+        redis = await get_redis()
+        action = await run_duplicate_scan(mid, db, redis)
+
+        if action is None:
+            return json.dumps({
+                "merchant_id": mid,
+                "result": "no_action",
+                "message": (
+                    "No duplicate group found — the catalog looks clean, "
+                    "the only duplicates found were auto-resolved silently, "
+                    "the best candidate is currently suppressed after a "
+                    "recent dismissal, or a decision is already pending "
+                    "for this store."
+                ),
+            })
+
+        return json.dumps({
+            "merchant_id": mid,
+            "result": "action_proposed",
+            "action": action.model_dump(),
         }, indent=2, default=str)
 
 
