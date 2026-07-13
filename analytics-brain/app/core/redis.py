@@ -83,6 +83,13 @@ class Keys:
         """Per-call Qwen usage log — capped list, newest first."""
         return f"elevate:{merchant_id}:qwen_usage"
 
+    @staticmethod
+    def duplicate_dismissed(merchant_id: str, group_hash: str) -> str:
+        """Suppression marker — a dismissed duplicate-merge proposal for this
+        exact group of product_ids is blocked from re-firing until this key
+        expires (DUPLICATE_DISMISS_TTL_SECONDS, default 7 days)."""
+        return f"elevate:{merchant_id}:dup_dismissed:{group_hash}"
+
 
 # ─── TTLs (seconds) ───────────────────────────────────────────────────────────
 

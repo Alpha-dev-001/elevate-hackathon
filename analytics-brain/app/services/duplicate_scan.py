@@ -75,3 +75,20 @@ def _duplicate_group_hash(product_ids: list[str]) -> str:
     that partial case. Accepted: re-proposing the leftover member next tick
     is arguably correct (it IS still an unresolved duplicate), not a bug."""
     return hashlib.sha1(",".join(sorted(product_ids)).encode()).hexdigest()[:16]
+
+
+async def suppress_duplicate_group(merchant_id: str, product_ids: list[str], redis) -> None:
+    """Called on dismiss (see agent.py:dismiss_action) — blocks this exact
+    group from re-proposing for DUPLICATE_DISMISS_TTL_SECONDS. Not
+    permanent: a single dismiss (possibly a misclick) must not blacklist a
+    group forever — see the frontend confirm/undo snackbar (OptionCard.tsx)
+    for the other half of that protection."""
+    from app.core.redis import Keys
+    key = Keys.duplicate_dismissed(merchant_id, _duplicate_group_hash(product_ids))
+    await redis.set(key, "1", ex=DUPLICATE_DISMISS_TTL_SECONDS)
+
+
+async def _is_suppressed(merchant_id: str, product_ids: list[str], redis) -> bool:
+    from app.core.redis import Keys
+    key = Keys.duplicate_dismissed(merchant_id, _duplicate_group_hash(product_ids))
+    return bool(await redis.get(key))
