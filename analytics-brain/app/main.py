@@ -61,6 +61,7 @@ _INLINE_PATCHES = [
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR DEFAULT ''",
     "ALTER TABLE orders ADD COLUMN IF NOT EXISTS updated_at BIGINT DEFAULT 0",
     "ALTER TABLE brand_profiles ADD COLUMN IF NOT EXISTS brand_tokens JSONB",
+    "ALTER TABLE agent_actions ADD COLUMN IF NOT EXISTS constraint_check VARCHAR DEFAULT ''",
 ]
 
 # migrations/*.sql live one level up from app/ (copied into the image via COPY . .)

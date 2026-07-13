@@ -465,7 +465,7 @@ export const AgentActionTypeSchema = z.enum([
 ])
 
 export const AgentActionStatusSchema = z.enum([
-  'pending', 'approved', 'dismissed', 'executed',
+  'pending', 'approved', 'dismissed', 'executed', 'blocked_at_execution',
 ])
 
 export const AgentActionSchema = z.object({
@@ -480,6 +480,7 @@ export const AgentActionSchema = z.object({
   estimated_confidence: z.number(),
   payload: z.record(z.any()),
   brand_check: z.string(),
+  constraint_check: z.string().default(''),
   reasoning: z.string().default(''),
   status: AgentActionStatusSchema,
   created_at: z.number(),

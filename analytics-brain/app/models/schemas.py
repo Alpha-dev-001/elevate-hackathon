@@ -87,6 +87,7 @@ class AgentActionStatus(str, Enum):
     APPROVED = "approved"
     DISMISSED = "dismissed"
     EXECUTED = "executed"
+    BLOCKED_AT_EXECUTION = "blocked_at_execution"
 
 
 # ─── 1. The Eyes: qwen-vl-max output ─────────────────────────────────────────
@@ -503,6 +504,7 @@ class AgentAction(BaseModel):
     estimated_confidence: float
     payload: dict[str, Any]
     brand_check: str
+    constraint_check: str = ""
     reasoning: str = ""
     status: AgentActionStatus = AgentActionStatus.PENDING
     created_at: int
