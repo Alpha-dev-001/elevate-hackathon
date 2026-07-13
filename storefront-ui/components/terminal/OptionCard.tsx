@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api } from '@/lib/api'
 import { IconBolt } from '@/components/icons'
@@ -8,6 +8,11 @@ import type { AgentAction } from '@/types/schemas'
 
 // ── Pending action TTL (must match backend config: pending_action_ttl_seconds) ─
 const PENDING_ACTION_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
+// ── Dismiss-confirm window for duplicate_merge only (must exceed nothing on
+// the backend — this is purely client-side, the real dismiss call is just
+// delayed until this elapses) ───────────────────────────────────────────────
+const UNDO_WINDOW_MS = 5000
 
 // ── Reduced-motion hook ──────────────────────────────────────────────────────
 
@@ -33,11 +38,12 @@ interface ActionTypeMeta {
 }
 
 const ACTION_TYPE_META: Record<string, ActionTypeMeta> = {
-  flash_sale:    { label: 'Flash Sale',       badgeBg: 'var(--color-warning)', badgeText: '#0A0A0B' },
-  layout_morph:  { label: 'Layout Shift',     badgeBg: 'var(--color-accent)',  badgeText: '#0A0A0B' },
-  recovery_offer:{ label: 'Win-Back Offer',   badgeBg: '#3B82F6',              badgeText: '#ffffff' },
-  scarcity_price:{ label: 'Scarcity Pricing', badgeBg: '#F97316',              badgeText: '#ffffff' },
-  copy_rewrite:  { label: 'Copy Rewrite',     badgeBg: '#8B5CF6',              badgeText: '#ffffff' },
+  flash_sale:      { label: 'Flash Sale',       badgeBg: 'var(--color-warning)', badgeText: '#0A0A0B' },
+  layout_morph:    { label: 'Layout Shift',     badgeBg: 'var(--color-accent)',  badgeText: '#0A0A0B' },
+  recovery_offer:  { label: 'Win-Back Offer',   badgeBg: '#3B82F6',              badgeText: '#ffffff' },
+  scarcity_price:  { label: 'Scarcity Pricing', badgeBg: '#F97316',              badgeText: '#ffffff' },
+  copy_rewrite:    { label: 'Copy Rewrite',     badgeBg: '#8B5CF6',              badgeText: '#ffffff' },
+  duplicate_merge: { label: 'Duplicate Cleanup',badgeBg: '#22C55E',              badgeText: '#ffffff' },
 }
 
 function getTypeMeta(actionType: string): ActionTypeMeta {
@@ -71,6 +77,14 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
   const [isDismissing, setIsDismissing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
+  const [pendingUndo, setPendingUndo] = useState(false)
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
+    }
+  }, [])
 
   // Track card age for TTL expiry display
   const [ageSeconds, setAgeSeconds] = useState(() =>
@@ -108,8 +122,36 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
     }
   }
 
+  async function commitDismiss() {
+    setIsDismissing(true)
+    try {
+      await api.dismissAction(action.id)
+      onDismiss(action.id)
+    } catch {
+      showError('Dismiss failed — try again')
+      setPendingUndo(false) // restore the card so the merchant can retry
+    } finally {
+      setIsDismissing(false)
+    }
+  }
+
   async function handleDismiss() {
-    if (isLoading) return
+    if (isLoading || pendingUndo) return
+
+    // duplicate_merge dismissals set a week-long suppression on the backend —
+    // a misclick shouldn't silently create that blind spot. Every other
+    // action type (and an already-expired duplicate_merge card, which has
+    // nothing left to suppress against) keeps today's instant dismiss.
+    const needsConfirm = action.action_type === 'duplicate_merge' && !isExpired
+    if (needsConfirm) {
+      setPendingUndo(true)
+      undoTimerRef.current = setTimeout(() => {
+        undoTimerRef.current = null
+        commitDismiss()
+      }, UNDO_WINDOW_MS)
+      return
+    }
+
     setIsDismissing(true)
     try {
       await api.dismissAction(action.id)
@@ -119,6 +161,14 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
     } finally {
       setIsDismissing(false)
     }
+  }
+
+  function handleUndo() {
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current)
+      undoTimerRef.current = null
+    }
+    setPendingUndo(false)
   }
 
   return (
@@ -139,189 +189,208 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
         padding: '20px',
       }}
     >
-      {/* Action type badge + age */}
-      <div className="flex items-center gap-2 mb-3">
-        <span
-          className="text-xs font-mono font-semibold px-2 py-0.5 rounded"
-          style={{
-            background: isExpired ? 'var(--color-border)' : meta.badgeBg,
-            color: isExpired ? 'var(--color-text-muted)' : meta.badgeText,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-          }}
-        >
-          {isExpired ? 'Expired' : meta.label}
-        </span>
-        <span
-          className="text-[10px] font-mono"
-          style={{ color: isExpired ? 'var(--color-danger)' : 'var(--color-text-muted)' }}
-        >
-          ⏱ {ageLabel}
-        </span>
-      </div>
-
-      {/* Expired signal banner */}
-      {isExpired && (
-        <p className="text-xs font-mono mb-3 px-2 py-1.5 rounded" style={{
-          background: 'rgba(255, 107, 107, 0.1)',
-          color: 'var(--color-danger)',
-          border: '1px solid rgba(255, 107, 107, 0.2)',
-        }}>
-          Signal expired — the anomaly that triggered this has likely resolved. Dismiss or approve anyway.
-        </p>
-      )}
-
-      {/* Trigger */}
-      <p className="text-xs font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-warning)' }}>
-        <IconBolt size={13} /> {action.trigger}
-      </p>
-
-      {/* Targeted product — show when Qwen's tool call identified a specific product */}
-      {action.payload?.product_id && (
-        <p className="text-[10px] font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
-          <span
-            className="px-1.5 py-0.5 rounded"
-            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+      {pendingUndo ? (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-mono" style={{ color: 'var(--color-text-muted)' }}>
+            Duplicate merge dismissed
+          </p>
+          <motion.button
+            onClick={handleUndo}
+            whileTap={{ scale: reduced ? 1 : 0.96 }}
+            transition={{ duration: microDuration }}
+            className="text-sm font-bold cursor-pointer px-3 py-1.5 rounded-lg"
+            style={{ color: 'var(--color-accent)', border: '1px solid var(--color-accent)' }}
           >
-            ⎯ Target: {String(action.payload.product_id).slice(0, 12)}
-          </span>
-        </p>
-      )}
+            Undo
+          </motion.button>
+        </div>
+      ) : (
+        <>
+          {/* Action type badge + age */}
+          <div className="flex items-center gap-2 mb-3">
+            <span
+              className="text-xs font-mono font-semibold px-2 py-0.5 rounded"
+              style={{
+                background: isExpired ? 'var(--color-border)' : meta.badgeBg,
+                color: isExpired ? 'var(--color-text-muted)' : meta.badgeText,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {isExpired ? 'Expired' : meta.label}
+            </span>
+            <span
+              className="text-[10px] font-mono"
+              style={{ color: isExpired ? 'var(--color-danger)' : 'var(--color-text-muted)' }}
+            >
+              ⏱ {ageLabel}
+            </span>
+          </div>
 
-      {/* Title */}
-      <h3
-        className="text-base font-bold mb-1 leading-snug"
-        style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
-      >
-        {action.title}
-      </h3>
+          {/* Expired signal banner */}
+          {isExpired && (
+            <p className="text-xs font-mono mb-3 px-2 py-1.5 rounded" style={{
+              background: 'rgba(255, 107, 107, 0.1)',
+              color: 'var(--color-danger)',
+              border: '1px solid rgba(255, 107, 107, 0.2)',
+            }}>
+              Signal expired — the anomaly that triggered this has likely resolved. Dismiss or approve anyway.
+            </p>
+          )}
 
-      {/* Description */}
-      <p className="text-sm mb-3" style={{ color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
-        {action.description}
-      </p>
+          {/* Trigger */}
+          <p className="text-xs font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-warning)' }}>
+            <IconBolt size={13} /> {action.trigger}
+          </p>
 
-      {/* Qwen's Reasoning — collapsible chain-of-thought */}
-      {action.reasoning && (
-        <div className="mb-4">
-          <button
-            onClick={() => setShowReasoning(!showReasoning)}
-            className="text-[10px] font-mono uppercase tracking-widest flex items-center gap-1.5 transition-colors"
-            style={{ color: showReasoning ? 'var(--color-accent)' : 'var(--color-text-muted)' }}
-          >
-            <span style={{ transform: showReasoning ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s', display: 'inline-block' }}>▸</span>
-            ✦ Qwen&apos;s reasoning
-          </button>
-          <AnimatePresence>
-            {showReasoning && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-                className="overflow-hidden"
+          {/* Targeted product — show when Qwen's tool call identified a specific product */}
+          {action.payload?.product_id && (
+            <p className="text-[10px] font-mono mb-3 flex items-center gap-1.5" style={{ color: 'var(--color-text-muted)' }}>
+              <span
+                className="px-1.5 py-0.5 rounded"
+                style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
               >
-                <p
-                  className="text-xs font-mono leading-relaxed mt-2 pl-3 border-l-2"
-                  style={{
-                    color: 'var(--color-accent)',
-                    borderColor: 'var(--color-accent)',
-                    opacity: 0.85,
-                  }}
-                >
-                  {action.reasoning}
-                </p>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+                ⎯ Target: {String(action.payload.product_id).slice(0, 12)}
+              </span>
+            </p>
+          )}
+
+          {/* Title */}
+          <h3
+            className="text-base font-bold mb-1 leading-snug"
+            style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
+          >
+            {action.title}
+          </h3>
+
+          {/* Description */}
+          <p className="text-sm mb-3" style={{ color: 'var(--color-text-muted)', lineHeight: '1.5' }}>
+            {action.description}
+          </p>
+
+          {/* Qwen's Reasoning — collapsible chain-of-thought */}
+          {action.reasoning && (
+            <div className="mb-4">
+              <button
+                onClick={() => setShowReasoning(!showReasoning)}
+                className="text-[10px] font-mono uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                style={{ color: showReasoning ? 'var(--color-accent)' : 'var(--color-text-muted)' }}
+              >
+                <span style={{ transform: showReasoning ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s', display: 'inline-block' }}>▸</span>
+                ✦ Qwen&apos;s reasoning
+              </button>
+              <AnimatePresence>
+                {showReasoning && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <p
+                      className="text-xs font-mono leading-relaxed mt-2 pl-3 border-l-2"
+                      style={{
+                        color: 'var(--color-accent)',
+                        borderColor: 'var(--color-accent)',
+                        opacity: 0.85,
+                      }}
+                    >
+                      {action.reasoning}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* GMV Impact */}
+          <p className="text-sm font-semibold mb-3" style={{ color: 'var(--color-accent)' }}>
+            Est. Revenue Impact: +${action.estimated_gmv.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          </p>
+
+          {/* Confidence bar */}
+          <div className="mb-3">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                Confidence
+              </span>
+              <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-accent)' }}>
+                {confidencePct}%
+              </span>
+            </div>
+            <div
+              className="h-1 rounded-full overflow-hidden"
+              style={{ background: 'var(--color-border)' }}
+            >
+              <motion.div
+                className="h-full rounded-full"
+                initial={{ width: 0 }}
+                animate={{ width: `${confidencePct}%` }}
+                transition={{ duration: reduced ? 0 : 0.6, ease: [0.4, 0, 0.2, 1], delay: delay + 0.1 }}
+                style={{ background: 'var(--color-accent)' }}
+              />
+            </div>
+          </div>
+
+          {/* Brand alignment */}
+          {action.brand_check && (
+            <p className="text-xs italic mb-4" style={{ color: 'var(--color-text-muted)' }}>
+              Brand alignment: {action.brand_check}
+            </p>
+          )}
+
+          {/* Error */}
+          {error && (
+            <p className="text-xs mb-3 font-mono" style={{ color: 'var(--color-danger)' }}>
+              {error}
+            </p>
+          )}
+
+          {/* Buttons */}
+          <div className="flex gap-3">
+            <motion.button
+              onClick={handleApprove}
+              disabled={isLoading}
+              whileTap={{ scale: reduced ? 1 : 0.96 }}
+              whileHover={{ opacity: isLoading ? 0.7 : 0.9 }}
+              transition={{ duration: microDuration }}
+              className="flex-1 py-2.5 rounded-lg text-sm font-bold cursor-pointer disabled:cursor-not-allowed"
+              style={{
+                background: isExpired
+                  ? 'transparent'
+                  : isLoading ? 'var(--color-accent-dim)' : 'var(--color-accent)',
+                border: isExpired ? '1px solid var(--color-border)' : 'none',
+                color: isExpired ? 'var(--color-text-muted)' : 'var(--color-bg)',
+                transition: `background ${microDuration}s, opacity ${microDuration}s`,
+                opacity: isLoading ? 0.7 : 1,
+              }}
+            >
+              {isApproving ? 'Applying…' : isExpired ? 'Approve anyway' : 'Approve'}
+            </motion.button>
+
+            <motion.button
+              onClick={handleDismiss}
+              disabled={isLoading}
+              whileTap={{ scale: reduced ? 1 : 0.96 }}
+              whileHover={{ borderColor: isExpired ? 'var(--color-danger)' : 'var(--color-accent)' }}
+              transition={{ duration: microDuration }}
+              className="px-5 py-2.5 rounded-lg text-sm cursor-pointer disabled:cursor-not-allowed"
+              style={{
+                border: `1px solid ${isExpired ? 'var(--color-danger)' : 'var(--color-border)'}`,
+                color: isExpired
+                  ? 'var(--color-danger)'
+                  : isLoading ? 'var(--color-text-muted)' : 'var(--color-text)',
+                background: isExpired ? 'rgba(255, 107, 107, 0.08)' : 'transparent',
+                fontWeight: isExpired ? 600 : 400,
+                transition: `color ${microDuration}s, border-color ${microDuration}s`,
+              }}
+            >
+              {isDismissing ? 'Dismissing…' : isExpired ? 'Dismiss (expired)' : 'Dismiss'}
+            </motion.button>
+          </div>
+        </>
       )}
-
-      {/* GMV Impact */}
-      <p className="text-sm font-semibold mb-3" style={{ color: 'var(--color-accent)' }}>
-        Est. Revenue Impact: +${action.estimated_gmv.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-      </p>
-
-      {/* Confidence bar */}
-      <div className="mb-3">
-        <div className="flex justify-between items-center mb-1.5">
-          <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
-            Confidence
-          </span>
-          <span className="text-xs font-mono font-semibold" style={{ color: 'var(--color-accent)' }}>
-            {confidencePct}%
-          </span>
-        </div>
-        <div
-          className="h-1 rounded-full overflow-hidden"
-          style={{ background: 'var(--color-border)' }}
-        >
-          <motion.div
-            className="h-full rounded-full"
-            initial={{ width: 0 }}
-            animate={{ width: `${confidencePct}%` }}
-            transition={{ duration: reduced ? 0 : 0.6, ease: [0.4, 0, 0.2, 1], delay: delay + 0.1 }}
-            style={{ background: 'var(--color-accent)' }}
-          />
-        </div>
-      </div>
-
-      {/* Brand alignment */}
-      {action.brand_check && (
-        <p className="text-xs italic mb-4" style={{ color: 'var(--color-text-muted)' }}>
-          Brand alignment: {action.brand_check}
-        </p>
-      )}
-
-      {/* Error */}
-      {error && (
-        <p className="text-xs mb-3 font-mono" style={{ color: 'var(--color-danger)' }}>
-          {error}
-        </p>
-      )}
-
-      {/* Buttons */}
-      <div className="flex gap-3">
-        <motion.button
-          onClick={handleApprove}
-          disabled={isLoading}
-          whileTap={{ scale: reduced ? 1 : 0.96 }}
-          whileHover={{ opacity: isLoading ? 0.7 : 0.9 }}
-          transition={{ duration: microDuration }}
-          className="flex-1 py-2.5 rounded-lg text-sm font-bold cursor-pointer disabled:cursor-not-allowed"
-          style={{
-            background: isExpired
-              ? 'transparent'
-              : isLoading ? 'var(--color-accent-dim)' : 'var(--color-accent)',
-            border: isExpired ? '1px solid var(--color-border)' : 'none',
-            color: isExpired ? 'var(--color-text-muted)' : 'var(--color-bg)',
-            transition: `background ${microDuration}s, opacity ${microDuration}s`,
-            opacity: isLoading ? 0.7 : 1,
-          }}
-        >
-          {isApproving ? 'Applying…' : isExpired ? 'Approve anyway' : 'Approve'}
-        </motion.button>
-
-        <motion.button
-          onClick={handleDismiss}
-          disabled={isLoading}
-          whileTap={{ scale: reduced ? 1 : 0.96 }}
-          whileHover={{ borderColor: isExpired ? 'var(--color-danger)' : 'var(--color-accent)' }}
-          transition={{ duration: microDuration }}
-          className="px-5 py-2.5 rounded-lg text-sm cursor-pointer disabled:cursor-not-allowed"
-          style={{
-            border: `1px solid ${isExpired ? 'var(--color-danger)' : 'var(--color-border)'}`,
-            color: isExpired
-              ? 'var(--color-danger)'
-              : isLoading ? 'var(--color-text-muted)' : 'var(--color-text)',
-            background: isExpired ? 'rgba(255, 107, 107, 0.08)' : 'transparent',
-            fontWeight: isExpired ? 600 : 400,
-            transition: `color ${microDuration}s, border-color ${microDuration}s`,
-          }}
-        >
-          {isDismissing ? 'Dismissing…' : isExpired ? 'Dismiss (expired)' : 'Dismiss'}
-        </motion.button>
-      </div>
     </motion.div>
   )
 }
