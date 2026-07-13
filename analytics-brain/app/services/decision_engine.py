@@ -239,7 +239,9 @@ async def run_decision_cycle(
 
     # Narrative fields templated from tool call + context
     # Use the product Qwen actually targeted, not just the first in the list
-    targeted_pid = tool_args.get("product_id")
+    # propose_duplicate_merge uses keep_product_id, not product_id — same
+    # fallback purpose (which product's name goes in the option card title).
+    targeted_pid = tool_args.get("product_id") or tool_args.get("keep_product_id")
     targeted_product_name = None
     if targeted_pid:
         for p in products:
