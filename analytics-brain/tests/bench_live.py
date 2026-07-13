@@ -277,6 +277,15 @@ async def _bare_arm(scenario: dict) -> dict:
         anomaly_description=scenario["anomaly_description"], memory_context="",
         tool_calling=False,
     )
+    # Guard against DECISION_PROMPT wording drifting out from under the
+    # .replace() calls in compose_decision_prompt — if that happens the swap
+    # silently becomes a no-op and this "bare" arm stops being tool-free.
+    assert "Use the available tools" not in prompt, (
+        "compose_decision_prompt(tool_calling=False) did not swap the "
+        "tool-instruction paragraph out of the prompt — DECISION_PROMPT's "
+        "wording likely changed and the .replace() substrings in "
+        "decision_engine.compose_decision_prompt no longer match."
+    )
     message = await _qwen_chat(
         model="qwen-max", messages=[{"role": "user", "content": prompt}],
         max_tokens=300, temperature=0.5, timeout=45.0,
