@@ -132,10 +132,21 @@ async def find_underperformer(
 async def run_store_review(
     merchant_id: str, db: "AsyncSession", redis
 ) -> "AgentAction | None":
-    """Find an underperformer and, if one exists, run it through the same
-    decision cycle the reactive/recovery paths use. Returns None (no-op,
-    not an error) when the catalog looks healthy or a decision is already
-    pending — both are correct, quiet outcomes."""
+    """Duplicate detection runs first — higher autopilot value (signal-driven,
+    genuine merge decision) than the underperformer check. See
+    docs/superpowers/specs/2026-07-12-duplicate-detection-autopilot-design.md.
+    run_decision_cycle's one-pending-action gate means only one of
+    {duplicate, underperformer} can fire a card per tick anyway, so checking
+    duplicates first simply prioritizes it.
+
+    Falls through to the underperformer check when duplicates find nothing.
+    Returns None (no-op, not an error) when both checks find nothing or a
+    decision is already pending — a correct, quiet outcome either way."""
+    from app.services.duplicate_scan import run_duplicate_scan
+    dup_action = await run_duplicate_scan(merchant_id, db, redis)
+    if dup_action:
+        return dup_action
+
     found = await find_underperformer(merchant_id, db)
     if not found:
         return None
