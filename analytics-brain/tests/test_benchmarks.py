@@ -260,3 +260,17 @@ class TestMockBenchmarkRun:
 # Results are printed as a formatted report at the end.
 # Copy the report into BENCHMARKS.md for the public repo.
 # ──────────────────────────────────────────────────────────────────────────────
+
+from tests.bench_live import SUBCONSCIOUS_SCENARIOS
+
+
+def test_subconscious_scenarios_have_required_fields():
+    assert len(SUBCONSCIOUS_SCENARIOS) == 7
+    required = {"name", "action_type", "cost_price", "price", "constraints", "anomaly_description"}
+    for scenario in SUBCONSCIOUS_SCENARIOS:
+        assert required.issubset(scenario.keys()), f"{scenario['name']} missing a required field"
+
+
+def test_negative_control_scenario_has_no_discount_dimension():
+    control = next(s for s in SUBCONSCIOUS_SCENARIOS if s["name"] == "duplicate_merge_control")
+    assert control["action_type"] == "duplicate_merge"

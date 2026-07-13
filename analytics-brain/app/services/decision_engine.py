@@ -72,14 +72,20 @@ def compose_decision_prompt(
     products_summary: str,
     anomaly_description: str,
     memory_context: str = "",
+    tool_calling: bool = True,
 ) -> str:
     """Build the decision prompt, injecting prior-outcome memory when present.
 
     Extracted (and pure) so the memory-injection behavior is unit-testable
     without a DB, Redis, or a live Qwen call.
+
+    tool_calling=False (benchmark bare-arm only) swaps the tool-instruction
+    paragraph for a plain JSON-reply instruction, so a model given no tools
+    isn't told to use tools it doesn't have — keeps the two benchmark arms
+    different in exactly one dimension (tools/interceptor), not two.
     """
     memory_block = f"\nPrior outcomes for this store (learn from them):\n{memory_context}\n" if memory_context else ""
-    return DECISION_PROMPT.format(
+    prompt = DECISION_PROMPT.format(
         store_name=store_name,
         mood=mood,
         brand_voice=brand_voice,
@@ -88,6 +94,16 @@ def compose_decision_prompt(
         anomaly_description=anomaly_description,
         memory_block=memory_block,
     )
+    if not tool_calling:
+        prompt = prompt.replace(
+            "Use the available tools to propose ONE action for the merchant to review.",
+            'Respond with a JSON object only, no other text: '
+            '{"product_id": "...", "discount_percent": <number>}.',
+        ).replace(
+            "The merchant approves before execution. Make it compelling.",
+            "",
+        )
+    return prompt
 
 
 async def run_decision_cycle(

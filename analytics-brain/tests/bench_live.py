@@ -19,7 +19,7 @@ import time
 from app.services import vision
 from app.services.brand import generate_brand, generate_descriptions, analyze_logo, _qwen_chat
 from app.services.decision_engine import compose_decision_prompt
-from app.services.tools import DECISION_TOOLS
+from app.services.tools import DECISION_TOOLS, parse_tool_args
 from app.models.schemas import ProductCSVRow
 from tests.test_benchmarks import BenchmarkResult, BenchmarkReport
 
@@ -164,6 +164,199 @@ async def bench_batch_descriptions(report: BenchmarkReport):
         ))
 
 
+# ─── "With a Subconscious vs. Without One" ───────────────────────────────────
+# Reframed from a competitor's "pipeline vs. single-prompt baseline" table —
+# CLAUDE.md already names the interceptor "the Subconscious Interceptor," so
+# the bare arm is literally Qwen with no subconscious: same model, same
+# prompt information, no DECISION_TOOLS, no enforce_action_discount. Every
+# call in both arms is real — no mocked Qwen response anywhere.
+
+from app.models.schemas import AgentActionType, BusinessConstraints
+from app.services import interceptor
+
+SUBCONSCIOUS_SCENARIOS = [
+    {
+        "name": "thin_margin_flash",
+        "action_type": AgentActionType.FLASH_SALE,
+        "cost_price": 38.0, "price": 45.0,
+        "constraints": BusinessConstraints(max_discount_percent=25, min_profit_margin_percent=15),
+        "anomaly_description": "Velocity spike: 40 views in 30s on Leather Slides",
+        "products_summary": "Leather Slides ($45, stock: 30)",
+    },
+    {
+        "name": "near_ceiling_stack",
+        "action_type": AgentActionType.SCARCITY_PRICE,
+        "cost_price": 20.0, "price": 45.0,
+        "constraints": BusinessConstraints(max_discount_percent=40, min_profit_margin_percent=15),
+        "anomaly_description": "Velocity spike: 35 views in 30s on Wool Jacket, already at a 32% promo",
+        "products_summary": "Wool Jacket ($45, stock: 6, currently 32% off)",
+    },
+    {
+        "name": "merchant_min_price_floor",
+        "action_type": AgentActionType.FLASH_SALE,
+        "cost_price": 10.0, "price": 45.0,
+        "constraints": BusinessConstraints(max_discount_percent=40, min_profit_margin_percent=15, min_price={"prod_floor": 40.0}),
+        "anomaly_description": "Velocity spike: 28 views in 30s on Canvas Tote",
+        "products_summary": "Canvas Tote ($45, stock: 20)",
+        "product_id": "prod_floor",
+    },
+    {
+        "name": "recovery_near_ceiling",
+        "action_type": AgentActionType.RECOVERY_OFFER,
+        "cost_price": 0.0, "price": 0.0,
+        "constraints": BusinessConstraints(max_discount_percent=15, min_profit_margin_percent=15),
+        "anomaly_description": "Cart abandon surge: 6 abandons in 30s",
+        "products_summary": "Leather Slides ($45, stock: 30), Wool Jacket ($120, stock: 8)",
+    },
+    {
+        "name": "revenue_left_on_table",
+        "action_type": AgentActionType.FLASH_SALE,
+        "cost_price": 15.0, "price": 50.0,
+        "constraints": BusinessConstraints(max_discount_percent=40, min_profit_margin_percent=15),
+        "anomaly_description": "Velocity spike: 50 views in 30s on Canvas Tote — going viral",
+        "products_summary": "Canvas Tote ($50, stock: 25)",
+    },
+    {
+        "name": "phantom_product_trap",
+        "action_type": AgentActionType.FLASH_SALE,
+        "cost_price": 25.0, "price": 40.0,
+        "constraints": BusinessConstraints(max_discount_percent=30, min_profit_margin_percent=15),
+        "anomaly_description": "Velocity spike: 22 views in 30s on product prod_deactivated_123",
+        "products_summary": "Leather Slides ($45, stock: 30) — note: prod_deactivated_123 is NOT in this list, it was removed",
+    },
+    {
+        "name": "duplicate_merge_control",
+        "action_type": AgentActionType.DUPLICATE_MERGE,
+        "cost_price": 0.0, "price": 0.0,
+        "constraints": BusinessConstraints(max_discount_percent=40, min_profit_margin_percent=15),
+        "anomaly_description": "Duplicate listings: 2 entries for \"Canvas Tote\"",
+        "products_summary": "Canvas Tote ($45, stock: 20), Canvas Tote copy ($45, stock: 20)",
+    },
+]
+
+
+async def _pipeline_arm(scenario: dict) -> dict:
+    """Real Qwen tool-calling call + the real enforce_action_discount — the
+    exact function wired into production (Task 2/3), no DB required."""
+    prompt = compose_decision_prompt(
+        store_name=STORE_NAME, mood="balanced", brand_voice=BRAND_VOICE,
+        brand_rules_summary="keep accent color within palette",
+        products_summary=scenario["products_summary"],
+        anomaly_description=scenario["anomaly_description"], memory_context="",
+    )
+    message = await _qwen_chat(
+        model="qwen-max", messages=[{"role": "user", "content": prompt}],
+        max_tokens=1000, temperature=0.5, timeout=45.0,
+        tools=DECISION_TOOLS, tool_choice="auto",
+    )
+    tool_calls = message.get("tool_calls") or [] if isinstance(message, dict) else []
+    if not tool_calls:
+        return {"proposed": False}
+    args = parse_tool_args(tool_calls[0].get("function", {}).get("arguments", "{}"))
+    clamped_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
+        scenario["action_type"], args,
+        cost_price=scenario["cost_price"], price=scenario["price"],
+        constraints=scenario["constraints"], product_id=scenario.get("product_id", ""),
+    )
+    return {
+        "proposed": True, "blocked": is_blocked,
+        "final_discount": clamped_args.get("discount_percent"),
+        "target_product_id": args.get("product_id"),
+        "constraint_check": constraint_check,
+    }
+
+
+async def _bare_arm(scenario: dict) -> dict:
+    """Real Qwen call, no tools, no interceptor — 'Qwen without a subconscious'.
+    tool_calling=False gives it the equivalent tool-free instruction (see
+    Step 2b) instead of leaving in a reference to tools it doesn't have."""
+    prompt = compose_decision_prompt(
+        store_name=STORE_NAME, mood="balanced", brand_voice=BRAND_VOICE,
+        brand_rules_summary="keep accent color within palette",
+        products_summary=scenario["products_summary"],
+        anomaly_description=scenario["anomaly_description"], memory_context="",
+        tool_calling=False,
+    )
+    message = await _qwen_chat(
+        model="qwen-max", messages=[{"role": "user", "content": prompt}],
+        max_tokens=300, temperature=0.5, timeout=45.0,
+    )
+    text = message if isinstance(message, str) else (message.get("content") or "")
+    try:
+        import json as _json
+        import re as _re
+        m = _re.search(r"\{.*\}", text, _re.DOTALL)
+        args = _json.loads(m.group()) if m else {}
+    except (ValueError, AttributeError):
+        args = {}
+    if not args:
+        return {"proposed": False}
+    return {"proposed": True, "raw_discount": args.get("discount_percent"), "raw_product_id": args.get("product_id")}
+
+
+def _margin_burned_dollars(scenario: dict, discount_percent: float | None) -> float:
+    """Real per-unit loss if this discount were executed — a hard fact
+    (cost_price - discounted_price when negative), never multiplied by an
+    assumed conversion rate."""
+    if discount_percent is None or scenario["price"] <= 0:
+        return 0.0
+    discounted = scenario["price"] * (1 - discount_percent / 100)
+    loss = scenario["cost_price"] - discounted
+    return round(loss, 2) if loss > 0 else 0.0
+
+
+def _safe_max_discount(scenario: dict) -> float:
+    """The largest discount enforce_action_discount would actually allow for
+    this scenario — the honest ceiling to compare a conservative guess against."""
+    clamped_args, _, is_blocked = interceptor.enforce_action_discount(
+        scenario["action_type"], {"product_id": scenario.get("product_id", ""), "discount_percent": 100},
+        cost_price=scenario["cost_price"], price=scenario["price"],
+        constraints=scenario["constraints"], product_id=scenario.get("product_id", ""),
+    )
+    return 0.0 if is_blocked else clamped_args.get("discount_percent", 0.0)
+
+
+async def bench_subconscious(report: BenchmarkReport) -> None:
+    for scenario in SUBCONSCIOUS_SCENARIOS:
+        t0 = time.time()
+        try:
+            pipeline = await _pipeline_arm(scenario)
+            bare = await _bare_arm(scenario)
+
+            bare_discount = bare.get("raw_discount") if bare.get("proposed") else None
+            bare_margin_burned = _margin_burned_dollars(scenario, bare_discount)
+            safe_max = _safe_max_discount(scenario)
+            headroom_unused = (
+                max(0.0, safe_max - bare_discount) if bare_discount is not None else 0.0
+            )
+            phantom = bool(
+                bare.get("raw_product_id")
+                and bare["raw_product_id"] not in scenario["products_summary"]
+                and scenario["name"] == "phantom_product_trap"
+            )
+
+            report.add(BenchmarkResult(
+                name=f"subconscious_{scenario['name']}",
+                latency_ms=(time.time() - t0) * 1000,
+                token_estimate=0,
+                output_valid=True,
+                output_quality="good",
+                notes=(
+                    f"pipeline_blocked={pipeline.get('blocked')} "
+                    f"pipeline_discount={pipeline.get('final_discount')} "
+                    f"bare_discount={bare_discount} "
+                    f"margin_burned=${bare_margin_burned} "
+                    f"headroom_unused={headroom_unused}pts "
+                    f"phantom_target={phantom}"
+                ),
+            ))
+        except Exception as e:  # noqa: BLE001
+            report.add(BenchmarkResult(
+                name=f"subconscious_{scenario['name']}", latency_ms=(time.time() - t0) * 1000,
+                token_estimate=0, output_valid=False, output_quality="failed", notes=str(e),
+            ))
+
+
 async def main() -> int:
     report = BenchmarkReport()
     analysis = await bench_logo_analysis(report)
@@ -174,6 +367,7 @@ async def main() -> int:
     await bench_decision_cycle(report)
     await bench_product_vision(report)
     await bench_batch_descriptions(report)
+    await bench_subconscious(report)
 
     print(report.summary())
     return 0 if report.valid_rate == 1.0 else 1
