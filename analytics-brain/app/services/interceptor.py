@@ -27,6 +27,7 @@ from app.models.schemas import (
     ValidationResult,
     Violation,
     RiskLevel,
+    AgentActionType,
 )
 from app.services.pricing import margin_floor_price
 
@@ -215,3 +216,94 @@ def validate_decision(
     profile: BusinessProfile,
 ) -> list[ValidationResult]:
     return [validate_action(a, profile) for a in actions]
+
+
+# ─── AgentAction discount enforcement (decision-time + execution-time) ───────
+
+def enforce_action_discount(
+    action_type: AgentActionType,
+    tool_args: dict,
+    *,
+    cost_price: float,
+    price: float,
+    constraints: BusinessConstraints,
+    product_id: str = "",
+) -> tuple[dict, str, bool]:
+    """Run a Qwen-proposed discount-bearing action through the real Layer 2/3
+    primitives before it becomes an AgentAction (decision time) or before its
+    payload is applied to live state (execution time, defense in depth).
+
+    FLASH_SALE / SCARCITY_PRICE are product-scoped — checked against that
+    product's real cost_price and price, including the merchant's explicit
+    per-product min_price (enforce_discount alone doesn't know about
+    min_price, only enforce_price/margin_floor_price does — this closes that
+    gap without changing enforce_discount itself).
+
+    RECOVERY_OFFER is order-level (no single product to protect margin on),
+    so it's checked on a normalized 0-100 scale: the Layer 2 ceiling clamp
+    still runs through the same real enforce_discount primitive, while Layer
+    3's below-cost check is a structural no-op here (100 * (1 - d/100) can
+    only go negative above 100%, which discount_percent can never reach once
+    the ceiling clamp has already run) — consistent with Layer 3 not
+    conceptually applying to a discount with no single cost basis.
+
+    Returns (clamped_tool_args, constraint_check_message, is_blocked).
+    is_blocked=True means the caller MUST decline the action entirely — the
+    returned tool_args are not safe to use. constraint_check_message is ""
+    when nothing was clamped (matches brand_check's empty-string convention).
+    Any other action_type (layout_morph, copy_rewrite, duplicate_merge)
+    passes through unchanged — they carry no discount.
+    """
+    if action_type not in (
+        AgentActionType.FLASH_SALE,
+        AgentActionType.SCARCITY_PRICE,
+        AgentActionType.RECOVERY_OFFER,
+    ):
+        return tool_args, "", False
+
+    try:
+        discount = float(tool_args.get("discount_percent") or 0)
+    except (TypeError, ValueError):
+        discount = 0.0
+
+    if action_type == AgentActionType.RECOVERY_OFFER:
+        final_discount, violations = enforce_discount(
+            cost_price=0.0, base_price=100.0,
+            discount_percent=discount, constraints=constraints,
+        )
+    else:
+        final_discount, violations = enforce_discount(
+            cost_price=cost_price, base_price=price,
+            discount_percent=discount, constraints=constraints,
+        )
+        if not blocked(violations):
+            floor = margin_floor_price(
+                cost_price, constraints.min_profit_margin_percent,
+                constraints.min_price.get(product_id, 0.0),
+            )
+            discounted_price = price * (1 - final_discount / 100) if price > 0 else 0.0
+            if floor > cost_price and discounted_price < floor and price > 0:
+                floor_discount = round((1 - floor / price) * 100, 2)
+                violations.append(Violation(
+                    rule="min_price",
+                    severity="warning",
+                    message=(
+                        f"{final_discount:g}% would sell below your ${floor:.2f} "
+                        f"minimum for this product. Clamped to {floor_discount:g}%."
+                    ),
+                    original_value=final_discount,
+                    clamped_value=floor_discount,
+                ))
+                final_discount = floor_discount
+
+    if blocked(violations):
+        message = next(
+            (v.message for v in violations if v.severity == "blocked"),
+            "Blocked by interceptor.",
+        )
+        return tool_args, message, True
+
+    constraint_check = "; ".join(v.message for v in violations)
+    clamped_args = dict(tool_args)
+    clamped_args["discount_percent"] = final_discount
+    return clamped_args, constraint_check, False
