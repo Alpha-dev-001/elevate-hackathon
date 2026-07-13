@@ -330,6 +330,33 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
                     row.id,
                 )
 
+    elif row.action_type == "feature_product":
+        target_pid = payload.get("product_id")
+        if target_pid:
+            # Unset any previously-featured product first — one clear pick,
+            # not a second spotlight competing with the main grid.
+            previously_featured = (await db.execute(
+                select(ProductDB)
+                .where(ProductDB.merchant_id == row.merchant_id)
+                .where(ProductDB.is_featured == True)
+            )).scalars().all()
+            for p in previously_featured:
+                p.is_featured = False
+
+            target = await db.get(ProductDB, target_pid)
+            if target and target.merchant_id == row.merchant_id:
+                target.is_featured = True
+                target.featured_label = str(payload.get("featured_label", "New Arrival"))[:80]
+                await db.flush()
+                from app.routers.products import _sync_state_if_live
+                await _sync_state_if_live(db, row.merchant_id)
+                logger.info("[agent] featured product %s for %s", target_pid, row.merchant_id)
+            else:
+                logger.info(
+                    "[agent] feature_product: target %s not found for %s (already removed?)",
+                    target_pid, row.id,
+                )
+
     # copy_rewrite and any unknown type — not a promo/layout action; log only.
     else:
         logger.info(f"[agent] action type {row.action_type} logged but not auto-applied")

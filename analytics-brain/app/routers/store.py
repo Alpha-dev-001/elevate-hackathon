@@ -106,8 +106,11 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
                     image_url=p.image_url,
                     category=p.category,
                     available=p.stock > 0,
+                    is_featured=p.is_featured,
+                    featured_label=p.featured_label,
                 )
             )
+        products.sort(key=lambda pr: not pr.is_featured)
         categories = seen_categories
 
     # Load BrandToken from brand_profile if available (Task 2 addition).
