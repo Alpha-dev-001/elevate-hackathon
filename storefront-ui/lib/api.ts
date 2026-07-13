@@ -152,6 +152,20 @@ export interface Capability {
   last_intent: string      // the merchant's most recent wording
 }
 
+/** A single autopilot decision as logged by the backend (Task 7's GET /merchant/decisions). */
+export interface DecisionLogEntry {
+  id: string
+  action_type: string
+  title: string
+  description: string
+  trigger: string
+  reasoning: string
+  status: string
+  created_at: number
+  approved_at: number | null
+  executed_at: number | null
+}
+
 export const api = {
   // ── Auth ────────────────────────────────────────────────────────────────
   signup: (body: MerchantCreate) =>
@@ -326,6 +340,10 @@ export const api = {
     req<{ action: AgentAction }>(`/api/agent/actions/${enc(actionId)}/dismiss`, {
       method: 'POST',
     }),
+  getDecisions: (limit = 20, offset = 0) =>
+    req<{ decisions: DecisionLogEntry[]; total: number }>(
+      `/merchant/decisions?limit=${limit}&offset=${offset}`,
+    ),
 
   // ── Dashboard ────────────────────────────────────────────────────────────
   getDashboard: (slug: string) =>
