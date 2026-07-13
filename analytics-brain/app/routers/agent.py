@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.security import get_current_merchant
 from app.models.db_models import AgentActionDB, MerchantDB, ProductDB
 from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType
 
@@ -58,10 +59,16 @@ async def get_pending_actions(slug: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/actions/{action_id}/approve")
-async def approve_action(action_id: str, db: AsyncSession = Depends(get_db)):
+async def approve_action(
+    action_id: str,
+    db: AsyncSession = Depends(get_db),
+    merchant: MerchantDB = Depends(get_current_merchant),
+):
     row = await db.get(AgentActionDB, action_id)
     if not row:
         raise HTTPException(status_code=404, detail="Action not found")
+    if row.merchant_id != merchant.id:
+        raise HTTPException(status_code=403, detail="This action belongs to a different store")
     if row.status != "pending":
         raise HTTPException(status_code=409, detail=f"Action is already {row.status}")
 
@@ -102,10 +109,16 @@ async def _load_state_promo_expiry(row: AgentActionDB, db: AsyncSession) -> int 
 
 
 @router.post("/actions/{action_id}/dismiss")
-async def dismiss_action(action_id: str, db: AsyncSession = Depends(get_db)):
+async def dismiss_action(
+    action_id: str,
+    db: AsyncSession = Depends(get_db),
+    merchant: MerchantDB = Depends(get_current_merchant),
+):
     row = await db.get(AgentActionDB, action_id)
     if not row:
         raise HTTPException(status_code=404, detail="Action not found")
+    if row.merchant_id != merchant.id:
+        raise HTTPException(status_code=403, detail="This action belongs to a different store")
     row.status = "dismissed"
     row.merchant_behavior = "dismissed"
     await db.commit()

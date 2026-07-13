@@ -22,12 +22,14 @@ import logging
 import time
 from typing import Any
 
+from fastapi import HTTPException
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import get_session_factory
 from app.core.redis import get_redis, Keys
+from app.core.security import decode_token
 from app.models.db_models import AgentActionDB, MerchantDB
 from app.models.schemas import AgentActionType, AgentActionStatus
 
@@ -43,7 +45,10 @@ mcp = FastMCP(
         "proactively from real catalog performance instead (no anomaly "
         "needed), elevate_run_duplicate_scan to check for duplicate "
         "product listings specifically, and elevate_approve_action / "
-        "elevate_dismiss_action to respond to pending agent proposals."
+        "elevate_dismiss_action to respond to pending agent proposals. "
+        "Approve/dismiss RELAY a merchant's own decision — they require the "
+        "merchant's real session token and cannot be used by an agent to "
+        "approve or dismiss on its own authority."
     ),
 )
 
@@ -73,6 +78,29 @@ def _action_row_to_dict(row: AgentActionDB) -> dict[str, Any]:
         "approved_at": row.approved_at,
         "executed_at": row.executed_at,
     }
+
+
+def _verify_merchant_token(merchant_session_token: str | None, owner_merchant_id: str) -> str | None:
+    """Verify the caller holds the owning merchant's own session token.
+
+    Returns an error message if missing/invalid/expired/wrong-store; None if
+    it checks out. This is the actual gate: it stops an agent from approving
+    or dismissing on its own authority — it can only relay a decision a human
+    already authenticated for via the terminal (the same elevate_session JWT
+    issued at login), never invent one.
+    """
+    if not merchant_session_token:
+        return (
+            "merchant_session_token is required. This tool relays a human's "
+            "own decision — it does not grant one on the agent's authority."
+        )
+    try:
+        token_merchant_id = decode_token(merchant_session_token)
+    except HTTPException as e:
+        return str(e.detail)
+    if token_merchant_id != owner_merchant_id:
+        return "This session token belongs to a different store than the one that owns this action."
+    return None
 
 
 async def _resolve_merchant(db, merchant_id_or_slug: str) -> str | None:
@@ -224,20 +252,31 @@ async def elevate_run_store_review(merchant_id: str) -> str:
 
 
 @mcp.tool()
-async def elevate_approve_action(action_id: str) -> str:
-    """Approve a pending agent action, executing its payload on the store.
+async def elevate_approve_action(action_id: str, merchant_session_token: str) -> str:
+    """Relay a merchant's own approval decision, executing its payload on the store.
 
-    This applies the Qwen-proposed change (flash sale, layout morph,
-    recovery offer, etc.) to the live store state and broadcasts the
-    update to connected clients.
+    This does NOT let an agent decide on the merchant's behalf. It requires
+    the owning merchant's real session token (the same elevate_session JWT
+    minted at login) as proof a human already approved this in the terminal.
+    Call elevate_get_store_state / elevate_get_terminal_feed to read and
+    reason about pending actions freely — only this call needs the token,
+    because only this call changes the live store.
 
     Args:
         action_id: The UUID of the pending action to approve.
+        merchant_session_token: The owning merchant's elevate_session JWT,
+            proving this approval is being relayed on behalf of an
+            authenticated human, not decided autonomously by the caller.
     """
     async with await _get_db_session() as db:
         row = await db.get(AgentActionDB, action_id)
         if not row:
             return json.dumps({"error": "Action not found", "action_id": action_id})
+
+        auth_error = _verify_merchant_token(merchant_session_token, row.merchant_id)
+        if auth_error:
+            return json.dumps({"error": auth_error, "action_id": action_id})
+
         if row.status != "pending":
             return json.dumps({
                 "error": f"Action is already {row.status}",
@@ -280,19 +319,29 @@ async def elevate_approve_action(action_id: str) -> str:
 
 
 @mcp.tool()
-async def elevate_dismiss_action(action_id: str) -> str:
-    """Dismiss a pending agent action without executing it.
+async def elevate_dismiss_action(action_id: str, merchant_session_token: str) -> str:
+    """Relay a merchant's own dismissal of a pending agent action (not executed).
+
+    Same authority rule as elevate_approve_action: requires the owning
+    merchant's real session token, because a dismissal still mutates the
+    action's status and feeds Qwen's rejection memory — it must reflect a
+    human's decision, not the calling agent's.
 
     Qwen still learns from the dismissal via the memory system —
     the outcome observer records the merchant's rejection.
 
     Args:
         action_id: The UUID of the pending action to dismiss.
+        merchant_session_token: The owning merchant's elevate_session JWT.
     """
     async with await _get_db_session() as db:
         row = await db.get(AgentActionDB, action_id)
         if not row:
             return json.dumps({"error": "Action not found", "action_id": action_id})
+
+        auth_error = _verify_merchant_token(merchant_session_token, row.merchant_id)
+        if auth_error:
+            return json.dumps({"error": auth_error, "action_id": action_id})
 
         row.status = "dismissed"
         row.merchant_behavior = "dismissed_via_mcp"
