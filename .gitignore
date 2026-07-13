@@ -102,4 +102,7 @@ DEVLOG.md
 # stray keys / junk
 *.pub
 analytics-brain/scripts/assets/
+
+# local git worktrees (superpowers:using-git-worktrees)
+.worktrees/
 docs/discussions/
