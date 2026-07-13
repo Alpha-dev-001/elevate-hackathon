@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_db
-from app.models.db_models import AgentActionDB, MerchantDB
+from app.models.db_models import AgentActionDB, MerchantDB, ProductDB
 from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,19 @@ async def dismiss_action(action_id: str, db: AsyncSession = Depends(get_db)):
     except Exception as e:  # noqa: BLE001
         import logging
         logging.getLogger(__name__).warning("[agent] dismiss observation failed for %s: %s", row.id, e)
+
+    if row.action_type == "duplicate_merge":
+        try:
+            from app.services.duplicate_scan import suppress_duplicate_group
+            from app.core.redis import get_redis
+            payload = row.payload or {}
+            keep_id = payload.get("keep_product_id")
+            remove_ids = payload.get("remove_product_ids") or []
+            group_ids = ([keep_id] if keep_id else []) + list(remove_ids)
+            if len(group_ids) >= 2:
+                await suppress_duplicate_group(row.merchant_id, group_ids, await get_redis())
+        except Exception as e:  # noqa: BLE001 — suppression must never block a dismiss
+            logger.warning("[agent] duplicate-merge suppression failed for %s: %s", row.id, e)
 
     return {"action": _to_schema(row).model_dump()}
 
@@ -271,6 +284,33 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> None:
                 except ValueError:
                     pass
             await delta_svc.save_state(row.merchant_id, state)
+
+    elif row.action_type == "duplicate_merge":
+        remove_ids = payload.get("remove_product_ids") or []
+        if remove_ids:
+            rows = (await db.execute(
+                select(ProductDB)
+                .where(ProductDB.id.in_(remove_ids))
+                .where(ProductDB.merchant_id == row.merchant_id)  # defense in depth — scope to this merchant
+            )).scalars().all()
+            if rows:
+                for p in rows:
+                    p.is_active = False
+                await db.flush()
+                # Imported here, not at the top of _execute_payload — matches
+                # this file's existing convention (_register_promo/_register_recovery
+                # import their own branch-specific dependencies locally too).
+                from app.routers.products import _sync_state_if_live
+                await _sync_state_if_live(db, row.merchant_id)
+                logger.info(
+                    "[agent] duplicate_merge deactivated %d product(s) for %s",
+                    len(rows), row.merchant_id,
+                )
+            else:
+                logger.info(
+                    "[agent] duplicate_merge: no matching products found for %s (already removed?)",
+                    row.id,
+                )
 
     # copy_rewrite and any unknown type — not a promo/layout action; log only.
     else:
