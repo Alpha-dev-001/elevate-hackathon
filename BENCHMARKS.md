@@ -136,9 +136,13 @@ allow?"
 This scenario has no discount at all — it's a catalog-hygiene action
 (merge two duplicate listings), not a pricing action. The `headroom_unused`
 figure the raw notes produced for it (90 points) is **not a real number**:
-it's `safe_max (0, since there is no discount ceiling for a merge) minus
-bare's irrelevant 10% guess`, and is reported here as "n/a" rather than as
-revenue headroom. Its actual job in this table is to be the zero-basis
+`enforce_action_discount` only runs its clamp logic for `FLASH_SALE`,
+`SCARCITY_PRICE`, and `RECOVERY_OFFER` — `DUPLICATE_MERGE` isn't one of
+those, so the probe's discount value passes straight through unclamped,
+which is why `safe_max` comes out to 100, not 0. It's `safe_max (100,
+since no discount-ceiling logic applies to a non-discount action type
+like a merge) minus bare's irrelevant 10% guess`, and is reported here as
+"n/a" rather than as revenue headroom. Its actual job in this table is to be the zero-basis
 control: pipeline blocked/clamped is "no discount dimension," margin
 burned is genuinely $0 (there is nothing to discount), and the bare arm's
 10% is exposed as noise — the model answering a pricing question it was
