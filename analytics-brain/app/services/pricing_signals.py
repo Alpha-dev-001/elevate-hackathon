@@ -167,3 +167,69 @@ async def rollup_daily_signals(
 
     await db.commit()
     return written
+
+
+# A day whose views are more than 5x its trailing average while cart_adds
+# stays at/near zero relative to that view count — real interest converts
+# to at least some cart-adds; a pure view-bot spike doesn't. Env-configurable,
+# same pattern as ANOMALY_THRESHOLD (behavior_tracker.py).
+import os
+
+SUSPICIOUS_VIEW_MULTIPLIER = float(os.getenv("SUSPICIOUS_VIEW_MULTIPLIER", "5.0"))
+SUSPICIOUS_MIN_CART_ADD_RATIO = float(os.getenv("SUSPICIOUS_MIN_CART_ADD_RATIO", "0.02"))
+
+
+def is_suspicious(today_views: int, today_cart_adds: int, trailing_avg_views: float) -> bool:
+    """Pure rule — no I/O, easy to test. A zero trailing average means there's
+    no baseline yet (e.g. a brand-new product); never flag in that case,
+    consistent with the cold-start gate's "no move on zero data" principle."""
+    if trailing_avg_views <= 0:
+        return False
+    if today_views < trailing_avg_views * SUSPICIOUS_VIEW_MULTIPLIER:
+        return False
+    return today_cart_adds < today_views * SUSPICIOUS_MIN_CART_ADD_RATIO
+
+
+async def flag_suspicious_signals(db: "AsyncSession", *, target_date: str | None = None) -> int:
+    """For each product's target_date row (defaults to yesterday UTC), compare
+    against its own trailing 7-day average and mark signal_quality='suspect'
+    if it looks gamed. Advisory only — never blocks anything, just excludes
+    that day's row from what compose_pricing_prompt shows Qwen (Task 8).
+    Per-product try/except, same discipline as rollup_daily_signals."""
+    from sqlalchemy import select, func
+    from app.models.db_models import ProductPriceHistoryDB
+
+    date_str = target_date or _yesterday_utc()
+    flagged = 0
+
+    today_rows = (
+        await db.execute(
+            select(ProductPriceHistoryDB).where(ProductPriceHistoryDB.date == date_str)
+        )
+    ).scalars().all()
+
+    for row in today_rows:
+        try:
+            cutoff = (
+                datetime.strptime(date_str, "%Y-%m-%d") - timedelta(days=7)
+            ).strftime("%Y-%m-%d")
+            trailing_avg = await db.scalar(
+                select(func.avg(ProductPriceHistoryDB.views))
+                .where(ProductPriceHistoryDB.product_id == row.product_id)
+                .where(ProductPriceHistoryDB.date >= cutoff)
+                .where(ProductPriceHistoryDB.date < date_str)
+            )
+            trailing_avg = float(trailing_avg or 0.0)
+            if is_suspicious(row.views, row.cart_adds, trailing_avg):
+                row.signal_quality = "suspect"
+                flagged += 1
+            else:
+                row.signal_quality = "normal"
+        except Exception as e:  # noqa: BLE001 — one product's failure must not skip the rest
+            logger.warning(
+                "[pricing_signals] suspicious-signal check failed for product %s: %s",
+                row.product_id, e,
+            )
+
+    await db.commit()
+    return flagged

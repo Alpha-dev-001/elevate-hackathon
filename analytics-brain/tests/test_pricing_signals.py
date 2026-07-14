@@ -27,3 +27,26 @@ def test_ignores_non_counted_event_types():
     ]
     counts = count_signals_for_product(events, "p1")
     assert counts == {"views": 0, "cart_adds": 0}
+
+
+from app.services.pricing_signals import is_suspicious
+
+
+def test_high_views_near_zero_cart_adds_is_suspicious():
+    # 5x trailing average, cart_adds effectively zero relative to that view count.
+    assert is_suspicious(today_views=100, today_cart_adds=0, trailing_avg_views=20.0) is True
+
+
+def test_high_views_with_real_cart_adds_is_not_suspicious():
+    # Same view spike, but genuine engagement (cart_adds proportional to views).
+    assert is_suspicious(today_views=100, today_cart_adds=15, trailing_avg_views=20.0) is False
+
+
+def test_normal_day_is_not_suspicious():
+    assert is_suspicious(today_views=22, today_cart_adds=3, trailing_avg_views=20.0) is False
+
+
+def test_zero_trailing_average_never_flags():
+    # No baseline to compare against (brand-new product) — can't call it
+    # suspicious with nothing to be anomalous relative to.
+    assert is_suspicious(today_views=50, today_cart_adds=0, trailing_avg_views=0.0) is False
