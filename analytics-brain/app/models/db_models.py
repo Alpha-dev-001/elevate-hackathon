@@ -37,6 +37,62 @@ class ReceiptDB(Base):
     )
 
 
+class ProductPriceHistoryDB(Base):
+    """One row per product per UTC day — the durable history a pricing
+    decision reasons over. Redis's behavior-event list (Keys.events) is
+    capped and TTL'd for real-time anomaly detection only; this table is
+    what makes "this product's history" mean something that survives past
+    an hour. Written daily by pricing_signals.rollup_daily_signals."""
+    __tablename__ = "product_price_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.id"), nullable=False, index=True
+    )
+    date: Mapped[str] = mapped_column(String, nullable=False)  # "YYYY-MM-DD", UTC
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    cart_adds: Mapped[int] = mapped_column(Integer, default=0)
+    purchases: Mapped[int] = mapped_column(Integer, default=0)
+    price_active: Mapped[float] = mapped_column(Float, nullable=False)
+    # "normal" | "suspect" — set by pricing_signals.flag_suspicious_signals.
+    # Suspect days are excluded from the pricing prompt rather than "corrected".
+    signal_quality: Mapped[str] = mapped_column(String, default="normal")
+    # Deliberately present but empty in v1 — a later signal (detail-view opens,
+    # dwell time) can land here without another migration. Not read by v1 code.
+    extra_signals: Mapped[dict] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint("product_id", "date", name="uq_price_history_product_date"),
+    )
+
+
+class AutopilotTrustDB(Base):
+    """Graduated-autonomy trust counter per (merchant, product, action_type).
+    Read/written by autopilot_trust.py on every PRICE_REBALANCE outcome.
+    Missing row == streak 0 == always gates; never defaults to trusted."""
+    __tablename__ = "autopilot_trust"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(
+        ForeignKey("merchants.id"), nullable=False, index=True
+    )
+    product_id: Mapped[str] = mapped_column(
+        ForeignKey("products.id"), nullable=False, index=True
+    )
+    action_type: Mapped[str] = mapped_column(String, nullable=False)
+    streak: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[int] = mapped_column(
+        BigInteger, default=lambda: int(time.time() * 1000)
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "merchant_id", "product_id", "action_type",
+            name="uq_trust_merchant_product_type",
+        ),
+    )
+
+
 class MerchantDB(Base):
     __tablename__ = "merchants"
 
