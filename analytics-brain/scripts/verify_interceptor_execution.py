@@ -34,7 +34,7 @@ async def main() -> None:
         product = await db.get(ProductDB, product_id)
         if product is None:
             product = ProductDB(id=product_id, merchant_id=merchant_id, name="Thin Margin Widget",
-                                 price=20.0, cost_price=18.0, stock=10)
+                                 price=20.0, baseline_price=20.0, cost_price=18.0, stock=10)
             db.add(product)
             await db.flush()
 

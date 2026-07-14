@@ -173,6 +173,7 @@ async def catalog_products(db, m: MerchantDB, bucket, s, brand_voice: str):
             name=name,
             description=pv.description or f"{pv.name}.",
             price=pv.suggested_price,
+            baseline_price=pv.suggested_price,
             cost_price=round(pv.suggested_price * DEFAULT_COST_RATIO, 2),
             stock=DEFAULT_STOCK,
             category=pv.category or "footwear",
