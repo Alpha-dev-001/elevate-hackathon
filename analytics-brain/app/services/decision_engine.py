@@ -278,8 +278,15 @@ async def run_decision_cycle(
     # propose_duplicate_merge uses keep_product_id, not product_id — same
     # fallback purpose (which product's name goes in the option card title).
     # A pricing cycle already knows exactly which product it's evaluating
-    # (target_product_id) — that takes priority over parsing tool_args, since
-    # the product may not even be in the top-10 `products` sample above.
+    # (target_product_id) — that takes priority over parsing tool_args.
+    # The DB fallback below is scoped ONLY to that explicit target_product_id
+    # case: a pricing cycle's target may legitimately fall outside the
+    # unordered top-10 `products` sample. When target_product_id is None
+    # (every pre-existing caller, parsing tool_args instead), a miss against
+    # the top-10 sample must leave targeted_product as None, exactly as it
+    # did before this fallback existed — do NOT widen it to tool_args-parsed
+    # ids, or every action type's cost_price/price/narrative silently changes
+    # for merchants with >10 products.
     targeted_pid = target_product_id or tool_args.get("product_id") or tool_args.get("keep_product_id")
     targeted_product = None
     if targeted_pid:
@@ -287,7 +294,7 @@ async def run_decision_cycle(
             if p.id == targeted_pid:
                 targeted_product = p
                 break
-        if targeted_product is None:
+        if targeted_product is None and target_product_id is not None:
             targeted_product = await db.get(ProductDB, targeted_pid)
             if targeted_product and targeted_product.merchant_id != merchant_id:
                 targeted_product = None
