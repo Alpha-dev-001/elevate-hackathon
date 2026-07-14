@@ -284,6 +284,12 @@ async def run_decision_cycle(
         logger.info(
             f"[decision] interceptor blocked {tool_name} for {merchant_id}: {constraint_check}"
         )
+        from app.services import receipts
+        await receipts.append_receipt(
+            db, merchant_id, "blocked",
+            note=f"{tool_name} blocked at decision time: {constraint_check}",
+        )
+        await db.commit()
         return None
 
     # Narrative fields templated from tool call + context — reflects the
@@ -322,6 +328,10 @@ async def run_decision_cycle(
     db.add(action_db)
     await db.commit()
     await db.refresh(action_db)
+
+    from app.services import receipts
+    await receipts.append_receipt(db, merchant_id, "proposed", action_row=action_db)
+    await db.commit()
 
     action = AgentAction(
         id=action_db.id,

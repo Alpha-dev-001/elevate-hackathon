@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60 * 24 * 7  # 7 days — hackathon-friendly session
 
+    # ── Audit receipts ────────────────────────────────────
+    # Optional — if unset, receipts.py derives a distinct key from jwt_secret
+    # (domain-separated, never jwt_secret reused directly) so this quick win
+    # doesn't force a new mandatory env var. Set a dedicated value in
+    # production instead of relying on the derived fallback.
+    receipt_hmac_secret: str = ""
+
     # ── Autopilot action defaults ─────────────────────────
     # Deterministic FALLBACKS only — Qwen chooses the real discount/duration in
     # its decision payload; these apply when it omits one. The upper bound on any

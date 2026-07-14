@@ -8,6 +8,35 @@ from app.core.database import Base
 import time
 
 
+class ReceiptDB(Base):
+    """Tamper-evident audit trail — one row per autopilot lifecycle event
+    (proposed/blocked/approved/dismissed/executed/blocked_at_execution).
+    Hash-chained per merchant (entry_hash covers prev_hash + body, so
+    reordering or deleting an entry breaks every entry after it) and
+    HMAC-signed (so a chain can't be silently regenerated without the
+    server's key). Verified offline by scripts/verify_receipts.py."""
+    __tablename__ = "receipts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(
+        ForeignKey("merchants.id"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    action_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    prev_hash: Mapped[str] = mapped_column(String, nullable=False)
+    entry_hash: Mapped[str] = mapped_column(String, nullable=False)
+    signature: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[int] = mapped_column(
+        BigInteger, default=lambda: int(time.time() * 1000)
+    )
+
+    __table_args__ = (
+        UniqueConstraint("merchant_id", "sequence", name="uq_receipts_merchant_sequence"),
+    )
+
+
 class MerchantDB(Base):
     __tablename__ = "merchants"
 

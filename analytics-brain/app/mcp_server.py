@@ -294,6 +294,9 @@ async def elevate_approve_action(action_id: str, merchant_session_token: str) ->
 
         row.status = "executed" if applied else "blocked_at_execution"
         row.executed_at = int(time.time() * 1000) if applied else None
+
+        from app.services import receipts
+        await receipts.append_receipt(db, row.merchant_id, row.status, action_row=row)
         await db.commit()
 
         # Best-effort WS broadcast (only works if FastAPI is running)
@@ -346,6 +349,9 @@ async def elevate_dismiss_action(action_id: str, merchant_session_token: str) ->
 
         row.status = "dismissed"
         row.merchant_behavior = "dismissed_via_mcp"
+
+        from app.services import receipts
+        await receipts.append_receipt(db, row.merchant_id, "dismissed", action_row=row)
         await db.commit()
 
         # Record the outcome so Qwen learns from the rejection

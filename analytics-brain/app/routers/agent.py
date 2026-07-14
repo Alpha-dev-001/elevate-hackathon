@@ -85,6 +85,9 @@ async def approve_action(
         row.executed_at = int(time.time() * 1000)
     else:
         row.status = "blocked_at_execution"
+
+    from app.services import receipts
+    await receipts.append_receipt(db, row.merchant_id, row.status, action_row=row)
     await db.commit()
 
     # Broadcast store update to all WS connections (even when blocked, so the
@@ -126,6 +129,9 @@ async def dismiss_action(
         raise HTTPException(status_code=403, detail="This action belongs to a different store")
     row.status = "dismissed"
     row.merchant_behavior = "dismissed"
+
+    from app.services import receipts
+    await receipts.append_receipt(db, row.merchant_id, "dismissed", action_row=row)
     await db.commit()
 
     # A dismissed action still teaches Qwen — observe it now (no promo to wait on).
