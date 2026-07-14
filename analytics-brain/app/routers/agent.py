@@ -301,6 +301,52 @@ async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession
     return True
 
 
+async def _register_price_rebalance(row: AgentActionDB, payload: dict, db: AsyncSession) -> bool:
+    """Apply a baseline-relative price change directly to Product.price — not
+    a Promo overlay, the live price itself moves. Returns False if the
+    interceptor's execution-time re-check blocks it (state may have drifted
+    unsafe — e.g. cost_price edited — since proposal)."""
+    from app.services import interceptor
+    from app.services.profile import load_constraints
+
+    product = await db.get(ProductDB, payload.get("product_id", ""))
+    if not product or product.merchant_id != row.merchant_id or not product.is_active:
+        logger.warning(
+            "[agent] price_rebalance: product not found/active for %s", row.id,
+        )
+        return False
+
+    constraints = await load_constraints(db, row.merchant_id)
+    try:
+        new_price = float(payload.get("new_price", product.price))
+    except (TypeError, ValueError):
+        new_price = product.price
+
+    clamped_price, constraint_check, is_blocked = interceptor.enforce_price_rebalance(
+        new_price,
+        baseline_price=product.baseline_price,
+        cost_price=product.cost_price,
+        constraints=constraints,
+        product_id=product.id,
+    )
+    if is_blocked:
+        logger.warning(
+            "[agent] price_rebalance blocked at execution for %s: %s",
+            row.id, constraint_check,
+        )
+        return False
+
+    product.price = clamped_price
+    await db.flush()
+    from app.routers.products import _sync_state_if_live
+    await _sync_state_if_live(db, row.merchant_id)
+    logger.info(
+        "[agent] price_rebalance set %s to $%.2f (baseline $%.2f)",
+        product.id, clamped_price, product.baseline_price,
+    )
+    return True
+
+
 async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> bool:
     """Apply the action's payload to the live store state. Returns False if
     the interceptor's execution-time re-check blocked it — the caller must
@@ -314,6 +360,9 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> bool:
 
     elif row.action_type in _PROMO_LABELS:
         return await _register_promo(row, _PROMO_LABELS[row.action_type], payload, db)
+
+    elif row.action_type == "price_rebalance":
+        return await _register_price_rebalance(row, payload, db)
 
     elif row.action_type == "layout_morph":
         state = await delta_svc.load_state(row.merchant_id)

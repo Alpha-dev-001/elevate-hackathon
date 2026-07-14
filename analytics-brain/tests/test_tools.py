@@ -58,6 +58,14 @@ class TestToolDefinitions:
         assert "new_grid" in props
         assert "new_grid" in tool["function"]["parameters"]["required"]
 
+    def test_price_rebalance_has_product_id_and_new_price(self):
+        """propose_price_rebalance tool must produce product_id + new_price
+        (what agent.py's _register_price_rebalance reads)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_price_rebalance")
+        props = tool["function"]["parameters"]["properties"]
+        assert "product_id" in props
+        assert "new_price" in props
+
     def test_recovery_offer_has_discount_percent(self):
         """recovery_offer tool must produce discount_percent (what _execute_payload reads)."""
         tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_recovery_offer")
