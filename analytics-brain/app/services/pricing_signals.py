@@ -27,20 +27,71 @@ def _yesterday_utc() -> str:
 
 
 def count_signals_for_product(events: list[dict], product_id: str) -> dict:
-    """Pure aggregation: views/cart_adds/purchases for one product out of a
-    raw event-dict list already pulled from Redis. No I/O — easy to test."""
-    views = cart_adds = purchases = 0
+    """Pure aggregation: views/cart_adds for one product out of a raw
+    event-dict list already pulled from Redis. No I/O — easy to test.
+
+    Purchases are NOT counted here — Keys.events structurally never contains
+    a purchase signal (checkout creates an OrderDB row but never fires a
+    behavior event; the only two push_event call sites in the backend,
+    behavior.py:53 and behavior.py:150, never send event_type="purchase").
+    OrderDB is the durable, authoritative source for purchases (same
+    precedent store_review.py's find_underperformer already established for
+    "did this product convert" — see purchase_counts_for_date below), so
+    purchase counting is a separate, DB-backed function, not part of this
+    pure event-list aggregation.
+
+    Note: "add_to_cart" is the real wire-format string the event pipeline
+    writes (behavior.py:33, :53-58) — NOT "cart_add", which is a different
+    pipeline's internal EventType enum value.
+    """
+    views = cart_adds = 0
     for e in events:
         if e.get("product_id") != product_id:
             continue
         et = e.get("event_type")
         if et == "view":
             views += 1
-        elif et == "cart_add":
+        elif et == "add_to_cart":
             cart_adds += 1
-        elif et == "purchase":
-            purchases += 1
-    return {"views": views, "cart_adds": cart_adds, "purchases": purchases}
+    return {"views": views, "cart_adds": cart_adds}
+
+
+async def purchase_counts_for_date(
+    db: "AsyncSession", merchant_id: str, date_str: str
+) -> dict[str, int]:
+    """Sum quantities purchased per product from real OrderDB rows created
+    on date_str (UTC). OrderDB.items is a JSON list of {"product_id", "qty",
+    ...} dicts (OrderItem shape, schemas.py:754-759) — same flattening
+    pattern store_review.py's extract_ordered_product_ids already uses for
+    orders, just counting quantities instead of collecting a set of ids."""
+    from sqlalchemy import select
+    from datetime import datetime, timezone, timedelta
+    from app.models.db_models import OrderDB
+
+    day_start = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    start_ms = int(day_start.timestamp() * 1000)
+    end_ms = int(day_end.timestamp() * 1000)
+
+    orders = (
+        await db.execute(
+            select(OrderDB)
+            .where(OrderDB.merchant_id == merchant_id)
+            .where(OrderDB.created_at >= start_ms)
+            .where(OrderDB.created_at < end_ms)
+        )
+    ).scalars().all()
+
+    counts: dict[str, int] = {}
+    for order in orders:
+        for item in order.items or []:
+            if not isinstance(item, dict):
+                continue
+            pid = item.get("product_id")
+            qty = item.get("qty")
+            if pid and isinstance(qty, int):
+                counts[pid] = counts.get(pid, 0) + qty
+    return counts
 
 
 async def rollup_daily_signals(
@@ -70,6 +121,12 @@ async def rollup_daily_signals(
             logger.warning("[pricing_signals] event read failed for %s: %s", merchant.id, e)
             continue
 
+        try:
+            purchase_counts = await purchase_counts_for_date(db, merchant.id, date_str)
+        except Exception as e:  # noqa: BLE001 — one merchant's DB blip must not skip the rest
+            logger.warning("[pricing_signals] purchase count failed for %s: %s", merchant.id, e)
+            purchase_counts = {}
+
         products = (
             await db.execute(
                 select(ProductDB)
@@ -81,6 +138,7 @@ async def rollup_daily_signals(
         for product in products:
             try:
                 counts = count_signals_for_product(events, product.id)
+                purchases = purchase_counts.get(product.id, 0)
                 existing = await db.scalar(
                     select(ProductPriceHistoryDB)
                     .where(ProductPriceHistoryDB.product_id == product.id)
@@ -89,7 +147,7 @@ async def rollup_daily_signals(
                 if existing:
                     existing.views = counts["views"]
                     existing.cart_adds = counts["cart_adds"]
-                    existing.purchases = counts["purchases"]
+                    existing.purchases = purchases
                     existing.price_active = product.price
                 else:
                     db.add(ProductPriceHistoryDB(
@@ -98,7 +156,7 @@ async def rollup_daily_signals(
                         date=date_str,
                         views=counts["views"],
                         cart_adds=counts["cart_adds"],
-                        purchases=counts["purchases"],
+                        purchases=purchases,
                         price_active=product.price,
                     ))
                 written += 1
