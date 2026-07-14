@@ -139,6 +139,68 @@ def enforce_discount(
     return d, violations
 
 
+def enforce_uplift(
+    baseline_price: float,
+    proposed_price: float,
+    constraints: BusinessConstraints,
+) -> tuple[float, list[Violation]]:
+    """Clamp a proposed price increase to the merchant's uplift ceiling above
+    baseline_price. Never blocks — an upward move can never sell below cost by
+    definition, so there is no Layer 3 case here, only Layer 2's ceiling.
+
+    Returns (final_price, violations), same shape as enforce_price.
+    """
+    violations: list[Violation] = []
+    ceiling = round(baseline_price * (1 + constraints.max_uplift_percent / 100), 2)
+    if proposed_price > ceiling:
+        violations.append(
+            Violation(
+                rule="max_uplift",
+                severity="warning",
+                message=(
+                    f"${proposed_price:.2f} exceeds your {constraints.max_uplift_percent:g}% "
+                    f"uplift ceiling above the ${baseline_price:.2f} baseline. "
+                    f"Clamped to ${ceiling:.2f}."
+                ),
+                original_value=proposed_price,
+                clamped_value=ceiling,
+            )
+        )
+        return ceiling, violations
+    return round(proposed_price, 2), violations
+
+
+def enforce_price_rebalance(
+    new_price: float,
+    *,
+    baseline_price: float,
+    cost_price: float,
+    constraints: BusinessConstraints,
+    product_id: str = "",
+) -> tuple[float, str, bool]:
+    """Route a PRICE_REBALANCE proposal through the correct floor/ceiling:
+    enforce_price (margin floor + below-cost block) for a move down from
+    baseline, enforce_uplift (uplift ceiling, never blocks) for a move at or
+    above baseline. Mirrors enforce_action_discount's (value, message,
+    is_blocked) return shape so callers handle both identically.
+    """
+    if new_price < baseline_price:
+        final_price, violations = enforce_price(
+            cost_price=cost_price, proposed_price=new_price,
+            constraints=constraints, product_id=product_id,
+        )
+        if blocked(violations):
+            message = next(
+                (v.message for v in violations if v.severity == "blocked"),
+                "Blocked by interceptor.",
+            )
+            return final_price, message, True
+        return final_price, "; ".join(v.message for v in violations), False
+
+    final_price, violations = enforce_uplift(baseline_price, new_price, constraints)
+    return final_price, "; ".join(v.message for v in violations), False
+
+
 def blocked(violations: list[Violation]) -> bool:
     return any(v.severity == "blocked" for v in violations)
 
