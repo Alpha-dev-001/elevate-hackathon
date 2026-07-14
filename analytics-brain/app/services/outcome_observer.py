@@ -67,7 +67,9 @@ async def observe_outcome(
         from app.services.autopilot_trust import update_trust_streak
         target_pid = (action.payload or {}).get("product_id", "")
         if target_pid:
-            approved = behavior != "dismissed"
+            # Use entry.merchant_behavior (fallback-aware) instead of raw behavior param
+            # to gracefully handle cases where behavior is None at call time.
+            approved = entry.merchant_behavior != "dismissed"
             outcome_negative = count == 0  # no attributed orders == negative outcome
             try:
                 await update_trust_streak(
