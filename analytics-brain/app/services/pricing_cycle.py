@@ -433,6 +433,131 @@ async def run_pricing_cycle(db: "AsyncSession", redis) -> list:
     return actions
 
 
+def should_revert(views_after: int, cart_adds_after: int, purchases_after: int) -> bool:
+    """Engagement without conversion — the reversion trigger over a completed
+    3-day post-move window. 'Engagement' means at least some views or
+    cart-adds happened; 'without conversion' means zero purchases. A window
+    with nothing happening at all is just low traffic, a distinct signal
+    from 'click but no buy' (spec: 'meaningful specifically')."""
+    return (views_after > 0 or cart_adds_after > 0) and purchases_after == 0
+
+
+def compute_reversion_price(current_price: float, baseline_price: float) -> float:
+    """Steps the live price halfway back toward baseline_price — a simple,
+    explicit halving step, not a tuned decay constant."""
+    gap = baseline_price - current_price
+    return round(current_price + gap / 2, 2)
+
+
+async def check_reversion_triggers(db: "AsyncSession", redis) -> int:
+    """Run once per tick, BEFORE apply_reversions. For each comparable-
+    informed PRICE_REBALANCE move whose 3-day post-move window has just
+    completed, decide whether to START reverting. Each move is checked at
+    most once ever — payload["reversion_checked"] is set immediately so a
+    move already evaluated (whichever way it went) is never re-evaluated,
+    which is what keeps this from re-triggering on the same static window
+    every subsequent tick. Returns the number of products newly added to
+    the reverting set this call."""
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.models.db_models import AgentActionDB, ProductPriceHistoryDB
+    from app.core.redis import Keys
+
+    started = 0
+    candidates = (
+        await db.execute(
+            select(AgentActionDB)
+            .where(AgentActionDB.action_type == "price_rebalance")
+            .where(AgentActionDB.status == "executed")
+        )
+    ).scalars().all()
+
+    for action in candidates:
+        payload = action.payload or {}
+        if not payload.get("comparable_informed") or payload.get("reversion_checked"):
+            continue
+        if not action.executed_at:
+            continue
+        try:
+            move_date = datetime.fromtimestamp(
+                action.executed_at / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d")
+            product_id = payload.get("product_id", "")
+            window_rows = (
+                await db.execute(
+                    select(ProductPriceHistoryDB)
+                    .where(ProductPriceHistoryDB.product_id == product_id)
+                    .where(ProductPriceHistoryDB.date > move_date)
+                    .order_by(ProductPriceHistoryDB.date.asc())
+                    .limit(3)
+                )
+            ).scalars().all()
+            if len(window_rows) < 3:
+                continue  # window not complete yet — check again next tick, don't mark checked
+
+            views_after = sum(r.views for r in window_rows)
+            cart_adds_after = sum(r.cart_adds for r in window_rows)
+            purchases_after = sum(r.purchases for r in window_rows)
+
+            action.payload = {**payload, "reversion_checked": True}
+            if should_revert(views_after, cart_adds_after, purchases_after):
+                await redis.sadd(Keys.reverting_products(), product_id)
+                started += 1
+        except Exception as e:  # noqa: BLE001 — one action's failure must not skip the rest
+            logger.warning(
+                "[pricing_cycle] reversion trigger check failed for action %s: %s", action.id, e,
+            )
+
+    await db.commit()
+    return started
+
+
+async def apply_reversions(db: "AsyncSession", redis) -> int:
+    """Run once per tick, after check_reversion_triggers. For every product
+    currently in the reverting set: stop (remove from the set) if the most
+    recent rolled-up day shows a purchase, or if the price has already
+    reached baseline; otherwise apply one more halving step. Per-product
+    try/except."""
+    from sqlalchemy import select
+    from app.models.db_models import ProductDB, ProductPriceHistoryDB
+    from app.core.redis import Keys
+
+    reverted = 0
+    active_pids = await redis.smembers(Keys.reverting_products())
+
+    for product_id in active_pids:
+        try:
+            product = await db.get(ProductDB, product_id)
+            if not product or not product.is_active:
+                await redis.srem(Keys.reverting_products(), product_id)
+                continue
+
+            latest_row = await db.scalar(
+                select(ProductPriceHistoryDB)
+                .where(ProductPriceHistoryDB.product_id == product_id)
+                .order_by(ProductPriceHistoryDB.date.desc())
+            )
+            if latest_row and latest_row.purchases > 0:
+                # A purchase occurred — stop reverting, reasoning restarts from real data.
+                await redis.srem(Keys.reverting_products(), product_id)
+                continue
+
+            if abs(product.price - product.baseline_price) < 0.01:
+                await redis.srem(Keys.reverting_products(), product_id)
+                continue
+
+            product.price = compute_reversion_price(product.price, product.baseline_price)
+            await db.flush()
+            from app.routers.products import _sync_state_if_live
+            await _sync_state_if_live(db, product.merchant_id)
+            reverted += 1
+        except Exception as e:  # noqa: BLE001 — one product's failure must not skip the rest
+            logger.warning("[pricing_cycle] reversion step failed for product %s: %s", product_id, e)
+
+    await db.commit()
+    return reverted
+
+
 def start_pricing_background_loop() -> None:
     """Same in-process asyncio loop shape as store_review.py's
     start_background_loop. The outer loop ticks hourly
@@ -448,6 +573,10 @@ def start_pricing_background_loop() -> None:
         try:
             async with factory() as db:
                 redis = await get_redis()
+                # Reversion runs BEFORE fresh proposals so a reverted price is
+                # what run_pricing_cycle reasons over this same tick, not stale.
+                await check_reversion_triggers(db, redis)
+                await apply_reversions(db, redis)
                 actions = await run_pricing_cycle(db, redis)
                 if actions:
                     logger.info("[pricing_cycle] %d pricing action(s) this tick", len(actions))

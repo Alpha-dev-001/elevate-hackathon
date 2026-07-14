@@ -64,6 +64,15 @@ class Keys:
         return f"elevate:price_check:{product_id}:escalation_streak"
 
     @staticmethod
+    def reverting_products() -> str:
+        """Global set of product_ids currently stepping back toward baseline
+        after a comparable-informed move showed engagement without
+        conversion. Membership is added by pricing_cycle.check_reversion_triggers,
+        removed by pricing_cycle.apply_reversions once baseline is reached or
+        a purchase occurs."""
+        return "elevate:reverting_products"
+
+    @staticmethod
     def qr_campaign(merchant_id: str, campaign_id: str) -> str:
         return f"elevate:{merchant_id}:qr:{campaign_id}"
 
