@@ -54,8 +54,11 @@ def grounded_gmv(action_type: str, anomaly_count: int, avg_price: float) -> floa
     """A revenue-impact estimate tied to REAL signals instead of a Qwen guess:
     the anomaly magnitude × the catalog's average price × a tunable per-type rate.
     Returns 0.0 when we can't ground it (caller then falls back to Qwen's number)."""
-    if action_type == "duplicate_merge":
-        return 0.0  # catalog-hygiene action, no grounded revenue basis
+    if action_type in ("duplicate_merge", "price_rebalance"):
+        # duplicate_merge: catalog-hygiene action, no grounded revenue basis.
+        # price_rebalance: a repricing's impact isn't "anomaly count × avg
+        # price × rate" — there's no anomaly count in the same sense here.
+        return 0.0
     if avg_price <= 0 or anomaly_count <= 0:
         return 0.0
     s = get_settings()
@@ -111,12 +114,21 @@ async def run_decision_cycle(
     anomaly_desc: str,
     db: "AsyncSession",
     redis: "Redis",
+    *,
+    tools: list[dict] | None = None,
+    target_product_id: str | None = None,
+    prompt_override: str | None = None,
 ) -> AgentAction | None:
     """Run a full Qwen decision cycle and persist + broadcast the result.
 
     Returns the created AgentAction or None if:
     - there is already a pending action (one at a time, unless it's stale)
     - Qwen returns garbage we can't trust
+
+    tools/target_product_id/prompt_override are set by run_pricing_cycle
+    (pricing_cycle.py) for a PRICE_REBALANCE proposal scoped to one specific
+    product with its own prompt shape — every other caller leaves all three
+    at their defaults and gets today's behavior unchanged.
     """
     from sqlalchemy import select
 
@@ -199,15 +211,22 @@ async def run_decision_cycle(
         entries = []
     memory_context = build_memory_context(entries)
 
-    prompt = compose_decision_prompt(
-        store_name=merchant.store_name,
-        mood=mood,
-        brand_voice=brand_voice,
-        brand_rules_summary=brand_rules_summary,
-        products_summary=products_summary,
-        anomaly_description=anomaly_desc,
-        memory_context=memory_context,
-    )
+    if prompt_override is not None:
+        # A pricing cycle (run_pricing_cycle, pricing_cycle.py) builds its own
+        # product-specific prompt via compose_pricing_prompt — the anomaly/
+        # catalog-summary prompt shape here doesn't fit a single-product
+        # repricing decision.
+        prompt = prompt_override
+    else:
+        prompt = compose_decision_prompt(
+            store_name=merchant.store_name,
+            mood=mood,
+            brand_voice=brand_voice,
+            brand_rules_summary=brand_rules_summary,
+            products_summary=products_summary,
+            anomaly_description=anomaly_desc,
+            memory_context=memory_context,
+        )
     estimated_tokens = len(prompt) // 4  # rough char/4 heuristic for the terminal badge
 
     try:
@@ -217,7 +236,7 @@ async def run_decision_cycle(
             max_tokens=1000,
             temperature=0.5,
             timeout=45.0,
-            tools=DECISION_TOOLS,
+            tools=tools or DECISION_TOOLS,
             tool_choice="auto",
             merchant_id=merchant_id,
             step="decision_cycle",
@@ -255,16 +274,23 @@ async def run_decision_cycle(
     # Qwen's reasoning comes from the message content (alongside tool_calls)
     reasoning = (message.get("content") or "")[:1000]
 
-    # Use the product Qwen actually targeted, not just the first in the list
+    # Use the product Qwen actually targeted, not just the first in the list.
     # propose_duplicate_merge uses keep_product_id, not product_id — same
     # fallback purpose (which product's name goes in the option card title).
-    targeted_pid = tool_args.get("product_id") or tool_args.get("keep_product_id")
+    # A pricing cycle already knows exactly which product it's evaluating
+    # (target_product_id) — that takes priority over parsing tool_args, since
+    # the product may not even be in the top-10 `products` sample above.
+    targeted_pid = target_product_id or tool_args.get("product_id") or tool_args.get("keep_product_id")
     targeted_product = None
     if targeted_pid:
         for p in products:
             if p.id == targeted_pid:
                 targeted_product = p
                 break
+        if targeted_product is None:
+            targeted_product = await db.get(ProductDB, targeted_pid)
+            if targeted_product and targeted_product.merchant_id != merchant_id:
+                targeted_product = None
     targeted_product_name = targeted_product.name if targeted_product else None
     product_name_for_narrative = targeted_product_name or (products[0].name if products else None)
 
@@ -275,11 +301,25 @@ async def run_decision_cycle(
     constraints = await load_constraints(db, merchant_id)
     cost_price = targeted_product.cost_price if targeted_product else 0.0
     price = targeted_product.price if targeted_product else 0.0
-    tool_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
-        action_type_enum, tool_args,
-        cost_price=cost_price, price=price, constraints=constraints,
-        product_id=targeted_pid or "",
-    )
+
+    if action_type_enum == AgentActionType.PRICE_REBALANCE:
+        baseline_price = targeted_product.baseline_price if targeted_product else price
+        try:
+            new_price = float(tool_args.get("new_price", price))
+        except (TypeError, ValueError):
+            new_price = price
+        clamped_price, constraint_check, is_blocked = interceptor.enforce_price_rebalance(
+            new_price, baseline_price=baseline_price, cost_price=cost_price,
+            constraints=constraints, product_id=targeted_pid or "",
+        )
+        tool_args = dict(tool_args)
+        tool_args["new_price"] = clamped_price
+    else:
+        tool_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
+            action_type_enum, tool_args,
+            cost_price=cost_price, price=price, constraints=constraints,
+            product_id=targeted_pid or "",
+        )
     if is_blocked:
         logger.info(
             f"[decision] interceptor blocked {tool_name} for {merchant_id}: {constraint_check}"
