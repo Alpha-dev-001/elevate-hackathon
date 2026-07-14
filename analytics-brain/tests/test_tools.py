@@ -17,8 +17,8 @@ from app.models.schemas import AgentActionType
 class TestToolDefinitions:
     """Every tool must be a valid OpenAI-compatible function definition."""
 
-    def test_seven_tools_defined(self):
-        assert len(DECISION_TOOLS) == 7
+    def test_eight_tools_defined(self):
+        assert len(DECISION_TOOLS) == 8
 
     def test_all_tools_have_required_fields(self):
         for tool in DECISION_TOOLS:
@@ -252,3 +252,32 @@ class TestToolMapping:
 
     def test_feature_product_maps_correctly(self):
         assert TOOL_TO_ACTION_TYPE["propose_feature_product"] == AgentActionType.FEATURE_PRODUCT
+
+
+def test_propose_price_rebalance_is_registered():
+    from app.services.tools import DECISION_TOOLS, TOOL_TO_ACTION_TYPE
+    from app.models.schemas import AgentActionType
+
+    names = [t["function"]["name"] for t in DECISION_TOOLS]
+    assert "propose_price_rebalance" in names
+    assert TOOL_TO_ACTION_TYPE["propose_price_rebalance"] == AgentActionType.PRICE_REBALANCE
+
+    tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_price_rebalance")
+    required = tool["function"]["parameters"]["required"]
+    assert "product_id" in required
+    assert "new_price" in required
+    assert "reasoning_signals" in required
+
+
+def test_narrative_from_tool_price_rebalance():
+    from app.services.tools import narrative_from_tool
+
+    narrative = narrative_from_tool(
+        "propose_price_rebalance",
+        {"product_id": "p1", "new_price": 24.5, "reasoning_signals": "purchases up 40% at current price"},
+        "Leather Slides",
+        "Price review: Leather Slides",
+    )
+    assert "Leather Slides" in narrative["title"]
+    assert "24.5" in narrative["title"] or "24.50" in narrative["title"]
+    assert "purchases up 40%" in narrative["description"]
