@@ -43,20 +43,33 @@ def best_active_promo(
 def effective_price(
     base_price: float,
     promo: Promo | None,
+    baseline_price: float | None = None,
 ) -> tuple[float, float | None, str | None]:
     """Returns (price, compare_at, label).
 
-    With no promo: (base_price, None, None).
-    With a promo:  (discounted, base_price, promo.label) — compare_at is the
-    original so the storefront can strike it through.
+    With an active promo: unchanged from before — (discounted, base_price,
+    promo.label), baseline_price is irrelevant once a promo is active.
+
+    With no active promo and baseline_price given: a dynamic-pricing autopilot
+    move BELOW baseline gets the same strike-through treatment as a promo
+    (compare_at = baseline_price, no label — asymmetric by design, see the
+    dynamic-baseline-pricing spec's "UI treatment" section). A move AT or
+    ABOVE baseline renders as a plain price — no compare_at, no label, no
+    promotional styling for a price increase.
+
+    With no promo and no baseline_price (every pre-existing caller that
+    doesn't pass it): unchanged — (base_price, None, None).
     """
-    if promo is None or promo.discount_percent <= 0:
-        return round(base_price, 2), None, None
-    discounted = round(base_price * (1 - promo.discount_percent / 100), 2)
-    # Never let rounding push the shown price to/above the original.
-    if discounted >= base_price:
-        return round(base_price, 2), None, None
-    return discounted, round(base_price, 2), promo.label
+    if promo is not None and promo.discount_percent > 0:
+        discounted = round(base_price * (1 - promo.discount_percent / 100), 2)
+        # Never let rounding push the shown price to/above the original.
+        if discounted < base_price:
+            return discounted, round(base_price, 2), promo.label
+
+    if baseline_price is not None and base_price < baseline_price:
+        return round(base_price, 2), round(baseline_price, 2), None
+
+    return round(base_price, 2), None, None
 
 
 def margin_floor_price(

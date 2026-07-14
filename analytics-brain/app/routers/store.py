@@ -92,7 +92,7 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
             if not p.qwen_generated and p.description is None and p.price <= 0:
                 continue  # skip anything malformed
             promo = best_active_promo(p.id, state.active_promos, now)
-            price, compare_at, promo_label = effective_price(p.price, promo)
+            price, compare_at, promo_label = effective_price(p.price, promo, baseline_price=p.baseline_price)
             if p.category and p.category not in seen_categories:
                 seen_categories.append(p.category)
             products.append(
