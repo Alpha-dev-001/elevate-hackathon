@@ -81,6 +81,15 @@ def test_missing_discount_percent_defaults_to_zero_not_a_crash():
     assert args["discount_percent"] == 0
 
 
+def test_cart_dwell_nudge_is_ceiling_only_no_below_cost_check():
+    args, msg, blocked = enforce_action_discount(
+        AgentActionType.CART_DWELL_NUDGE, {"discount_percent": 90},
+        cost_price=0.0, price=0.0, constraints=DEFAULT,
+    )
+    assert blocked is False
+    assert args["discount_percent"] == 40  # clamped to ceiling, never blocked
+
+
 def test_min_price_above_actual_price_clamps_to_zero_not_negative():
     # Merchant misconfigured min_price ($25) above the product's actual price
     # ($20) — floor_discount = (1 - 25/20) * 100 = -25%, which is nonsensical.

@@ -320,6 +320,7 @@ def enforce_action_discount(
         AgentActionType.FLASH_SALE,
         AgentActionType.SCARCITY_PRICE,
         AgentActionType.RECOVERY_OFFER,
+        AgentActionType.CART_DWELL_NUDGE,
     ):
         return tool_args, "", False
 
@@ -328,7 +329,10 @@ def enforce_action_discount(
     except (TypeError, ValueError):
         discount = 0.0
 
-    if action_type == AgentActionType.RECOVERY_OFFER:
+    if action_type in (AgentActionType.RECOVERY_OFFER, AgentActionType.CART_DWELL_NUDGE):
+        # Both are order-level (no single product to protect margin on) —
+        # same normalized 0-100 scale, same "no below-cost concept" reasoning
+        # documented in this function's own docstring for RECOVERY_OFFER.
         final_discount, violations = enforce_discount(
             cost_price=0.0, base_price=100.0,
             discount_percent=discount, constraints=constraints,

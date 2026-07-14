@@ -73,6 +73,14 @@ class Keys:
         return "elevate:reverting_products"
 
     @staticmethod
+    def active_carts(merchant_id: str) -> str:
+        """Set of session_ids with a currently non-empty cart for this
+        merchant — the enumeration index cart_dwell.py's periodic tick needs
+        (carts are otherwise only addressable by a known (merchant_id,
+        session_id) pair, with no way to list "all carts for a merchant")."""
+        return f"elevate:{merchant_id}:active_carts"
+
+    @staticmethod
     def qr_campaign(merchant_id: str, campaign_id: str) -> str:
         return f"elevate:{merchant_id}:qr:{campaign_id}"
 

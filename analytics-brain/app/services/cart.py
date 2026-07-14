@@ -96,6 +96,14 @@ async def _save(cart: Cart) -> None:
         cart.model_dump_json(),
         ex=TTL.CART,
     )
+    # Keep the enumerable active-carts index in sync — every cart mutation
+    # (add_item, set_item, including the qty<=0 removal path) goes through
+    # this one function, so this is the single choke point to hook rather
+    # than touching each call site separately.
+    if cart.items:
+        await redis.sadd(Keys.active_carts(cart.merchant_id), cart.session_id)
+    else:
+        await redis.srem(Keys.active_carts(cart.merchant_id), cart.session_id)
 
 
 async def _live_product(db: AsyncSession, merchant_id: str, product_id: str) -> ProductDB:
@@ -201,6 +209,7 @@ async def clear_cart(merchant_id: str, session_id: str) -> Cart:
     try:
         redis = await get_redis()
         await redis.delete(Keys.cart(merchant_id, session_id))
+        await redis.srem(Keys.active_carts(merchant_id), session_id)
     except Exception as e:
         logger.warning(f"[cart] clear failed for {merchant_id}/{session_id}: {e}")
     return _empty(merchant_id, session_id)

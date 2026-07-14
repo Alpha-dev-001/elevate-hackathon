@@ -258,6 +258,12 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
     return True
 
 
+_RECOVERY_LABELS = {
+    "recovery_offer": "Complete your order — {d}% off",
+    "cart_dwell_nudge": "Still deciding? {d}% off if you complete now",
+}
+
+
 async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession) -> bool:
     """Set the merchant's active ORDER-LEVEL cart-recovery discount. Returns
     False if the interceptor's execution-time re-check blocks it."""
@@ -275,9 +281,9 @@ async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession
 
     constraints = await load_constraints(db, row.merchant_id)
     payload_with_default = dict(payload)
-    payload_with_default.setdefault("discount_percent", _default_discount("recovery_offer"))
+    payload_with_default.setdefault("discount_percent", _default_discount(row.action_type))
     clamped_args, constraint_check, is_blocked = interceptor.enforce_action_discount(
-        AgentActionType.RECOVERY_OFFER, payload_with_default,
+        AgentActionType(row.action_type), payload_with_default,
         cost_price=0.0, price=0.0, constraints=constraints,
     )
     if is_blocked:
@@ -289,9 +295,10 @@ async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession
 
     discount = clamped_args["discount_percent"]
     expires_at = _payload_duration_ms(payload)
+    label_tmpl = _RECOVERY_LABELS.get(row.action_type, _RECOVERY_LABELS["recovery_offer"])
     state.recovery = RecoveryOffer(
         percent=discount,
-        label=f"Complete your order — {int(discount)}% off",
+        label=label_tmpl.format(d=int(discount)),
         expires_at=expires_at,
         promo_id=row.promo_id,
         triggered_by="auto",
@@ -355,7 +362,7 @@ async def _execute_payload(row: AgentActionDB, db: AsyncSession) -> bool:
 
     payload = row.payload or {}
 
-    if row.action_type == "recovery_offer":
+    if row.action_type in ("recovery_offer", "cart_dwell_nudge"):
         return await _register_recovery(row, payload, db)
 
     elif row.action_type in _PROMO_LABELS:

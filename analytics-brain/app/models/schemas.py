@@ -83,6 +83,7 @@ class AgentActionType(str, Enum):
     DUPLICATE_MERGE = "duplicate_merge"
     FEATURE_PRODUCT = "feature_product"
     PRICE_REBALANCE = "price_rebalance"
+    CART_DWELL_NUDGE = "cart_dwell_nudge"
 
 class AgentActionStatus(str, Enum):
     PENDING = "pending"

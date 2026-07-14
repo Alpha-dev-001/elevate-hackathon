@@ -17,8 +17,8 @@ from app.models.schemas import AgentActionType
 class TestToolDefinitions:
     """Every tool must be a valid OpenAI-compatible function definition."""
 
-    def test_eight_tools_defined(self):
-        assert len(DECISION_TOOLS) == 8
+    def test_nine_tools_defined(self):
+        assert len(DECISION_TOOLS) == 9
 
     def test_all_tools_have_required_fields(self):
         for tool in DECISION_TOOLS:
@@ -93,6 +93,13 @@ class TestToolDefinitions:
         required = tool["function"]["parameters"]["required"]
         assert "product_id" in required
         assert "featured_label" in required
+
+    def test_cart_dwell_nudge_has_discount_percent(self):
+        """cart_dwell_nudge tool must produce discount_percent (what
+        agent.py's _register_recovery reads via _execute_payload)."""
+        tool = next(t for t in DECISION_TOOLS if t["function"]["name"] == "propose_cart_dwell_nudge")
+        props = tool["function"]["parameters"]["properties"]
+        assert "discount_percent" in props
 
 
 # ---------------------------------------------------------------------------

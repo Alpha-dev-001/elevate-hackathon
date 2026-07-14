@@ -225,6 +225,27 @@ DECISION_TOOLS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_cart_dwell_nudge",
+            "description": (
+                "Nudge a customer whose cart has sat untouched for a while but "
+                "who hasn't left yet — an order-level discount to encourage "
+                "completing checkout now, before they abandon."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "discount_percent": {
+                        "type": "number",
+                        "description": "Nudge discount percentage, e.g. 8 for 8% off cart total",
+                    },
+                },
+                "required": ["discount_percent"],
+            },
+        },
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -240,6 +261,7 @@ TOOL_TO_ACTION_TYPE: dict[str, AgentActionType] = {
     "propose_duplicate_merge": AgentActionType.DUPLICATE_MERGE,
     "propose_feature_product": AgentActionType.FEATURE_PRODUCT,
     "propose_price_rebalance": AgentActionType.PRICE_REBALANCE,
+    "propose_cart_dwell_nudge": AgentActionType.CART_DWELL_NUDGE,
 }
 
 # ---------------------------------------------------------------------------
@@ -330,6 +352,14 @@ def narrative_from_tool(
         return {
             "title": f"Price Rebalance: {name} → ${new_price:.2f}",
             "description": str(signals)[:300],
+            "trigger": anomaly_desc[:200],
+            "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
+        }
+
+    if tool_name == "propose_cart_dwell_nudge":
+        return {
+            "title": f"Cart Nudge: {d:g}% off to complete checkout",
+            "description": f"Order-level nudge for a cart that's gone quiet — {short_anomaly}",
             "trigger": anomaly_desc[:200],
             "brand_check": f"Aligned with {brand_voice} voice" if brand_voice else "Auto-generated via tool calling",
         }
