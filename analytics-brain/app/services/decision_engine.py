@@ -354,6 +354,19 @@ async def run_decision_cycle(
     if est_gmv <= 0:
         est_gmv = float(tool_args.get("estimated_gmv", 0) or 0)
 
+    # Graduated autonomy — PRICE_REBALANCE only. A trusted (merchant, product)
+    # pair with a move already inside the interceptor-clamped range executes
+    # immediately instead of waiting for merchant approval; every other
+    # action type, and every PRICE_REBALANCE below the trust threshold or
+    # outside the auto-apply band, takes the unchanged "pending" path.
+    auto_trusted = False
+    if action_type_enum == AgentActionType.PRICE_REBALANCE and targeted_product:
+        from app.services.autopilot_trust import get_trust_streak, should_auto_apply
+        streak = await get_trust_streak(merchant_id, targeted_pid, "price_rebalance", db)
+        auto_trusted = should_auto_apply(
+            streak, tool_args["new_price"], targeted_product.baseline_price, constraints,
+        )
+
     action_db = AgentActionDB(
         id=str(uuid4()),
         merchant_id=merchant_id,
@@ -368,8 +381,11 @@ async def run_decision_cycle(
         payload=tool_args,  # tool args become the execution payload directly
         brand_check=narrative["brand_check"][:500],
         constraint_check=constraint_check,
-        status="pending",
+        status="executed" if auto_trusted else "pending",
         created_at=now,
+        approved_at=now if auto_trusted else None,
+        executed_at=now if auto_trusted else None,
+        merchant_behavior="auto_trusted" if auto_trusted else None,
         trigger_description=anomaly_desc[:1000],
     )
     db.add(action_db)
@@ -377,7 +393,25 @@ async def run_decision_cycle(
     await db.refresh(action_db)
 
     from app.services import receipts
-    await receipts.append_receipt(db, merchant_id, "proposed", action_row=action_db)
+    if auto_trusted:
+        from app.routers.agent import _execute_payload, _broadcast_state_update
+        applied = await _execute_payload(action_db, db)
+        if not applied:
+            # State drifted unsafe between the interceptor check above and
+            # execution (rare, defense-in-depth) — fall back to a normal
+            # gated card instead of silently losing the proposal.
+            action_db.status = "pending"
+            action_db.approved_at = None
+            action_db.executed_at = None
+            action_db.merchant_behavior = None
+            await db.commit()
+            await receipts.append_receipt(db, merchant_id, "proposed", action_row=action_db)
+        else:
+            await db.commit()
+            await receipts.append_receipt(db, merchant_id, "executed", action_row=action_db)
+            await _broadcast_state_update(merchant_id)
+    else:
+        await receipts.append_receipt(db, merchant_id, "proposed", action_row=action_db)
     await db.commit()
 
     action = AgentAction(
