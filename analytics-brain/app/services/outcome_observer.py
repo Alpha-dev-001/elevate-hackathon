@@ -62,6 +62,23 @@ async def observe_outcome(
     )
     await write_memory(action.merchant_id, entry, db, redis)
     logger.info("[observer] memory written for %s: %s → %s", action.merchant_id, action.action_type, entry.outcome)
+
+    if action.action_type == "price_rebalance":
+        from app.services.autopilot_trust import update_trust_streak
+        target_pid = (action.payload or {}).get("product_id", "")
+        if target_pid:
+            approved = behavior != "dismissed"
+            outcome_negative = count == 0  # no attributed orders == negative outcome
+            try:
+                await update_trust_streak(
+                    action.merchant_id, target_pid, "price_rebalance", db,
+                    approved=approved, outcome_negative=outcome_negative,
+                )
+            except Exception as e:  # noqa: BLE001 — trust tracking must never block outcome observation
+                logger.warning(
+                    "[outcome_observer] trust streak update failed for %s: %s", action.id, e,
+                )
+
     return entry
 
 
