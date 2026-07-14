@@ -195,7 +195,10 @@ async def flag_suspicious_signals(db: "AsyncSession", *, target_date: str | None
     against its own trailing 7-day average and mark signal_quality='suspect'
     if it looks gamed. Advisory only — never blocks anything, just excludes
     that day's row from what compose_pricing_prompt shows Qwen (Task 8).
-    Per-product try/except, same discipline as rollup_daily_signals."""
+    Per-product try/except, same discipline as rollup_daily_signals.
+
+    Trailing average excludes previously-flagged suspect days to prevent a
+    sustained gaming campaign from poisoning its own future baseline."""
     from sqlalchemy import select, func
     from app.models.db_models import ProductPriceHistoryDB
 
@@ -218,6 +221,7 @@ async def flag_suspicious_signals(db: "AsyncSession", *, target_date: str | None
                 .where(ProductPriceHistoryDB.product_id == row.product_id)
                 .where(ProductPriceHistoryDB.date >= cutoff)
                 .where(ProductPriceHistoryDB.date < date_str)
+                .where(ProductPriceHistoryDB.signal_quality != "suspect")
             )
             trailing_avg = float(trailing_avg or 0.0)
             if is_suspicious(row.views, row.cart_adds, trailing_avg):
