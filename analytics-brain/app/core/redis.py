@@ -100,5 +100,10 @@ class TTL:
     DELTA_LOG = 86400 * 7   # 7 days
     CART = 86400 * 2        # 2 days — outlives a browse session but stays ephemeral
     CATALOG_REVIEW = 86400  # 1 day — cached Qwen observation, re-run on demand
-    EVENTS = 3600           # 1 hour — behavior events; only need last N for decision cycle
+    # 25h (not 24h) — the daily signal-rollup job (pricing_signals.rollup_daily_signals)
+    # reads "yesterday's" events once a day; a plain 24h TTL risks the list expiring
+    # in the gap between "last event of the day" and "the job actually runs". Real-
+    # time anomaly detection (behavior_tracker) only ever reads the first 100 of the
+    # capped 500-item list regardless of TTL, so this is a zero-cost change for it.
+    EVENTS = 90000          # 25 hours — long enough for the once-daily signal rollup
     QWEN_USAGE = 86400 * 7  # 7 days — token usage log per merchant
