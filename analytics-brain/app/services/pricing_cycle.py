@@ -213,3 +213,253 @@ def compose_pricing_prompt(
         history_summary=history_summary,
         comparable_block=comparable_block, memory_block=memory_block,
     )
+
+
+import os
+import time as _time
+from app.core.redis import Keys
+
+# Env-configurable, same pattern as ANOMALY_THRESHOLD (behavior_tracker.py).
+PRICE_REVIEW_INTERVAL_SECONDS = int(os.getenv("PRICE_REVIEW_INTERVAL_SECONDS", "86400"))  # daily
+PRICE_REVIEW_ESCALATED_INTERVAL_SECONDS = int(os.getenv("PRICE_REVIEW_ESCALATED_INTERVAL_SECONDS", "3600"))  # hourly
+PRICE_REVIEW_ESCALATION_DECAY_TICKS = 3
+PRICING_TICK_INTERVAL_SECONDS = int(os.getenv("PRICING_TICK_INTERVAL_SECONDS", "3600"))
+
+
+def next_check_decision(current_streak: int, escalated_this_tick: bool) -> tuple[int, int]:
+    """Pure — no I/O. Returns (new_escalation_streak, next_interval_seconds).
+    A fresh anomaly this tick always escalates to hourly and (re)starts the
+    decay streak at 1; otherwise an active streak counts up toward
+    PRICE_REVIEW_ESCALATION_DECAY_TICKS quiet ticks before reverting to
+    daily; no active streak stays daily. A literal continuous half-life
+    function was considered and rejected — this step-based version produces
+    the same practical behavior with far less machinery."""
+    if escalated_this_tick:
+        return 1, PRICE_REVIEW_ESCALATED_INTERVAL_SECONDS
+    if current_streak <= 0:
+        return 0, PRICE_REVIEW_INTERVAL_SECONDS
+    new_streak = current_streak + 1
+    if new_streak >= PRICE_REVIEW_ESCALATION_DECAY_TICKS:
+        return 0, PRICE_REVIEW_INTERVAL_SECONDS
+    return new_streak, PRICE_REVIEW_ESCALATED_INTERVAL_SECONDS
+
+
+async def should_run_pricing_check(product_id: str, redis) -> bool:
+    """No stored next-check time == never checked before == due now."""
+    raw = await redis.get(Keys.next_price_check(product_id))
+    if raw is None:
+        return True
+    return int(_time.time() * 1000) >= int(raw)
+
+
+async def record_pricing_check_result(product_id: str, redis, *, escalated_this_tick: bool) -> None:
+    raw_streak = await redis.get(Keys.price_check_escalation(product_id))
+    current_streak = int(raw_streak) if raw_streak else 0
+    new_streak, interval_seconds = next_check_decision(current_streak, escalated_this_tick)
+    now = int(_time.time() * 1000)
+    await redis.set(Keys.next_price_check(product_id), now + interval_seconds * 1000)
+    if new_streak > 0:
+        await redis.set(Keys.price_check_escalation(product_id), new_streak)
+    else:
+        await redis.delete(Keys.price_check_escalation(product_id))
+
+
+async def run_pricing_cycle(db: "AsyncSession", redis) -> list:
+    """One pass per live merchant, per eligible-and-due product. Per-product
+    (and per-merchant) try/except — one bad product/merchant must never skip
+    the rest, same discipline as store_review.py's tick. Returns the list of
+    AgentAction results actually fired this pass (gated ones and
+    auto-trusted ones both included — run_decision_cycle returns either)."""
+    from sqlalchemy import select
+    from app.models.db_models import MerchantDB, ProductDB, BrandProfileDB, ProductPriceHistoryDB, AgentActionDB
+    from app.services.decision_engine import run_decision_cycle
+    from app.services.tools import DECISION_TOOLS
+    from app.services import behavior_tracker
+    from app.services.memory import get_memory, build_memory_context
+
+    price_rebalance_tools = [
+        t for t in DECISION_TOOLS if t["function"]["name"] == "propose_price_rebalance"
+    ]
+    actions = []
+
+    merchants = (
+        await db.execute(select(MerchantDB).where(MerchantDB.is_live == True))
+    ).scalars().all()
+
+    for merchant in merchants:
+        try:
+            brand_profile = await db.get(BrandProfileDB, merchant.id)
+            brand_voice, mood = "professional, friendly", "balanced"
+            if brand_profile:
+                gb = brand_profile.generated_brand or {}
+                brand_voice = gb.get("brand", {}).get("brand_voice_profile", brand_voice)
+                mood = gb.get("brand", {}).get("layout_variant", mood)
+
+            products = (
+                await db.execute(
+                    select(ProductDB)
+                    .where(ProductDB.merchant_id == merchant.id)
+                    .where(ProductDB.is_active == True)
+                )
+            ).scalars().all()
+
+            per_product_views = await behavior_tracker.count_per_product_views_in_window(
+                redis, merchant.id
+            )
+
+            for product in products:
+                try:
+                    if not await should_run_pricing_check(product.id, redis):
+                        continue
+
+                    # Eligibility is "own data clears the threshold" OR "a valid
+                    # comparable exists" — NOT own-data-only. A brand-new product
+                    # with zero history must still reach the borrow-from-comparable
+                    # path (spec: "How does a new product get priced before it has
+                    # its own history? Borrow from a similar, proven product").
+                    # Checking check_eligibility() alone and skipping on False would
+                    # make that path unreachable — comparable lookup must run first
+                    # for a not-yet-eligible product, not be skipped alongside it.
+                    own_eligible = await check_eligibility(product.id, db)
+                    comparable_pid = await find_comparable(product, db) if not own_eligible else None
+                    if not own_eligible and not comparable_pid:
+                        continue  # no data, no valid comparable — stays at baseline (cold-start gate)
+
+                    def _rows_to_dicts(rows):
+                        return [
+                            {"date": r.date, "views": r.views, "cart_adds": r.cart_adds,
+                             "purchases": r.purchases, "price_active": r.price_active,
+                             "signal_quality": r.signal_quality}
+                            for r in reversed(rows)
+                        ]
+
+                    history_rows = (
+                        await db.execute(
+                            select(ProductPriceHistoryDB)
+                            .where(ProductPriceHistoryDB.product_id == product.id)
+                            .order_by(ProductPriceHistoryDB.date.desc())
+                            .limit(7)
+                        )
+                    ).scalars().all()
+                    history_summary = format_history_summary(_rows_to_dicts(history_rows))
+
+                    comparable_summary = ""
+                    if comparable_pid:
+                        comp_rows = (
+                            await db.execute(
+                                select(ProductPriceHistoryDB)
+                                .where(ProductPriceHistoryDB.product_id == comparable_pid)
+                                .order_by(ProductPriceHistoryDB.date.desc())
+                                .limit(7)
+                            )
+                        ).scalars().all()
+                        comparable_summary = format_history_summary(_rows_to_dicts(comp_rows))
+
+                    recent_actions = (
+                        await db.execute(
+                            select(AgentActionDB)
+                            .where(AgentActionDB.merchant_id == merchant.id)
+                            .where(AgentActionDB.action_type.in_(
+                                ["price_rebalance", "flash_sale", "scarcity_price"]
+                            ))
+                            .where(AgentActionDB.status.in_(["executed", "dismissed"]))
+                            .order_by(AgentActionDB.created_at.desc())
+                            .limit(20)
+                        )
+                    ).scalars().all()
+                    # recent_actions is merchant-wide (spec: the revealed-preference
+                    # aggregate is "computed from AgentActionDB rows... for a
+                    # merchant", not scoped to the one product under review), so a
+                    # price_rebalance row's magnitude needs ITS OWN product's
+                    # baseline_price, not this loop's current `product` — resolved
+                    # from the `products` list already fetched above, zero extra query.
+                    product_baseline_by_id = {p.id: p.baseline_price for p in products}
+                    revealed_pref = build_revealed_preference_summary([
+                        {
+                            "action_type": a.action_type, "status": a.status,
+                            "payload": a.payload or {},
+                            "baseline_price": product_baseline_by_id.get(
+                                (a.payload or {}).get("product_id")
+                            ),
+                        }
+                        for a in recent_actions
+                    ])
+
+                    memory_entries = await get_memory(merchant.id, db, redis)
+                    memory_context = build_memory_context(memory_entries)
+                    combined_memory = "; ".join(filter(None, [revealed_pref, memory_context]))
+
+                    prompt = compose_pricing_prompt(
+                        store_name=merchant.store_name, mood=mood, brand_voice=brand_voice,
+                        product_name=product.name, baseline_price=product.baseline_price,
+                        current_price=product.price, cost_price=product.cost_price,
+                        history_summary=history_summary, comparable_summary=comparable_summary,
+                        memory_context=combined_memory,
+                    )
+
+                    escalated_this_tick = (
+                        per_product_views.get(product.id, 0) >= behavior_tracker.ANOMALY_THRESHOLD * 4
+                    )
+
+                    action = await run_decision_cycle(
+                        merchant.id, f"Price review: {product.name}", db, redis,
+                        tools=price_rebalance_tools, target_product_id=product.id,
+                        prompt_override=prompt,
+                    )
+                    if action:
+                        actions.append(action)
+                        if comparable_pid:
+                            # Tag the row so Task 14's reversion check can tell a
+                            # comparable-informed move apart from an own-data move —
+                            # only the former reverts on engagement-without-conversion,
+                            # per the spec's reversion rule. run_decision_cycle has no
+                            # kwarg for this (it doesn't know about comparables at
+                            # all), so it's set here, directly on the just-created row.
+                            row = await db.get(AgentActionDB, action.id)
+                            if row:
+                                row.payload = {**(row.payload or {}), "comparable_informed": True}
+                                await db.commit()
+
+                    await record_pricing_check_result(
+                        product.id, redis, escalated_this_tick=escalated_this_tick,
+                    )
+                except Exception as e:  # noqa: BLE001 — one product's failure must not skip the rest
+                    logger.warning(
+                        "[pricing_cycle] check failed for product %s: %s", product.id, e,
+                    )
+        except Exception as e:  # noqa: BLE001 — one merchant's failure must not skip the rest
+            logger.warning("[pricing_cycle] cycle failed for merchant %s: %s", merchant.id, e)
+
+    return actions
+
+
+def start_pricing_background_loop() -> None:
+    """Same in-process asyncio loop shape as store_review.py's
+    start_background_loop. The outer loop ticks hourly
+    (PRICING_TICK_INTERVAL_SECONDS) so an escalated product can actually get
+    an hourly check; should_run_pricing_check is what gates each PRODUCT to
+    its own daily-vs-escalated cadence within that shared outer rhythm."""
+    import asyncio
+    from app.core.redis import get_redis
+
+    async def _tick():
+        from app.core.database import get_session_factory
+        factory = get_session_factory()
+        try:
+            async with factory() as db:
+                redis = await get_redis()
+                actions = await run_pricing_cycle(db, redis)
+                if actions:
+                    logger.info("[pricing_cycle] %d pricing action(s) this tick", len(actions))
+        except Exception as e:  # noqa: BLE001 — a failed tick must not kill the loop
+            logger.warning("[pricing_cycle] tick failed: %s", e)
+
+    async def _runner():
+        while True:
+            await asyncio.sleep(PRICING_TICK_INTERVAL_SECONDS)
+            await _tick()
+
+    asyncio.create_task(_runner())
+    logger.info(
+        "[pricing_cycle] background loop started (every %ss)", PRICING_TICK_INTERVAL_SECONDS,
+    )

@@ -51,6 +51,19 @@ class Keys:
         return f"elevate:{merchant_id}:pending_actions"
 
     @staticmethod
+    def next_price_check(product_id: str) -> str:
+        """When this product is next due for a PRICE_REBALANCE reasoning
+        pass — set by pricing_cycle.record_pricing_check_result."""
+        return f"elevate:price_check:{product_id}:next"
+
+    @staticmethod
+    def price_check_escalation(product_id: str) -> str:
+        """Consecutive-hourly-check streak while a product is in escalated
+        cadence — decays back to daily after PRICE_REVIEW_ESCALATION_DECAY_TICKS
+        quiet ticks. Absent key == not currently escalated."""
+        return f"elevate:price_check:{product_id}:escalation_streak"
+
+    @staticmethod
     def qr_campaign(merchant_id: str, campaign_id: str) -> str:
         return f"elevate:{merchant_id}:qr:{campaign_id}"
 

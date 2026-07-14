@@ -116,6 +116,9 @@ async def startup():
     from app.services.store_review import start_background_loop
     start_background_loop()
 
+    from app.services.pricing_cycle import start_pricing_background_loop
+    start_pricing_background_loop()
+
 
 @app.get("/api/health")
 async def health():
