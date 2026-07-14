@@ -275,6 +275,7 @@ async def _run_brand_pipeline(
                             description=str(raw_p.get("description", "")),
                             price=float(raw_p.get("price", 10.0)),
                             cost_price=float(raw_p.get("price", 10.0)) * 0.5,
+                            baseline_price=float(raw_p.get("price", 10.0)),
                             stock=int(raw_p.get("stock", 100)),
                             category=str(raw_p.get("category", ""))[:100],
                             image_urls=[],

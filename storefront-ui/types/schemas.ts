@@ -123,6 +123,7 @@ export const ProductSchema = z.object({
   name: z.string(),
   price: z.number().positive(),
   cost_price: z.number().positive(),
+  baseline_price: z.number(),
   stock: z.number().int().min(0),
   image_url: z.string().url().nullable().optional(),
   category: z.string().nullable().optional(),
@@ -436,6 +437,7 @@ export const ConstraintsSchema = z.object({
   max_discount_percent: z.number().min(0).max(100).optional(),
   min_price: z.record(z.number()).optional(),
   accessibility_level: z.enum(['AA', 'AAA']).optional(),
+  max_uplift_percent: z.number().min(0).max(100).default(0),
 })
 
 export const PricingFlagSchema = z.object({

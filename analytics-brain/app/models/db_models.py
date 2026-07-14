@@ -82,6 +82,7 @@ class ProductDB(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     price: Mapped[float] = mapped_column(Float, nullable=False)
     cost_price: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_price: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     stock: Mapped[int] = mapped_column(Integer, default=0)
     category: Mapped[str] = mapped_column(String, default="")
     image_urls: Mapped[list] = mapped_column(JSON, default=list)

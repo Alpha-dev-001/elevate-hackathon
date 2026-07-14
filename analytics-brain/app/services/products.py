@@ -25,6 +25,7 @@ def db_to_product(row: ProductDB) -> Product:
         image_url=row.image_urls[0] if row.image_urls else None,
         category=row.category or None,
         cost_price=row.cost_price,
+        baseline_price=row.baseline_price,
         description=row.description or None,
         qwen_generated=row.qwen_generated_description,
         is_pending=not row.is_active,

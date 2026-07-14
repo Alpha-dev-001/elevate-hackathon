@@ -40,6 +40,7 @@ def _make_product(pid: str = "prod_1", cost: float = 10.0, price: float = 15.0) 
         name="Widget",
         cost_price=cost,
         price=price,
+        baseline_price=price,
         stock=50,
     )
 

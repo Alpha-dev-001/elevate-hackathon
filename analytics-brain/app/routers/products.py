@@ -163,6 +163,7 @@ async def add_product(
         description=descs.get(payload.name, f"{payload.name}."),
         price=payload.price,
         cost_price=payload.cost_price,
+        baseline_price=payload.price,
         stock=payload.stock,
         category=payload.category or "",
         image_urls=[payload.image_url] if payload.image_url else [],
@@ -206,6 +207,7 @@ async def add_products_batch(
             description=descs.get(r.name, f"{r.name}."),
             price=r.price,
             cost_price=round(r.price * DEFAULT_COST_RATIO, 2),  # CSV has no cost
+            baseline_price=r.price,
             stock=r.stock,
             category=r.category or "",
             image_urls=[r.image_url] if r.image_url else [],
@@ -418,6 +420,7 @@ async def vision_batch(
             description=vision_result.description or f"{vision_result.name}.",
             price=vision_result.suggested_price,
             cost_price=round(vision_result.suggested_price * DEFAULT_COST_RATIO, 2),
+            baseline_price=vision_result.suggested_price,
             stock=10,
             category=vision_result.category or "",
             image_urls=[url],

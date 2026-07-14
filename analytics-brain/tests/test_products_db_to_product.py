@@ -6,6 +6,7 @@ from app.services.products import db_to_product
 def _row(**overrides):
     defaults = dict(
         id="p1", merchant_id="m1", name="Slides", price=40.0, cost_price=20.0,
+        baseline_price=40.0,
         stock=5, category="footwear", image_urls=["https://x/a.jpg"],
         is_active=True, qwen_generated_description=True,
         is_featured=False, featured_label=None,
@@ -24,3 +25,10 @@ class TestDbToProductFeaturedFields:
         product = db_to_product(_row(is_featured=True, featured_label="New Arrival"))
         assert product.is_featured is True
         assert product.featured_label == "New Arrival"
+
+
+def test_db_to_product_includes_baseline_price():
+    # baseline_price deliberately differs from price here to prove
+    # db_to_product passes it through as its own field, not a price alias.
+    product = db_to_product(_row(price=20.0, cost_price=10.0, baseline_price=18.0))
+    assert product.baseline_price == 18.0
