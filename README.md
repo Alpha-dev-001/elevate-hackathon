@@ -10,7 +10,7 @@
 ·
 [Alibaba Cloud](https://alibabacloud.com)
 
-**157 tests passing · 62 adversarial edge cases · 7 distinct Qwen call types (vision, tool-calling, brand gen, DSL composition, CSS, descriptions, decisions) · MCP server exposing the store to external agents**
+**300+ tests passing · 62 adversarial edge cases · 7 distinct Qwen call types (vision, tool-calling, brand gen, DSL composition, CSS, descriptions, decisions) · MCP server exposing the store to external agents**
 
 **Live Qwen benchmark (real API, not mocked): 100% valid rate across all 5 call types, avg 5.6s latency, 5/5 scenarios rated "good".** Reproduce it yourself: `docker compose exec api python -m tests.bench_live` — full breakdown in [BENCHMARKS.md](./BENCHMARKS.md).
 
@@ -41,6 +41,17 @@ normalization, and deterministic fallback. If the Qwen call fails
 entirely, a brand-seeded hash generates a distinct layout.
 The customer never sees a blank page.
 
+**4. Pricing that reasons, not just reacts.**
+A merchant sets a baseline price once. Qwen continuously reasons about
+where the *live* price should actually sit — up or down, not just
+discount-down — from each product's own sales history, borrowing a
+similar product's history while it's new, always inside a merchant-set
+range the interceptor enforces on every move. A graduated trust counter
+earns Qwen the right to apply small, already-safe moves without a human
+tap over time — trust only ever removes the gate, it never widens the
+range — while an engagement-without-conversion signal walks a misjudged
+move back toward baseline on its own, no human intervention required.
+
 ### What Qwen actually does here vs. a typical AI integration
 
 | What most "AI-powered" apps do | What Elevate does |
@@ -62,7 +73,7 @@ Here's the feature-to-criterion map, not just a claim:
 
 | Judging criterion | Weight | Where Elevate proves it |
 | --- | --- | --- |
-| Technical Depth & Engineering | 30% | 2 models, **7 distinct Qwen call types**, native tool-calling (6 typed tools), 3-layer interceptor, Redis + Postgres two-layer state, 157 tests |
+| Technical Depth & Engineering | 30% | 2 models, **7 distinct Qwen call types**, native tool-calling (9 typed tools), 3-layer interceptor, Redis + Postgres two-layer state, 300+ tests |
 | Innovation & AI Creativity | 30% | Qwen authors its own brand guard rules at creation time — not developer-written safety rules. LayoutDSL gives every store a genuinely distinct layout, not a template swap |
 | Problem Value & Impact | 25% | Every independent brand deserves a store that looks like *them*, not a Shopify theme — and the store improves itself without a merchant hiring a CRO agency |
 | Presentation & Documentation | 15% | Architecture diagram ([docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)), full test suite ([docs/TESTING.md](./docs/TESTING.md)), technical deep dive ([docs/TECHNICAL-DEEP-DIVE.md](./docs/TECHNICAL-DEEP-DIVE.md)) |
@@ -190,7 +201,7 @@ Two Qwen models. Each chosen for what it does best. No routing complexity.
 4. **Custom CSS** — scoped micro-interactions (sanitized before storage)
 5. **Product vision** (VL) — identify + describe from photo, price anchored
 6. **Batched descriptions** — 20 products per call, parallelized chunks
-7. **Decision cycles** — native tool-calling (6 typed tools), memory-informed
+7. **Decision cycles** — native tool-calling (9 typed tools), memory-informed
 
 **Vision Fingerprinting** — before any image reaches Qwen, a perceptual
 hash (aHash, 64-bit) runs client-side in `fingerprint.ts`. Near-duplicate
@@ -217,7 +228,7 @@ retry before falling back to deterministic defaults.
 | Storage   | Alibaba Cloud OSS — logos, product images (presigned PUT, never through backend) |
 | Deploy    | Alibaba Cloud Function Compute (serverless) + Docker Compose (local)     |
 
-**157 tests passing · 62 adversarial edge cases · 5/5 Qwen benchmark scenarios passing live (100% valid rate) · MCP server for external agent integration**
+**300+ tests passing · 62 adversarial edge cases · 5/5 Qwen benchmark scenarios passing live (100% valid rate) · MCP server for external agent integration**
 
 ---
 
