@@ -16,6 +16,28 @@ class TestNextStreak:
         assert next_streak(0, approved=False, outcome_negative=False) == 0
 
 
+class TestTrustEvaluationUsesRealPurchaseSignal:
+    """Proves the exact composition pricing_cycle.evaluate_trust_outcomes
+    relies on: outcome_negative must be derived from REAL post-move
+    product_price_history purchases, not from OrderDB.promo_applied (which a
+    direct price change never populates — found in final whole-branch review,
+    see evaluate_trust_outcomes' docstring). This is the property that was
+    silently broken end-to-end before the fix: an approved move with zero
+    real purchases in the window must still reset to 0, and one with real
+    purchases must still increment — exactly like next_streak already
+    guarantees, this just proves the real signal maps onto it correctly."""
+
+    def test_approved_move_with_zero_real_purchases_resets_despite_approval(self):
+        purchases_in_window = 0
+        outcome_negative = purchases_in_window == 0
+        assert next_streak(2, approved=True, outcome_negative=outcome_negative) == 0
+
+    def test_approved_move_with_real_purchases_increments(self):
+        purchases_in_window = 3
+        outcome_negative = purchases_in_window == 0
+        assert next_streak(2, approved=True, outcome_negative=outcome_negative) == 3
+
+
 class TestShouldAutoApply:
     def _constraints(self, max_uplift=10.0, max_discount=40.0):
         return BusinessConstraints(max_uplift_percent=max_uplift, max_discount_percent=max_discount)

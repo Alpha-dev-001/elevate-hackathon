@@ -558,6 +558,90 @@ async def apply_reversions(db: "AsyncSession", redis) -> int:
     return reverted
 
 
+async def evaluate_trust_outcomes(db: "AsyncSession", redis) -> int:
+    """Run once per tick, alongside check_reversion_triggers. Updates the
+    graduated-autonomy trust streak (Task 11) for each executed PRICE_REBALANCE
+    action from REAL post-move purchase data, once a full 3-day
+    product_price_history window exists after the move.
+
+    This does NOT run through outcome_observer.observe_outcome/
+    schedule_observation — that mechanism fires ~agent_action_duration_minutes
+    (default 30 min) after approval and measures outcome via
+    OrderDB.promo_applied == action.promo_id. A direct price change never
+    registers a Promo/RecoveryOffer, so that count is structurally always 0
+    for this action type — the trust streak could never advance, silently
+    defeating graduated autonomy end to end (found in final whole-branch
+    review). Even swapping the data source there wouldn't help: 30 minutes
+    after approval, rollup_daily_signals (a once-a-day job) has not yet
+    written a single new product_price_history row, so there would be
+    nothing real to check. The trust outcome genuinely only becomes knowable
+    on the same multi-day cadence this daily tick already runs on — so it is
+    evaluated here instead, using the identical "N-day window after
+    executed_at" pattern check_reversion_triggers already established, and a
+    one-time payload["trust_evaluated"] marker for the same reason
+    check_reversion_triggers uses payload["reversion_checked"]: re-running the
+    same static window's purchase count on every subsequent tick must not
+    re-score (and re-mutate the streak for) the same move twice.
+
+    Covers BOTH the merchant-approved and the auto-trusted execution path
+    (Task 12) — both end in status="executed" with executed_at set, so an
+    auto-applied move's outcome is evaluated here too, closing the gap where
+    it previously fed neither memory nor the trust streak at all."""
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.models.db_models import AgentActionDB, ProductPriceHistoryDB
+    from app.services.autopilot_trust import update_trust_streak
+
+    evaluated = 0
+    candidates = (
+        await db.execute(
+            select(AgentActionDB)
+            .where(AgentActionDB.action_type == "price_rebalance")
+            .where(AgentActionDB.status == "executed")
+        )
+    ).scalars().all()
+
+    for action in candidates:
+        payload = action.payload or {}
+        if payload.get("trust_evaluated") or not action.executed_at:
+            continue
+        try:
+            product_id = payload.get("product_id", "")
+            if not product_id:
+                continue
+            move_date = datetime.fromtimestamp(
+                action.executed_at / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d")
+            window_rows = (
+                await db.execute(
+                    select(ProductPriceHistoryDB)
+                    .where(ProductPriceHistoryDB.product_id == product_id)
+                    .where(ProductPriceHistoryDB.date > move_date)
+                    .order_by(ProductPriceHistoryDB.date.asc())
+                    .limit(3)
+                )
+            ).scalars().all()
+            if len(window_rows) < 3:
+                continue  # window not complete yet — evaluate again next tick
+
+            purchases = sum(r.purchases for r in window_rows)
+            action.payload = {**payload, "trust_evaluated": True}
+            approved = action.merchant_behavior != "dismissed"
+            outcome_negative = purchases == 0
+            await update_trust_streak(
+                action.merchant_id, product_id, "price_rebalance", db,
+                approved=approved, outcome_negative=outcome_negative,
+            )
+            evaluated += 1
+        except Exception as e:  # noqa: BLE001 — one action's failure must not skip the rest
+            logger.warning(
+                "[pricing_cycle] trust evaluation failed for action %s: %s", action.id, e,
+            )
+
+    await db.commit()
+    return evaluated
+
+
 def start_pricing_background_loop() -> None:
     """Same in-process asyncio loop shape as store_review.py's
     start_background_loop. The outer loop ticks hourly
@@ -577,6 +661,10 @@ def start_pricing_background_loop() -> None:
                 # what run_pricing_cycle reasons over this same tick, not stale.
                 await check_reversion_triggers(db, redis)
                 await apply_reversions(db, redis)
+                # Trust-streak evaluation also runs on this same daily cadence
+                # (see evaluate_trust_outcomes' docstring for why it can't run
+                # on outcome_observer's 30-minute schedule_observation timer).
+                await evaluate_trust_outcomes(db, redis)
                 actions = await run_pricing_cycle(db, redis)
                 if actions:
                     logger.info("[pricing_cycle] %d pricing action(s) this tick", len(actions))

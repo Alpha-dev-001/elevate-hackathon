@@ -63,24 +63,18 @@ async def observe_outcome(
     await write_memory(action.merchant_id, entry, db, redis)
     logger.info("[observer] memory written for %s: %s → %s", action.merchant_id, action.action_type, entry.outcome)
 
-    if action.action_type == "price_rebalance":
-        from app.services.autopilot_trust import update_trust_streak
-        target_pid = (action.payload or {}).get("product_id", "")
-        if target_pid:
-            # Use entry.merchant_behavior (fallback-aware) instead of raw behavior param
-            # to gracefully handle cases where behavior is None at call time.
-            approved = entry.merchant_behavior != "dismissed"
-            outcome_negative = count == 0  # no attributed orders == negative outcome
-            try:
-                await update_trust_streak(
-                    action.merchant_id, target_pid, "price_rebalance", db,
-                    approved=approved, outcome_negative=outcome_negative,
-                )
-            except Exception as e:  # noqa: BLE001 — trust tracking must never block outcome observation
-                logger.warning(
-                    "[outcome_observer] trust streak update failed for %s: %s", action.id, e,
-                )
-
+    # PRICE_REBALANCE's graduated-autonomy trust streak (Task 11) is
+    # deliberately NOT updated here. This function's `count` is computed from
+    # OrderDB.promo_applied == action.promo_id — a direct price change never
+    # registers a Promo/RecoveryOffer, so that count would be structurally
+    # always 0 for this action type (found in final whole-branch review).
+    # Even swapping the data source wouldn't help: schedule_observation fires
+    # this ~agent_action_duration_minutes (30 min default) after approval,
+    # long before rollup_daily_signals (a once-a-day job) has written any new
+    # product_price_history row to check. The trust outcome only becomes
+    # knowable on that same multi-day cadence, so it's evaluated there
+    # instead — see pricing_cycle.evaluate_trust_outcomes, run from the same
+    # daily tick as the reversion check and the next pricing proposal.
     return entry
 
 

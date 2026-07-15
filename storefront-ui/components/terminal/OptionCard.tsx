@@ -45,6 +45,7 @@ const ACTION_TYPE_META: Record<string, ActionTypeMeta> = {
   copy_rewrite:    { label: 'Copy Rewrite',     badgeBg: '#8B5CF6',              badgeText: '#ffffff' },
   duplicate_merge: { label: 'Duplicate Cleanup',badgeBg: '#22C55E',              badgeText: '#ffffff' },
   price_rebalance: { label: 'Price Rebalance',  badgeBg: '#EAB308',              badgeText: '#0A0A0B' },
+  cart_dwell_nudge:{ label: 'Cart Nudge',        badgeBg: '#06B6D4',              badgeText: '#0A0A0B' },
 }
 
 function getTypeMeta(actionType: string): ActionTypeMeta {

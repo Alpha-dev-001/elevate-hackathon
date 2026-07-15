@@ -468,6 +468,7 @@ export const ViolationSchema = z.object({
 
 export const AgentActionTypeSchema = z.enum([
   'flash_sale', 'layout_morph', 'scarcity_price', 'recovery_offer', 'copy_rewrite', 'duplicate_merge', 'feature_product',
+  'price_rebalance', 'cart_dwell_nudge',
 ])
 
 export const AgentActionStatusSchema = z.enum([
