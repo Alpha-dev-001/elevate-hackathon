@@ -81,8 +81,11 @@ async def update_trust_streak(
     *, approved: bool, outcome_negative: bool,
 ) -> int:
     """Read-modify-write the streak via next_streak, upserting the row.
-    Called by outcome_observer.observe_outcome for every PRICE_REBALANCE
-    outcome. Returns the new streak value."""
+    Called from two places: outcome_observer.observe_outcome (immediate
+    reset on dismissal) and pricing_cycle.evaluate_trust_outcomes (real
+    purchase-based outcome for an executed move, evaluated on the daily
+    pricing tick once enough product_price_history data exists). Returns the
+    new streak value."""
     from sqlalchemy import select
     from app.models.db_models import AutopilotTrustDB
 
