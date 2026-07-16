@@ -265,8 +265,14 @@ _RECOVERY_LABELS = {
 
 
 async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession) -> bool:
-    """Set the merchant's active ORDER-LEVEL cart-recovery discount. Returns
-    False if the interceptor's execution-time re-check blocks it."""
+    """Register a cart-recovery discount. recovery_offer is store-wide
+    (SystemState.recovery, applies to every session) by design — the
+    abandon-rate spike that triggers it has no single session to point to.
+    cart_dwell_nudge is session-scoped instead (cart.py's dwell-offer key)
+    since it's detected per-session and must not leak to shoppers who never
+    dwelled. Returns False if the interceptor's execution-time re-check
+    blocks it, or if cart_dwell_nudge is missing the session_id it needs to
+    scope to."""
     from app.services import delta as delta_svc, interceptor
     from app.services.profile import load_constraints
     from app.models.schemas import RecoveryOffer
@@ -296,13 +302,38 @@ async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession
     discount = clamped_args["discount_percent"]
     expires_at = _payload_duration_ms(payload)
     label_tmpl = _RECOVERY_LABELS.get(row.action_type, _RECOVERY_LABELS["recovery_offer"])
-    state.recovery = RecoveryOffer(
+    offer = RecoveryOffer(
         percent=discount,
         label=label_tmpl.format(d=int(discount)),
         expires_at=expires_at,
         promo_id=row.promo_id,
         triggered_by="auto",
     )
+
+    if row.action_type == "cart_dwell_nudge":
+        # Session-scoped — this discount must reach ONLY the one cart that
+        # was actually dwelling, never every other shopper. session_id was
+        # written into the payload by decision_engine.run_decision_cycle at
+        # proposal time (see cart_dwell.py's run_dwell_check), server-side,
+        # never something Qwen's tool call could supply or overwrite.
+        session_id = payload.get("session_id")
+        if not session_id:
+            logger.warning(
+                "[agent] cart_dwell_nudge missing session_id in payload for %s — "
+                "cannot scope, declining rather than falling back to store-wide",
+                row.merchant_id,
+            )
+            return False
+        from app.services import cart as cart_svc
+        await cart_svc.set_dwell_offer(row.merchant_id, session_id, offer)
+        logger.info(
+            "[agent] cart_dwell_nudge set session-scoped recovery %d%% for %s/%s (promo %s)",
+            int(discount), row.merchant_id, session_id, row.promo_id,
+        )
+        return True
+
+    # recovery_offer — store-wide by design, unchanged.
+    state.recovery = offer
     await delta_svc.save_state(row.merchant_id, state)
     logger.info("[agent] recovery_offer set order-level recovery %d%% (promo %s)", int(discount), row.promo_id)
     return True
