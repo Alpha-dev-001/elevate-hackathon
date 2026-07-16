@@ -11,7 +11,7 @@ import { DecisionFeed } from '@/components/terminal/DecisionFeed'
 import { AttributionDashboard } from '@/components/terminal/AttributionDashboard'
 import { CapabilityProposals } from '@/components/terminal/CapabilityProposals'
 import { ConstraintsSettings } from '@/components/terminal/ConstraintsSettings'
-import { PendingProductCard } from '@/components/terminal/PendingProductCard'
+import { PendingProductCard, type PendingProduct } from '@/components/terminal/PendingProductCard'
 
 export default function TerminalPage() {
   const router = useRouter()
@@ -28,7 +28,7 @@ export default function TerminalPage() {
   const [lastTokens, setLastTokens] = useState<number | null>(null)
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [qwenFallback, setQwenFallback] = useState<{ message: string; type: string } | null>(null)
-  const [pendingProducts, setPendingProducts] = useState<Product[]>([])
+  const [pendingProducts, setPendingProducts] = useState<PendingProduct[]>([])
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -132,7 +132,7 @@ export default function TerminalPage() {
           fetchDashboard(slug)
         }
         if (event === 'products_pending' && Array.isArray(payload.products)) {
-          const incoming = payload.products as Product[]
+          const incoming = payload.products as PendingProduct[]
           setPendingProducts((prev) => {
             const existingIds = new Set(prev.map((p) => p.id))
             const newOnes = incoming.filter((p) => !existingIds.has(p.id))

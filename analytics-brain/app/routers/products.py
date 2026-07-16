@@ -479,7 +479,12 @@ async def vision_batch(
             merchant.id,
             WSMessage(
                 event=WSEventType.PRODUCTS_PENDING,
-                payload={"products": [p.product.model_dump() for p in created]},
+                payload={
+                    "products": [
+                        {**p.product.model_dump(), "confident": p.confident}
+                        for p in created
+                    ]
+                },
                 merchant_id=merchant.id,
                 timestamp=_now(),
             ),

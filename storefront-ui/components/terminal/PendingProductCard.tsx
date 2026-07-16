@@ -5,20 +5,28 @@ import { api } from '@/lib/api'
 import { ProductImage } from '@/components/storefront/ProductImage'
 import type { Product } from '@/types/schemas'
 
+/** confident is ephemeral — only known at the moment vision-batch runs (the
+ * WS push carries it), never persisted on the Product itself. A refetch on
+ * mount (GET /products/pending) won't have it, same constraint the
+ * /products page's own uncertainIds already lives with. */
+export type PendingProduct = Product & { confident?: boolean }
+
 /**
  * A Qwen-vision-identified product awaiting merchant approval, rendered as
  * a card in the terminal's live feed — same approve/discard actions as the
  * /products page's own pending list (GET /products/pending,
  * POST /products/{id}/approve, DELETE /products/{id}), just also surfaced
  * where the merchant is actually watching after publish, not only during
- * onboarding.
+ * onboarding. Badge convention matches that page exactly: category (if
+ * any) + "needs verification" when Qwen wasn't confident — no "from
+ * photo" text, since the section header above already says that.
  */
 export function PendingProductCard({
   product,
   onApproved,
   onDiscarded,
 }: {
-  product: Product
+  product: PendingProduct
   onApproved: (p: Product) => void
   onDiscarded: (id: string) => void
 }) {
@@ -59,12 +67,33 @@ export function PendingProductCard({
         <div className="flex items-center gap-2 flex-wrap">
           <p className="font-semibold truncate" style={{ color: 'var(--color-text)' }}>{product.name}</p>
           <span className="font-mono text-sm" style={{ color: 'var(--color-accent)' }}>${product.price}</span>
-          <span
-            className="text-[10px] font-mono rounded-full px-1.5 py-0.5"
-            style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
-          >
-            from photo
-          </span>
+          {product.category && (
+            <span
+              className="text-[10px] font-mono rounded-full px-1.5 py-0.5"
+              style={{ color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
+            >
+              {product.category}
+            </span>
+          )}
+          {product.confident === false && (
+            <span
+              className="text-[10px] font-mono rounded-full px-1.5 py-0.5"
+              style={{ background: 'color-mix(in srgb, var(--color-warning) 18%, transparent)', color: 'var(--color-warning)' }}
+            >
+              needs verification
+            </span>
+          )}
+          {!product.image_url && (
+            // Shouldn't happen post-fix (vision_batch always attaches an
+            // image) — kept as a defensive flag so a data anomaly reads as
+            // "verify before approving," never as an ordinary listing.
+            <span
+              className="text-[10px] font-mono rounded-full px-1.5 py-0.5"
+              style={{ color: 'var(--color-warning)', border: '1px solid var(--color-warning)' }}
+            >
+              no image — verify
+            </span>
+          )}
         </div>
         {product.description && (
           <p className="text-sm mt-1 leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>{product.description}</p>
