@@ -5,6 +5,7 @@ import { LayoutDSLSchema } from '@/types/schemas'
 import '@/lib/registerVariants'
 import { resolveTheme } from '@/lib/storeTheme'
 import { StoreShell } from '@/components/store/StoreShell'
+import { sameCategory } from '@/lib/category'
 import { DSLSection } from './DSLSection'
 import { DSLNav } from './DSLNav'
 import { DSLFooter } from './DSLFooter'
@@ -42,6 +43,11 @@ export function DSLRenderer({
   const customer = useCustomer((s) => s.customer)
   const initCustomer = useCustomer((s) => s.init)
   const [openId, setOpenId] = useState<string | null>(initialProductId ?? null)
+  // Owned here (not in DSLNav) because filtering has to happen where
+  // store.products is actually handed to the product_grid section — see
+  // memory: elevate-dsl-category-filter-broken for why this used to be a
+  // no-op cosmetic-only chip.
+  const [activeCategory, setActiveCategory] = useState<string | null>(null)
 
   // Resolve the signed-in customer for this store (guest = null). Not in preview.
   useEffect(() => {
@@ -191,7 +197,13 @@ export function DSLRenderer({
         <CustomCSSInjector css={parsed.custom_css} slug={slug} />
         {!hasAnnounce && (
           <EditTargetWrap editMode={editMode} onClick={() => onSelectTarget?.({ kind: 'global', field: 'nav_style' })} label="Navigation">
-            <DSLNav store={store} navStyle={parsed.global_config.nav_style} preview={preview} />
+            <DSLNav
+              store={store}
+              navStyle={parsed.global_config.nav_style}
+              preview={preview}
+              activeCategory={activeCategory}
+              onSelectCategory={setActiveCategory}
+            />
           </EditTargetWrap>
         )}
         {parsed.sections.map((section, i) => (
@@ -200,7 +212,16 @@ export function DSLRenderer({
                           label={`${section.type.replace('_', ' ')} · ${section.variant}`}>
             <DSLSection
               section={section}
-              store={store}
+              // Only the product grid should ever be scoped by the category
+              // filter — a hero/banner/story section needs the full catalog
+              // for its own logic (e.g. a hero's featured product lookup),
+              // and must not disappear just because a customer filtered
+              // elsewhere on the page.
+              store={
+                section.type === 'product_grid' && activeCategory
+                  ? { ...store, products: store.products.filter((p) => sameCategory(p.category, activeCategory)) }
+                  : store
+              }
               slug={slug}
               globalConfig={parsed.global_config}
               preview={preview}

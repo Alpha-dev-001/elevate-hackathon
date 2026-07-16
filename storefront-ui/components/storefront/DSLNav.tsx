@@ -1,11 +1,28 @@
 'use client'
-import { useState } from 'react'
 import type { PublicStore } from '@/types/schemas'
 import { NAV_REGISTRY } from '@/lib/dslRegistry'
 import { BrandLogo } from '@/components/storefront/BrandLogo'
 
-export function DSLNav({ store, navStyle, preview }: { store: PublicStore; navStyle: string; preview?: boolean }) {
-  const [active, setActive] = useState<string | null>(null)
+/**
+ * Category filter state is owned by the parent (DSLRenderer) and passed down
+ * as controlled props — it has to live there because DSLRenderer is the one
+ * that actually filters store.products before handing them to the
+ * product_grid section. This component previously owned that state locally,
+ * which meant the chip's own active/underline indicator updated correctly
+ * but never actually filtered anything: a real, live bug on every DSL-rendered
+ * storefront (see memory: elevate-dsl-category-filter-broken).
+ */
+export function DSLNav({
+  store, navStyle, preview, activeCategory, onSelectCategory,
+}: {
+  store: PublicStore
+  navStyle: string
+  preview?: boolean
+  activeCategory: string | null
+  onSelectCategory: (c: string | null) => void
+}) {
+  const active = activeCategory
+  const setActive = onSelectCategory
   const Comp = NAV_REGISTRY[navStyle]
 
   // Persistent brand lockup — the merchant's real uploaded logo (falls back to
