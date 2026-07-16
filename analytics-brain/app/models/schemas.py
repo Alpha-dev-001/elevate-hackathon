@@ -802,6 +802,13 @@ class ConstraintsUpdate(BaseModel):
     max_uplift_percent: Optional[float] = Field(default=None, ge=0, le=100)
 
 
+class ApproveActionRequest(BaseModel):
+    """Optional merchant override on a pending discount-bearing action. Still
+    clamped by the interceptor exactly like Qwen's own number — an override
+    can loosen toward the merchant's own ceiling, never bypass it."""
+    discount_percent_override: Optional[float] = Field(default=None, ge=0, le=100)
+
+
 # ─── 19. Sprint 2 — Qwen observes: catalog pricing review (read-only) ─────────
 # qwen-max reviews names/categories/prices only — never cost, never PII — and
 # flags possible pricing issues. Surfaced to the merchant; NEVER auto-applied.

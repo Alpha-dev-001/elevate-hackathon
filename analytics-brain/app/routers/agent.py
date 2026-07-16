@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.security import get_current_merchant
 from app.models.db_models import AgentActionDB, MerchantDB, ProductDB
-from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType
+from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType, ApproveActionRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/agent", tags=["agent"])
@@ -61,6 +61,7 @@ async def get_pending_actions(slug: str, db: AsyncSession = Depends(get_db)):
 @router.post("/actions/{action_id}/approve")
 async def approve_action(
     action_id: str,
+    body: ApproveActionRequest | None = None,
     db: AsyncSession = Depends(get_db),
     merchant: MerchantDB = Depends(get_current_merchant),
 ):
@@ -77,7 +78,33 @@ async def approve_action(
     row.approved_at = now
     row.merchant_behavior = "approved"
 
+    override = body.discount_percent_override if body else None
+    if override is not None and "discount_percent" in (row.payload or {}):
+        original = row.payload.get("discount_percent")
+        row.payload = {**row.payload, "discount_percent": override}
+        # Record the correction so future proposals learn the merchant's
+        # preferred range — same pattern as products.py's update_product.
+        try:
+            from app.services.memory import write_memory
+            from app.models.schemas import MemoryEntry
+            await write_memory(
+                merchant.id,
+                MemoryEntry(
+                    action_type="qwen_discount_override",
+                    trigger=f"approved '{row.title}'",
+                    outcome=f"discount_percent: {original}→{override}",
+                    merchant_behavior="approved_then_modified",
+                    notes="merchant overrode Qwen's proposed discount on approval",
+                ),
+                db, None,
+            )
+        except Exception as e:  # noqa: BLE001 — memory write must never block approval
+            logger.warning("[agent] memory write failed for override on %s: %s", action_id, e)
+
     # Execute payload — apply flash_sale as a promo, layout_morph updates state, etc.
+    # The interceptor's own execution-time re-check inside _register_promo/
+    # _register_recovery still clamps this to the ceiling regardless — an
+    # override can loosen toward the merchant's own limit, never past it.
     applied = await _execute_payload(row, db)
 
     if applied:
