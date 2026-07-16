@@ -135,6 +135,30 @@ def _schedule_featuring_check(background: BackgroundTasks, merchant_id: str, new
     background.add_task(_check)
 
 
+def _schedule_image_mirror(background: BackgroundTasks, merchant_id: str, product_id: str, image_url: str) -> None:
+    """Mirror a CSV/manual image_url to our own OSS in the background — never
+    blocks the add-product response. Vision-batch products already have an
+    OSS-hosted image_url by the time they reach this router, so this is a
+    no-op for them (mirror_image detects "already ours" and returns None)."""
+    async def _mirror():
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from app.core.database import get_engine
+        from app.services.image_mirror import mirror_image
+
+        new_url = await mirror_image(image_url, merchant_id)
+        if not new_url:
+            return
+        async with AsyncSession(get_engine()) as session:
+            product = await session.get(ProductDB, product_id)
+            if product and product.merchant_id == merchant_id and product.image_urls and product.image_urls[0] == image_url:
+                product.image_urls = [new_url] + product.image_urls[1:]
+                await session.commit()
+                await _sync_state_if_live(session, merchant_id)
+                logger.info(f"[image_mirror] mirrored image for {product_id}")
+
+    background.add_task(_mirror)
+
+
 @router.post("", response_model=Product, status_code=201)
 async def add_product(
     payload: ProductCreate,
@@ -175,6 +199,8 @@ async def add_product(
 
     await _sync_state_if_live(db, merchant.id)
     _schedule_featuring_check(background, merchant.id, [product.id])
+    if payload.image_url:
+        _schedule_image_mirror(background, merchant.id, product.id, payload.image_url)
     return db_to_product(product)
 
 
@@ -221,6 +247,9 @@ async def add_products_batch(
 
     await _sync_state_if_live(db, merchant.id)
     _schedule_featuring_check(background, merchant.id, [p.id for p in created])
+    for p, r in zip(created, rows):
+        if r.image_url:
+            _schedule_image_mirror(background, merchant.id, p.id, r.image_url)
     return [db_to_product(p) for p in created]
 
 
