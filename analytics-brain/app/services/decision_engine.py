@@ -118,6 +118,7 @@ async def run_decision_cycle(
     tools: list[dict] | None = None,
     target_product_id: str | None = None,
     prompt_override: str | None = None,
+    session_id: str | None = None,
 ) -> AgentAction | None:
     """Run a full Qwen decision cycle and persist + broadcast the result.
 
@@ -128,7 +129,12 @@ async def run_decision_cycle(
     tools/target_product_id/prompt_override are set by run_pricing_cycle
     (pricing_cycle.py) for a PRICE_REBALANCE proposal scoped to one specific
     product with its own prompt shape — every other caller leaves all three
-    at their defaults and gets today's behavior unchanged.
+    at their defaults and gets today's behavior unchanged. session_id is set
+    by cart_dwell.py's run_dwell_check for a CART_DWELL_NUDGE proposal — it
+    is written into the persisted payload AFTER Qwen's tool call and the
+    interceptor clamp run, so it is never something Qwen could hallucinate
+    or overwrite; agent.py's _register_recovery reads it back at approval
+    time to scope the discount to that one session.
     """
     from sqlalchemy import select
 
@@ -327,6 +333,9 @@ async def run_decision_cycle(
             cost_price=cost_price, price=price, constraints=constraints,
             product_id=targeted_pid or "",
         )
+    if session_id:
+        tool_args = dict(tool_args)
+        tool_args["session_id"] = session_id
     if is_blocked:
         logger.info(
             f"[decision] interceptor blocked {tool_name} for {merchant_id}: {constraint_check}"

@@ -86,6 +86,7 @@ async def run_dwell_check(db: "AsyncSession", redis: "Redis") -> int:
                         f"Cart dwell: an item has sat in a customer's cart for "
                         f"{CART_DWELL_MINUTES}+ minutes without completing checkout",
                         db, redis,
+                        session_id=session_id,
                     )
                     if action:
                         fired += 1
