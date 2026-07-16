@@ -39,6 +39,13 @@ A recovery_offer is an ORDER-LEVEL percentage discount on the shopper's existing
 cart to win back an abandoned checkout — this store has no shipping concept, so
 never propose free shipping.
 
+This merchant's actual discount ceiling is {max_discount_percent:g}% — any
+flash_sale, scarcity_price, or recovery_offer discount you propose is allowed
+to use the real headroom up to that ceiling when the anomaly justifies it, not
+just a safe-sounding round number. Reason about how much of that headroom this
+specific anomaly actually earns; a discount below the ceiling is a choice you
+should be able to defend with the anomaly's magnitude, not a default.
+
 The merchant approves before execution. Make it compelling."""
 
 
@@ -76,6 +83,7 @@ def compose_decision_prompt(
     anomaly_description: str,
     memory_context: str = "",
     tool_calling: bool = True,
+    max_discount_percent: float = 40.0,
 ) -> str:
     """Build the decision prompt, injecting prior-outcome memory when present.
 
@@ -86,6 +94,10 @@ def compose_decision_prompt(
     paragraph for a plain JSON-reply instruction, so a model given no tools
     isn't told to use tools it doesn't have — keeps the two benchmark arms
     different in exactly one dimension (tools/interceptor), not two.
+
+    max_discount_percent defaults to BusinessConstraints' own schema default
+    (40.0) so any caller that hasn't been updated to pass the merchant's real
+    constraints yet still gets a truthful number instead of a made-up one.
     """
     memory_block = f"\nPrior outcomes for this store (learn from them):\n{memory_context}\n" if memory_context else ""
     prompt = DECISION_PROMPT.format(
@@ -96,6 +108,7 @@ def compose_decision_prompt(
         products_summary=products_summary,
         anomaly_description=anomaly_description,
         memory_block=memory_block,
+        max_discount_percent=max_discount_percent,
     )
     if not tool_calling:
         prompt = prompt.replace(
@@ -224,6 +237,8 @@ async def run_decision_cycle(
         # repricing decision.
         prompt = prompt_override
     else:
+        from app.services.profile import load_constraints
+        constraints = await load_constraints(db, merchant_id)
         prompt = compose_decision_prompt(
             store_name=merchant.store_name,
             mood=mood,
@@ -232,6 +247,7 @@ async def run_decision_cycle(
             products_summary=products_summary,
             anomaly_description=anomaly_desc,
             memory_context=memory_context,
+            max_discount_percent=constraints.max_discount_percent,
         )
     estimated_tokens = len(prompt) // 4  # rough char/4 heuristic for the terminal badge
 
