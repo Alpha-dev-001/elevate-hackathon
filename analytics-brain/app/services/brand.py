@@ -210,30 +210,6 @@ Layout style guide — pick the ONE that matches this logo's visual DNA:
 Be opinionated. Make this store unmistakable. Pure JSON. Nothing else."""
 
 
-SEED_PRODUCTS_PROMPT = """You are generating realistic seed products for a new store.
-
-Store: {store_name}
-Industry: {industry_hint}
-Brand voice: {brand_voice}
-
-Generate exactly 6 products that would fit this store naturally. Return ONLY JSON:
-
-[
-  {{
-    "name": "<product name>",
-    "price": <realistic price as number>,
-    "stock": <50-200>,
-    "category": "<category>",
-    "description": "<2-3 sentences in the brand voice>",
-    "image_url": ""
-  }}
-]
-
-Prices should reflect the brand's price point (luxury = higher, craft = mid, bold = accessible).
-All 6 must be realistic products this specific store would actually sell.
-Pure JSON array. Nothing else."""
-
-
 # Icons are generated in a SEPARATE call (see generate_icons) so the brand
 # reveal isn't blocked on token-heavy SVG markup. The merchant sees the brand
 # in ~10s; real icons morph in a beat later.
@@ -947,45 +923,6 @@ async def generate_brand_token(
         return BrandToken.model_validate(data)
     except ValueError as e:
         raise BrandGenerationError(f"BrandToken failed schema validation: {e!s}") from e
-
-
-async def generate_seed_products(
-    store_name: str,
-    brand_voice: str,
-    industry_hint: str,
-) -> list[dict]:
-    """qwen-max generates 6 industry-appropriate seed products for the demo.
-
-    Returns raw dicts (name, price, stock, category, description, image_url)
-    ready to insert as ProductDB rows. Falls back to empty list on failure so
-    it never blocks the onboarding flow.
-    """
-    prompt = SEED_PRODUCTS_PROMPT.format(
-        store_name=store_name,
-        industry_hint=industry_hint,
-        brand_voice=brand_voice,
-    )
-
-    try:
-        raw = await _qwen_chat(
-            model=get_settings().qwen_model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.6,
-            timeout=60.0,
-        )
-        # Seed products come back as a JSON array, not an object
-        text = raw.strip()
-        # Strip markdown fences
-        text = _FENCE_RE.sub("", text)
-        start, end = text.find("["), text.rfind("]")
-        if start != -1 and end > start:
-            products = json.loads(text[start:end + 1])
-            if isinstance(products, list):
-                return products[:6]
-    except Exception as e:
-        logger.warning(f"[brand] seed products generation failed: {e}")
-    return []
 
 
 # ─── Orchestrator ───────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { api, ApiError } from '@/lib/api'
 import type { PublicStore, PublicProduct } from '@/types/schemas'
 import { storeThemeVars, useStoreFonts } from '@/lib/storeTheme'
 import { useCart } from '@/lib/cart'
+import { sameCategory } from '@/lib/category'
 import { ProductGrid } from './ProductGrid'
 import { Cart } from './Cart'
 
@@ -20,6 +21,7 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
   const [store, setStore] = useState<PublicStore | null>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading')
   const [qty, setQty] = useState(1)
+  const [imgFailed, setImgFailed] = useState(false)
 
   const initCart = useCart((s) => s.init)
   const add = useCart((s) => s.add)
@@ -46,7 +48,7 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
   const related = useMemo(
     () =>
       (store?.products ?? [])
-        .filter((p) => p.id !== productId && product?.category && p.category === product.category)
+        .filter((p) => p.id !== productId && product?.category && sameCategory(p.category, product.category))
         .slice(0, 3),
     [store, product, productId],
   )
@@ -94,9 +96,14 @@ export function ProductDetail({ slug, productId }: { slug: string; productId: st
             className="aspect-square rounded-2xl flex items-center justify-center overflow-hidden relative"
             style={{ background: 'color-mix(in srgb, var(--s-primary) 16%, var(--s-bg))' }}
           >
-            {product.image_url ? (
+            {product.image_url && !imgFailed ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={product.image_url} alt={product.name} className="w-full h-full object-contain" />
+              <img
+                src={product.image_url}
+                alt={product.name}
+                className="w-full h-full object-contain"
+                onError={() => setImgFailed(true)}
+              />
             ) : (
               <div className="w-20 h-20 [&>svg]:w-full [&>svg]:h-full" style={{ opacity: 0.2 }} dangerouslySetInnerHTML={{ __html: store.icons.logo_mark }} />
             )}

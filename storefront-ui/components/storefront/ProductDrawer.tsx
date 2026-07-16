@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import type { PublicStore, LayoutGlobalConfig } from '@/types/schemas'
 import { useCart } from '@/lib/cart'
 import { readableOn } from '@/lib/color'
+import { sameCategory } from '@/lib/category'
 
 type Product = PublicStore['products'][number]
 type DetailVariant = LayoutGlobalConfig['product_detail']
@@ -31,7 +32,7 @@ export function ProductDrawer({
   }, [product])
 
   const moreLikeThis = product
-    ? store.products.filter((p) => p.id !== product.id && p.category === product.category).slice(0, 4)
+    ? store.products.filter((p) => p.id !== product.id && sameCategory(p.category, product.category)).slice(0, 4)
     : []
 
   // Contrast-safe CTA colours. A brand whose accent is near-white (e.g. a B&W

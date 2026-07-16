@@ -44,6 +44,32 @@ def group_by_primary_image(products: list[ProductDB]) -> dict[str, list[ProductD
     return dict(by_image)
 
 
+def _normalize_name(name: str) -> str:
+    return " ".join((name or "").strip().lower().split())
+
+
+def duplicate_candidate_groups(products: list[ProductDB]) -> list[list[ProductDB]]:
+    """Same image URL is necessary but not sufficient — merchants routinely
+    reuse one stock/placeholder photo across genuinely different products
+    (a CSV import in particular). Splitting each image group by normalized
+    name keeps auto-merge to items that are actually the same listing:
+    same photo AND same name. A same-image group with different names is
+    never returned here (each name-distinct item is its own group of 1,
+    filtered out below), so it's left alone rather than hard-deleted.
+    Pure — no I/O."""
+    candidates: list[list[ProductDB]] = []
+    for group in group_by_primary_image(products).values():
+        if len(group) < 2:
+            continue
+        by_name: dict[str, list[ProductDB]] = defaultdict(list)
+        for p in group:
+            by_name[_normalize_name(p.name)].append(p)
+        for sub in by_name.values():
+            if len(sub) >= 2:
+                candidates.append(sub)
+    return candidates
+
+
 def format_duplicate_description(group: list[ProductDB]) -> str:
     """Count leads the sentence — same digit-safety discipline as
     store_review.format_review_description, so decision_engine._extract_count()
@@ -186,13 +212,11 @@ async def find_duplicate_group(
     if len(products) < 2:
         return None
 
-    groups = group_by_primary_image(products)
+    groups = duplicate_candidate_groups(products)
     merchant_written_group: list[ProductDB] | None = None
     auto_deleted_ids: set[str] = set()
 
-    for group in groups.values():
-        if len(group) < 2:
-            continue
+    for group in groups:
         if all(p.qwen_generated_description for p in group):
             for dup in group[1:]:
                 await db.delete(dup)

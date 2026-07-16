@@ -22,7 +22,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import patch, AsyncMock
 
-from app.services.vision import analyze_product_image, ProductVision
+import httpx
+
+from app.services.vision import analyze_product_image, ProductVision, is_probably_image
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -342,16 +344,105 @@ def test_category_truncated_to_40():
     assert len(result.category) == 40
 
 
+# ── Pre-flight URL validity check ─────────────────────────────────────────────
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, content_type="image/jpeg"):
+        self.status_code = status_code
+        self.headers = {"content-type": content_type} if content_type else {}
+
+
+class _FakeAsyncClient:
+    """Mimics httpx.AsyncClient's async context manager + head/get, for a
+    single test-controlled response per call."""
+    def __init__(self, head_response=None, get_response=None, raise_exc=None):
+        self._head_response = head_response
+        self._get_response = get_response
+        self._raise_exc = raise_exc
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def head(self, url):
+        if self._raise_exc:
+            raise self._raise_exc
+        return self._head_response
+
+    async def get(self, url, headers=None):
+        return self._get_response
+
+
+def _patch_client(monkeypatch, client):
+    import app.services.vision as vision_mod
+    monkeypatch.setattr(vision_mod.httpx, "AsyncClient", lambda **kw: client)
+
+
+def test_dead_url_returns_false(monkeypatch):
+    _patch_client(monkeypatch, _FakeAsyncClient(head_response=_FakeResponse(404)))
+    assert asyncio.run(is_probably_image("https://example.com/dead.jpg")) is False
+
+
+def test_non_image_content_type_returns_false(monkeypatch):
+    _patch_client(monkeypatch, _FakeAsyncClient(
+        head_response=_FakeResponse(200, content_type="text/html")
+    ))
+    assert asyncio.run(is_probably_image("https://example.com/page.html")) is False
+
+
+def test_valid_image_returns_true(monkeypatch):
+    _patch_client(monkeypatch, _FakeAsyncClient(
+        head_response=_FakeResponse(200, content_type="image/png")
+    ))
+    assert asyncio.run(is_probably_image("https://example.com/photo.png")) is True
+
+
+def test_head_not_supported_falls_back_to_ranged_get(monkeypatch):
+    _patch_client(monkeypatch, _FakeAsyncClient(
+        head_response=_FakeResponse(405),
+        get_response=_FakeResponse(206, content_type="image/webp"),
+    ))
+    assert asyncio.run(is_probably_image("https://cdn.example.com/photo.webp")) is True
+
+
+def test_timeout_is_inconclusive_returns_true(monkeypatch):
+    """A network blip must never block a real photo — Qwen's own fetch is
+    the tie-breaker when the pre-check can't tell either way."""
+    _patch_client(monkeypatch, _FakeAsyncClient(raise_exc=httpx.TimeoutException("timed out")))
+    assert asyncio.run(is_probably_image("https://example.com/slow.jpg")) is True
+
+
+def test_missing_content_type_header_is_inconclusive_returns_true(monkeypatch):
+    _patch_client(monkeypatch, _FakeAsyncClient(head_response=_FakeResponse(200, content_type=None)))
+    assert asyncio.run(is_probably_image("https://example.com/no-header.jpg")) is True
+
+
 # ── Confidence edge cases ─────────────────────────────────────────────────────
 
 
-def test_confident_missing_defaults_to_true():
-    """Missing 'confident' key → defaults to True."""
+def test_confident_missing_defaults_to_false():
+    """Missing 'confident' key means Qwen's JSON didn't match the contract —
+    defaults to False so it goes to merchant review rather than going live
+    silently on an incomplete response."""
     result = _call({
         "name": "Leather Slides",
         "suggested_price": 50,
     })
-    assert result.confident is True
+    assert result.confident is False
+
+
+def test_confident_true_but_no_name_forced_false():
+    """Qwen claims confident=True but gave no usable name — contradictory,
+    so 'confident' is forced False regardless of the claimed value."""
+    result = _call({
+        "confident": True,
+        "suggested_price": 50,
+    })
+    assert result.confident is False
+    assert result.name == "Unidentified item"
 
 
 def test_confident_truthy_int_zero():

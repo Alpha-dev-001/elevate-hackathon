@@ -390,6 +390,11 @@ async def vision_batch(
 
     async def analyze_one(url: str):
         async with sem:
+            # Cheap reachability/content-type check first — a confirmed-dead
+            # or non-image URL never reaches Qwen, so it costs nothing.
+            if not await vision_svc.is_probably_image(url):
+                logger.info(f"[vision-batch] skipping dead/non-image URL: {url}")
+                return url, None
             try:
                 result = await vision_svc.analyze_product_image(
                     image_ref=url,
@@ -493,7 +498,7 @@ async def approve_all_products(
 
 # ── Duplicate detection & catalog cleanup ──────────────────────────────────────
 
-from app.services.duplicate_scan import group_by_primary_image
+from app.services.duplicate_scan import duplicate_candidate_groups
 from app.models.schemas import DeduplicateReport, DuplicateGroup
 
 
@@ -502,7 +507,9 @@ async def deduplicate_products(
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Scan the merchant's catalog for duplicate products (same image_url).
+    """Scan the merchant's catalog for duplicate products (same image_url
+    AND same name — a shared stock/placeholder photo across genuinely
+    different products is never treated as a duplicate).
 
     Qwen-generated duplicates are auto-resolved: the first product is kept,
     extras are hard-deleted (they were never live or are redundant vision
@@ -514,16 +521,12 @@ async def deduplicate_products(
     products = list(rows)
     total_scanned = len(products)
 
-    by_image = group_by_primary_image(products)
-
     auto_merged: list[DuplicateGroup] = []
     needs_review: list[DuplicateGroup] = []
     total_duplicates = 0
 
-    for image_url, group in by_image.items():
-        if len(group) < 2:
-            continue
-
+    for group in duplicate_candidate_groups(products):
+        image_url = group[0].image_urls[0]
         total_duplicates += len(group) - 1
         all_qwen = all(p.qwen_generated_description for p in group)
 

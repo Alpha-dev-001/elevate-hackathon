@@ -8,6 +8,7 @@ import { resolveTheme } from '@/lib/storeTheme'
 import { ProductGrid } from './ProductGrid'
 import { Cart } from './Cart'
 import { useCart } from '@/lib/cart'
+import { sameCategory } from '@/lib/category'
 
 /**
  * The no-brand_token / no-DSL path. Ported verbatim from the original
@@ -24,7 +25,7 @@ export function FallbackStorefront({ store, slug }: { store: PublicStore; slug: 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return store.products.filter((p) => {
-      if (activeCategory && p.category !== activeCategory) return false
+      if (activeCategory && !sameCategory(p.category, activeCategory)) return false
       if (!q) return true
       return (
         p.name.toLowerCase().includes(q) ||

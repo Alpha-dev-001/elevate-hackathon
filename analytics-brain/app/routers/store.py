@@ -88,12 +88,18 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
         if state.recovery and state.recovery.expires_at > now and state.recovery.percent > 0:
             recovery = state.recovery
         seen_categories: list[str] = []
+        seen_category_keys: set[str] = set()
         for p in state.products.values():
             if not p.qwen_generated and p.description is None and p.price <= 0:
                 continue  # skip anything malformed
             promo = best_active_promo(p.id, state.active_promos, now)
             price, compare_at, promo_label = effective_price(p.price, promo, baseline_price=p.baseline_price)
-            if p.category and p.category not in seen_categories:
+            # Case/whitespace-insensitive de-dup — "Shoes"/"shoes"/" Shoes "
+            # must collapse into one filter chip, not fragment into three.
+            # First-seen casing wins as the display label.
+            category_key = p.category.strip().lower() if p.category else ""
+            if category_key and category_key not in seen_category_keys:
+                seen_category_keys.add(category_key)
                 seen_categories.append(p.category)
             products.append(
                 PublicProduct(

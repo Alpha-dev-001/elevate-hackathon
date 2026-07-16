@@ -15,6 +15,7 @@ import { BrandLogo } from './BrandLogo'
 import { Cart } from './Cart'
 import { useCart } from '@/lib/cart'
 import { readableOn } from '@/lib/color'
+import { sameCategory } from '@/lib/category'
 
 /**
  * Smart layout switcher. Owns the filter state so Storefront.tsx stays lean.
@@ -43,7 +44,7 @@ export function LayoutRouter({ store, slug }: { store: PublicStore; slug: string
     const items = store.products
     const q = query.trim().toLowerCase()
     return items.filter((p) => {
-      if (activeCategory && p.category !== activeCategory) return false
+      if (activeCategory && !sameCategory(p.category, activeCategory)) return false
       if (!q) return true
       return (
         p.name.toLowerCase().includes(q) ||

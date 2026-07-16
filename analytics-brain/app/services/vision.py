@@ -14,12 +14,45 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.services.brand import _qwen_chat, _extract_json, BrandGenerationError
 
 logger = logging.getLogger(__name__)
+
+
+class DeadImageError(BrandGenerationError):
+    """Raised when a URL is confirmed dead/non-image before spending a Qwen
+    call on it — distinct from a Qwen-side failure so callers can log it
+    without implying the model did anything wrong."""
+
+
+async def is_probably_image(url: str) -> bool:
+    """Cheap reachability + content-type pre-check, run before any Qwen
+    vision call. Only returns False on a CONFIRMED negative signal (URL
+    unreachable, or a content-type that is explicitly not an image) — an
+    inconclusive check (HEAD blocked/timeout, missing content-type header,
+    a CDN that 405s HEAD) returns True so a real photo behind a picky CDN
+    is never wrongly rejected. This trades a few false positives (still
+    handled by Qwen's own download-failure path) for zero false negatives.
+    """
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=5.0) as client:
+            resp = await client.head(url)
+            if resp.status_code in (405, 501):
+                # HEAD not supported — fall back to a ranged GET instead of
+                # trusting an inconclusive HEAD response.
+                resp = await client.get(url, headers={"Range": "bytes=0-0"})
+            if resp.status_code >= 400:
+                return False
+            content_type = resp.headers.get("content-type", "")
+            if content_type and not content_type.startswith("image/"):
+                return False
+    except (httpx.TimeoutException, httpx.TransportError):
+        return True  # inconclusive — let Qwen's own fetch be the judge
+    return True
 
 
 class ProductVision(BaseModel):
@@ -122,6 +155,13 @@ async def analyze_product_image(
 
     # Strip BEFORE fallback — "   " is truthy but strips to empty.
     raw_name = str(data.get("name") or "").strip()
+    # Default to NOT confident on a malformed/incomplete response — an
+    # absent "confident" key means Qwen's JSON didn't match the contract,
+    # which is itself a reason to force merchant review rather than trust
+    # it. Same logic if no usable name came back at all: "Unidentified
+    # item" is definitionally not a confident catalogue entry, regardless
+    # of what the "confident" field claims.
+    confident = bool(data.get("confident", False)) and bool(raw_name)
     try:
         return ProductVision(
             name=(raw_name or "Unidentified item")[:120],
@@ -130,7 +170,7 @@ async def analyze_product_image(
             category=str(data.get("category") or "other").strip().lower()[:40],
             colors=colors,
             suggested_price=round(price, 2),
-            confident=bool(data.get("confident", True)),
+            confident=confident,
         )
     except ValueError as e:
         raise BrandGenerationError(f"Product vision failed schema validation: {e!s}") from e

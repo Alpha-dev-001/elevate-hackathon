@@ -1,10 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api, ApiError } from '@/lib/api'
-import { parseProductCsv } from '@/lib/csv'
 import { useStore } from '@/lib/store'
 import { ProductImage } from '@/components/storefront/ProductImage'
 import { CatalogReview } from '@/components/onboarding/CatalogReview'
@@ -12,26 +11,25 @@ import { ImageDropZone } from '@/components/onboarding/ImageDropZone'
 import type { Product, DeduplicateReport, CatalogAuditReport } from '@/types/schemas'
 
 /**
- * Step 4 — inventory. Add products one at a time, drop a CSV, or drop product
- * photos (qwen-vl-max identifies each product from the image). Descriptions are
- * written in one batched qwen-max call (CSV/manual) or by the vision pipeline
- * (photo drop). Publish from here. Zero products is allowed — the store opens
- * in its "preparing the shelves" state.
+ * Step 4 — inventory. Add products one at a time, or drop a CSV/product
+ * photos onto one zone that detects which it got (qwen-vl-max identifies
+ * each product from a photo). Descriptions are written in one batched
+ * qwen-max call (CSV/manual) or by the vision pipeline (photo drop).
+ * Publish from here. Zero products is allowed — the store opens in its
+ * "preparing the shelves" state.
  */
 export default function ProductsPage() {
   const router = useRouter()
   const { storeShellUrl, liveUrl } = useStore()
   const setLiveUrl = useStore((s) => s.setLiveUrl)
-  const csvInput = useRef<HTMLInputElement>(null)
 
   const [products, setProducts] = useState<Product[]>([])
   const [pendingProducts, setPendingProducts] = useState<Product[]>([])
   const [form, setForm] = useState({ name: '', price: '', cost_price: '', stock: '', category: '', image_url: '' })
   const [adding, setAdding] = useState(false)
-  const [csvBusy, setCsvBusy] = useState(false)
+  const [visionBusy, setVisionBusy] = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
   const [uncertainIds, setUncertainIds] = useState<Set<string>>(new Set())
   const [dedupReport, setDedupReport] = useState<DeduplicateReport | null>(null)
   const [auditReport, setAuditReport] = useState<CatalogAuditReport | null>(null)
@@ -44,12 +42,29 @@ export default function ProductsPage() {
     api.deduplicateProducts().then(setDedupReport).catch(() => {})
   }, [])
 
+  // Qwen is actively mid-flight (adding, or CSV/photo-drop via the drop zone)
+  // — warn before a refresh/close drops the merchant's view of progress,
+  // since that ambiguity ("did it finish or not?") is what actually confused
+  // merchants, not any real data loss.
+  const qwenBusy = adding || visionBusy
+  useEffect(() => {
+    if (!qwenBusy) return
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [qwenBusy])
+
   const handleVisionProducts = useCallback((newProducts: Product[], uncertain: string[]) => {
     // Vision products start as pending — merchant approves each one
     setPendingProducts((prev) => [...prev, ...newProducts])
     if (uncertain.length > 0) {
       setUncertainIds((prev) => new Set([...prev, ...uncertain]))
     }
+  }, [])
+
+  const handleCsvProducts = useCallback((newProducts: Product[]) => {
+    // CSV rows are live immediately — no approval step, unlike vision products.
+    setProducts((prev) => [...prev, ...newProducts])
   }, [])
 
   const approveProduct = useCallback(async (p: Product) => {
@@ -110,29 +125,6 @@ export default function ProductsPage() {
     }
   }
 
-  const handleCsv = async (file: File | undefined) => {
-    if (!file) return
-    setError(null)
-    setNote(null)
-    const text = await file.text()
-    const { rows, skipped } = parseProductCsv(text)
-    if (!rows.length) {
-      setError('No valid rows found. Columns: name, price, stock, image_url, category.')
-      return
-    }
-    setCsvBusy(true)
-    try {
-      const created = await api.addProductsBatch(rows)
-      setProducts((prev) => [...prev, ...created])
-      setNote(`Added ${created.length} product${created.length > 1 ? 's' : ''}` + (skipped ? `, skipped ${skipped} invalid row${skipped > 1 ? 's' : ''}.` : '.'))
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'CSV import failed')
-    } finally {
-      setCsvBusy(false)
-      if (csvInput.current) csvInput.current.value = ''
-    }
-  }
-
   const publish = async () => {
     setError(null)
     setPublishing(true)
@@ -173,23 +165,12 @@ export default function ProductsPage() {
         </button>
       </form>
 
-      {/* CSV drop */}
-      <div className="w-full max-w-2xl">
-        <div
-          onClick={() => csvInput.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => { e.preventDefault(); handleCsv(e.dataTransfer.files?.[0]) }}
-          className="cursor-pointer rounded-lg border-2 border-dashed border-border hover:border-accent transition-colors p-5 text-center"
-        >
-          <p className="text-sm text-text">{csvBusy ? 'Importing…' : 'Or drop a CSV'}</p>
-          <p className="text-muted text-xs font-mono mt-1">columns: name, price, stock, image_url, category</p>
-        </div>
-        <input ref={csvInput} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => handleCsv(e.target.files?.[0])} />
-        {note && <p className="text-accent text-xs font-mono mt-2">{note}</p>}
-      </div>
-
-      {/* Photo drop — qwen-vl-max identifies each product from the photo */}
-      <ImageDropZone onProductsCreated={handleVisionProducts} />
+      {/* One drop zone for both CSV and photos — detects what was dropped */}
+      <ImageDropZone
+        onProductsCreated={handleVisionProducts}
+        onCsvProductsAdded={handleCsvProducts}
+        onBusyChange={setVisionBusy}
+      />
 
       {/* Dedup report — auto-merged duplicates + merchant-written duplicates for review */}
       {dedupReport && dedupReport.total_duplicates > 0 && (
@@ -378,35 +359,18 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* product list */}
+      {/* product list — every product is editable, not just ones CatalogReview
+          flagged. This is the only place a merchant can fix a listing after
+          publish, so it can't be limited to the onboarding review pass. */}
       {products.length > 0 && (
         <div className="w-full max-w-2xl flex flex-col gap-3">
           <AnimatePresence>
             {products.map((p) => (
-              <motion.div
+              <EditableProductRow
                 key={p.id}
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
-                className="card p-4 flex gap-4 items-start"
-              >
-                {/* Always render via ProductImage: a dead/missing URL falls back
-                    to a branded initial tile instead of a broken-image glyph —
-                    keeps the add screen clean on camera. */}
-                <div className="w-14 h-14 rounded-md overflow-hidden bg-surface-2 shrink-0">
-                  <ProductImage src={p.image_url} alt={p.name} initial={p.name} className="w-full h-full object-cover" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-text font-semibold truncate">{p.name}</p>
-                    <span className="text-accent font-mono text-sm">${p.price}</span>
-                    {p.qwen_generated && (
-                      <span className="text-[10px] font-mono text-muted border border-border rounded-full px-1.5 py-0.5">qwen</span>
-                    )}
-                  </div>
-                  {p.description && <p className="text-sm text-muted mt-1 leading-relaxed">{p.description}</p>}
-                </div>
-              </motion.div>
+                product={p}
+                onUpdated={(updated) => setProducts((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))}
+              />
             ))}
           </AnimatePresence>
         </div>
@@ -429,15 +393,150 @@ export default function ProductsPage() {
             {!products.length && pendingProducts.length > 0 && (
               <p className="text-muted text-xs font-mono">Approve products first to publish.</p>
             )}
-            <button onClick={() => router.push('/brand-review')} className="text-muted text-xs font-mono hover:text-accent transition-colors">
+            <button
+              onClick={() => router.push('/brand-review')}
+              disabled={qwenBusy}
+              className="text-muted text-xs font-mono hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
               ← back to brand
             </button>
-            <button onClick={() => router.push('/terminal')} className="text-muted text-xs font-mono hover:text-accent transition-colors">
+            <button
+              onClick={() => router.push('/terminal')}
+              disabled={qwenBusy}
+              className="text-muted text-xs font-mono hover:text-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
               ← terminal
             </button>
+            {qwenBusy && (
+              <p className="text-muted text-[11px] font-mono">Qwen is still working — navigation unlocks when it's done.</p>
+            )}
           </>
         )}
       </div>
     </main>
+  )
+}
+
+/**
+ * One product row, editable in place. PATCH /products/{id} already records
+ * every merchant edit into qwen_memory server-side (products.py's
+ * update_product) — Qwen reads it back on future description/vision calls.
+ * That worked invisibly before; the "Qwen noted this" line below is the only
+ * change here, closing the loop so the merchant actually sees it happen.
+ */
+function EditableProductRow({
+  product,
+  onUpdated,
+}: {
+  product: Product
+  onUpdated: (p: Product) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [noted, setNoted] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [name, setName] = useState(product.name)
+  const [price, setPrice] = useState(String(product.price))
+  const [category, setCategory] = useState(product.category || '')
+
+  const startEdit = () => {
+    setName(product.name)
+    setPrice(String(product.price))
+    setCategory(product.category || '')
+    setErr(null)
+    setEditing(true)
+  }
+
+  const save = async () => {
+    setErr(null)
+    const body: Record<string, unknown> = {}
+    const trimmedName = name.trim()
+    if (trimmedName && trimmedName !== product.name) body.name = trimmedName
+    const parsedPrice = parseFloat(price)
+    if (!Number.isNaN(parsedPrice) && parsedPrice > 0 && parsedPrice !== product.price) body.price = parsedPrice
+    const trimmedCategory = category.trim()
+    if (trimmedCategory !== (product.category || '')) body.category = trimmedCategory
+    if (Object.keys(body).length === 0) { setEditing(false); return }
+
+    setSaving(true)
+    try {
+      const { product: updated } = await api.updateProduct(product.id, body as any)
+      onUpdated(updated)
+      setEditing(false)
+      setNoted(true)
+      setTimeout(() => setNoted(false), 4000)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Update failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCls =
+    'bg-bg border border-border rounded-md px-3 py-2 text-text text-sm outline-none ' +
+    'focus:border-accent transition-colors placeholder:text-muted'
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
+      className="card p-4 flex gap-4 items-start"
+    >
+      {/* Always render via ProductImage: a dead/missing URL falls back
+          to a branded initial tile instead of a broken-image glyph —
+          keeps the add screen clean on camera. */}
+      <div className="w-14 h-14 rounded-md overflow-hidden bg-surface-2 shrink-0">
+        <ProductImage src={product.image_url} alt={product.name} initial={product.name} className="w-full h-full object-cover" />
+      </div>
+      <div className="min-w-0 flex-1">
+        {editing ? (
+          <div className="flex flex-col gap-2">
+            <input className={inputCls} placeholder="Product name" value={name} onChange={(e) => setName(e.target.value)} />
+            <div className="flex gap-2">
+              <input className={`${inputCls} sm:max-w-[120px]`} placeholder="Price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} />
+              <input className={inputCls} placeholder="Category" value={category} onChange={(e) => setCategory(e.target.value)} />
+            </div>
+            {err && <p className="text-danger text-xs font-mono">{err}</p>}
+            <div className="flex gap-2">
+              <button onClick={save} disabled={saving} className="bg-accent text-bg font-semibold rounded-md py-1.5 px-4 text-xs hover:opacity-90 disabled:opacity-50 transition-opacity">
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button onClick={() => setEditing(false)} disabled={saving} className="rounded-md py-1.5 px-3 text-xs border border-border text-muted hover:text-text transition-colors disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-text font-semibold truncate">{product.name}</p>
+              <span className="text-accent font-mono text-sm">${product.price}</span>
+              {product.qwen_generated && (
+                <span className="text-[10px] font-mono text-muted border border-border rounded-full px-1.5 py-0.5">qwen</span>
+              )}
+              <button
+                onClick={startEdit}
+                className="text-[11px] font-mono text-muted hover:text-accent transition-colors ml-auto"
+              >
+                Edit
+              </button>
+            </div>
+            {product.description && <p className="text-sm text-muted mt-1 leading-relaxed">{product.description}</p>}
+            {noted && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="text-[11px] font-mono mt-1"
+                style={{ color: 'var(--color-accent)' }}
+              >
+                ✦ Qwen noted this change — it'll shape future descriptions and suggestions for this store.
+              </motion.p>
+            )}
+          </>
+        )}
+      </div>
+    </motion.div>
   )
 }

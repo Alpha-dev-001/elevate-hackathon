@@ -18,20 +18,17 @@ Icons are upgraded a beat later in a second push so the reveal stays fast.
 """
 from __future__ import annotations
 
-import asyncio
 import time
 import logging
-from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, get_session_factory
 from app.core.redis import get_redis, Keys
 from app.core.security import get_current_merchant
 from app.core.ws_manager import manager
-from app.models.db_models import MerchantDB, BrandProfileDB, ProductDB
+from app.models.db_models import MerchantDB, BrandProfileDB
 from app.models.schemas import (
     LogoSubmitRequest,
     BrandPackage,
@@ -202,30 +199,17 @@ async def _run_brand_pipeline(
         except BrandGenerationError as e:
             logger.warning(f"[onboarding] icon upgrade failed for {merchant_id}: {e}")
 
-        # BrandToken + seed products — off the critical path, never block reveal.
+        # BrandToken — off the critical path, never block reveal.
         try:
             from app.models.schemas import BrandToken
-            industry_hint = (
-                pkg.brand.suggested_categories[0]
-                if pkg.brand.suggested_categories
-                else "other"
-            )
-            brand_token_result, seed_products_raw = await asyncio.gather(
-                brand_svc.generate_brand_token(pkg.analysis, store_name, category),
-                brand_svc.generate_seed_products(
-                    store_name=store_name,
-                    brand_voice=pkg.brand.brand_voice_profile,
-                    industry_hint=industry_hint,
-                ),
-                return_exceptions=True,
-            )
+            brand_token_result = await brand_svc.generate_brand_token(pkg.analysis, store_name, category)
 
             async with factory() as db:
                 # Store BrandToken if generation succeeded
                 brand_profile = await db.get(BrandProfileDB, merchant_id)
                 if brand_profile and isinstance(brand_token_result, BrandToken):
                     from app.services.layout_dsl import generate_layout_dsl
-                    product_count = len(seed_products_raw) if isinstance(seed_products_raw, list) else 0
+                    product_count = 0  # new store — merchant hasn't added products yet
                     brand_token_result.layout_dsl = await generate_layout_dsl(
                         brand_token_result, store_name, category, product_count,
                         slug=slug,
@@ -260,41 +244,10 @@ async def _run_brand_pipeline(
                         f"{brand_token_result}"
                     )
 
-                # Seed products only if store has none yet
-                existing_count = await db.scalar(
-                    select(func.count()).where(ProductDB.merchant_id == merchant_id)
-                )
-                if existing_count == 0 and isinstance(seed_products_raw, list):
-                    for raw_p in seed_products_raw:
-                        if not isinstance(raw_p, dict) or not raw_p.get("name"):
-                            continue
-                        db.add(ProductDB(
-                            id=str(uuid4()),
-                            merchant_id=merchant_id,
-                            name=str(raw_p.get("name", "Product"))[:255],
-                            description=str(raw_p.get("description", "")),
-                            price=float(raw_p.get("price", 10.0)),
-                            cost_price=float(raw_p.get("price", 10.0)) * 0.5,
-                            baseline_price=float(raw_p.get("price", 10.0)),
-                            stock=int(raw_p.get("stock", 100)),
-                            category=str(raw_p.get("category", ""))[:100],
-                            image_urls=[],
-                            qwen_generated_description=True,
-                        ))
-                    logger.info(
-                        f"[onboarding] {len(seed_products_raw)} seed products inserted "
-                        f"for {merchant_id}"
-                    )
-                elif isinstance(seed_products_raw, Exception):
-                    logger.warning(
-                        f"[onboarding] seed products failed for {merchant_id}: "
-                        f"{seed_products_raw}"
-                    )
-
                 await db.commit()
         except Exception as e:
             logger.warning(
-                f"[onboarding] brand token/seed products step failed for {merchant_id}: {e}"
+                f"[onboarding] brand token step failed for {merchant_id}: {e}"
             )
 
     except BrandGenerationError as e:

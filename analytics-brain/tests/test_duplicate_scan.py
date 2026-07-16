@@ -8,6 +8,7 @@ import re
 from app.models.db_models import ProductDB
 from app.services.duplicate_scan import (
     group_by_primary_image,
+    duplicate_candidate_groups,
     format_duplicate_description,
     _duplicate_group_hash,
 )
@@ -44,6 +45,51 @@ class TestGroupByPrimaryImage:
         """Grouping doesn't filter singletons — callers check len(group) >= 2."""
         products = [_product("p1", "A", "https://x/a.jpg")]
         assert len(group_by_primary_image(products)["https://x/a.jpg"]) == 1
+
+
+class TestDuplicateCandidateGroups:
+    """Same image_url is necessary but not sufficient for auto-merge — a
+    shared stock/placeholder photo across genuinely different products
+    (common in CSV imports) must never be treated as a duplicate."""
+
+    def test_same_image_same_name_is_a_candidate(self):
+        products = [
+            _product("p1", "AirPods 2", "https://x/a.jpg"),
+            _product("p2", "AirPods 2", "https://x/a.jpg"),
+        ]
+        groups = duplicate_candidate_groups(products)
+        assert len(groups) == 1
+        assert {p.id for p in groups[0]} == {"p1", "p2"}
+
+    def test_same_image_different_name_is_not_a_candidate(self):
+        """The exact scenario a shared placeholder/stock photo produces:
+        two unrelated products, one image_url. Must not be flagged."""
+        products = [
+            _product("p1", "Xbox Series X", "https://x/placeholder.jpg"),
+            _product("p2", "Logitech MX Master Mouse", "https://x/placeholder.jpg"),
+        ]
+        assert duplicate_candidate_groups(products) == []
+
+    def test_name_match_is_case_and_whitespace_insensitive(self):
+        products = [
+            _product("p1", "Leather Slides", "https://x/a.jpg"),
+            _product("p2", "  leather   slides ", "https://x/a.jpg"),
+        ]
+        groups = duplicate_candidate_groups(products)
+        assert len(groups) == 1
+        assert {p.id for p in groups[0]} == {"p1", "p2"}
+
+    def test_three_way_split_by_name_within_one_image(self):
+        """Two products share a name (real duplicate) and a third shares
+        only the image (different item) — only the matching pair returns."""
+        products = [
+            _product("p1", "Slides", "https://x/a.jpg"),
+            _product("p2", "Slides", "https://x/a.jpg"),
+            _product("p3", "Sandals", "https://x/a.jpg"),
+        ]
+        groups = duplicate_candidate_groups(products)
+        assert len(groups) == 1
+        assert {p.id for p in groups[0]} == {"p1", "p2"}
 
 
 class TestFormatDuplicateDescription:
