@@ -386,10 +386,12 @@ export const CartSchema = z.object({
   items: z.array(CartItemSchema).default([]),
   subtotal: z.number().default(0),
   item_count: z.number().int().default(0),
-  // Order-level recovery discount overlaid by the backend at read time.
+  // Order-level discount overlaid by the backend at read time — store-wide
+  // recovery_offer or this session's own cart_dwell_nudge offer.
   discount_percent: z.number().default(0),
   discount_label: z.string().nullable().optional(),
   discount_expires_at: z.number().nullable().optional(),
+  discount_promo_id: z.string().nullable().optional(),
   discount_amount: z.number().default(0),
   total: z.number().default(0),
   updated_at: z.number(),

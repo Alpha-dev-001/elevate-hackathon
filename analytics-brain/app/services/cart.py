@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.redis import get_redis, Keys, TTL
 from app.models.db_models import ProductDB
-from app.models.schemas import Cart, CartItem
+from app.models.schemas import Cart, CartItem, RecoveryOffer
 from app.services import delta as delta_svc
 from app.services.pricing import best_active_promo, effective_price, now_ms
 
@@ -49,28 +49,76 @@ def _recompute(cart: Cart) -> Cart:
     return cart
 
 
-async def _apply_recovery(merchant_id: str, cart: Cart) -> Cart:
-    """Overlay the merchant's active order-level recovery discount onto the cart.
+async def set_dwell_offer(merchant_id: str, session_id: str, offer: RecoveryOffer) -> None:
+    """Persist a cart_dwell_nudge discount scoped to exactly this session.
+    Redis TTL matches the offer's own expiry so a stale key can never
+    outlive the discount it represents — no separate cleanup needed."""
+    redis = await get_redis()
+    ttl_seconds = max(60, (offer.expires_at - now_ms()) // 1000)
+    await redis.set(
+        Keys.dwell_offer(merchant_id, session_id),
+        offer.model_dump_json(),
+        ex=ttl_seconds,
+    )
 
-    Recomputed on EVERY read from SystemState.recovery, so an expired or removed
-    offer zeroes the discount out — a stale stored blob can never resurrect one.
-    Product line snapshots are never touched: only the cart total moves, which is
-    exactly the cart-recovery behavior (the browse grid stays at full price).
-    Best-effort: a Redis blip leaves the cart at full price rather than 500-ing.
-    """
-    percent, label, expires_at = 0.0, None, None
+
+async def _get_dwell_offer(merchant_id: str, session_id: str) -> RecoveryOffer | None:
     try:
-        state = await delta_svc.load_state(merchant_id)
-        rec = state.recovery if state else None
-        if rec and cart.items and rec.percent > 0 and rec.expires_at > now_ms():
-            percent, label, expires_at = rec.percent, rec.label, rec.expires_at
-    except Exception as e:
+        redis = await get_redis()
+        raw = await redis.get(Keys.dwell_offer(merchant_id, session_id))
+        if raw:
+            return RecoveryOffer.model_validate_json(raw)
+    except Exception as e:  # noqa: BLE001 — a Redis blip must not break checkout
+        logger.warning(f"[cart] dwell offer read failed for {merchant_id}/{session_id}: {e}")
+    return None
+
+
+async def get_effective_discount(merchant_id: str, session_id: str) -> RecoveryOffer | None:
+    """The discount that actually applies to THIS session's order right now:
+    the merchant-wide recovery_offer (applies to every session) or this
+    session's own cart_dwell_nudge offer (applies to no one else), whichever
+    is larger. Both are re-checked for expiry here, never trusted from a
+    stale read — a merchant's offer expiring takes effect on the very next
+    call. Single source of truth for both the cart display (_apply_recovery
+    below) and the checkout math (orders.checkout) — they must never compute
+    this independently or they can drift apart, which was the original bug
+    (checkout re-derived it straight from SystemState.recovery instead of
+    reading what the cart had already computed)."""
+    candidates: list[RecoveryOffer] = []
+
+    state = await delta_svc.load_state(merchant_id)
+    if state and state.recovery and state.recovery.percent > 0 and state.recovery.expires_at > now_ms():
+        candidates.append(state.recovery)
+
+    dwell = await _get_dwell_offer(merchant_id, session_id)
+    if dwell and dwell.percent > 0 and dwell.expires_at > now_ms():
+        candidates.append(dwell)
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda o: o.percent)
+
+
+async def _apply_recovery(merchant_id: str, cart: Cart) -> Cart:
+    """Overlay whichever discount actually applies to THIS cart's session
+    right now (see get_effective_discount) onto the cart total. Recomputed
+    on EVERY read, so an expired or dismissed offer zeroes the discount out
+    — a stale stored blob can never resurrect one. Product line snapshots
+    are never touched: only the cart total moves. Best-effort: a Redis blip
+    leaves the cart at full price rather than 500-ing.
+    """
+    offer: RecoveryOffer | None = None
+    try:
+        if cart.items:
+            offer = await get_effective_discount(merchant_id, cart.session_id)
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"[cart] recovery overlay failed for {merchant_id}: {e}")
 
-    cart.discount_percent = percent
-    cart.discount_label = label
-    cart.discount_expires_at = expires_at
-    cart.discount_amount = round(cart.subtotal * percent / 100, 2) if percent else 0.0
+    cart.discount_percent = offer.percent if offer else 0.0
+    cart.discount_label = offer.label if offer else None
+    cart.discount_expires_at = offer.expires_at if offer else None
+    cart.discount_promo_id = offer.promo_id if offer else None
+    cart.discount_amount = round(cart.subtotal * cart.discount_percent / 100, 2) if offer else 0.0
     cart.total = round(cart.subtotal - cart.discount_amount, 2)
     return cart
 

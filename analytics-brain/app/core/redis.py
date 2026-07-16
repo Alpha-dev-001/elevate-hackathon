@@ -81,6 +81,15 @@ class Keys:
         return f"elevate:{merchant_id}:active_carts"
 
     @staticmethod
+    def dwell_offer(merchant_id: str, session_id: str) -> str:
+        """A cart_dwell_nudge discount scoped to exactly this session — never
+        read by any other session's checkout. Self-expiring (set_dwell_offer
+        sets the Redis TTL to match the offer's own expires_at), so a merchant
+        approving a new dwell nudge for a stale session can never leave a
+        zombie discount behind."""
+        return f"elevate:{merchant_id}:dwell:{session_id}"
+
+    @staticmethod
     def qr_campaign(merchant_id: str, campaign_id: str) -> str:
         return f"elevate:{merchant_id}:qr:{campaign_id}"
 

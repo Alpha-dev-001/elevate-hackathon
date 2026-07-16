@@ -731,11 +731,14 @@ class Cart(BaseModel):
     items: list[CartItem] = Field(default_factory=list)
     subtotal: float = 0.0            # sum of line_totals, before any recovery discount
     item_count: int = 0
-    # Order-level recovery discount overlaid at read time from SystemState.recovery.
-    # Never snapshotted onto lines — recomputed on every read so it can expire.
+    # Order-level discount overlaid at read time — store-wide recovery_offer
+    # (SystemState.recovery) or this session's own cart_dwell_nudge offer,
+    # whichever applies (see cart.py's get_effective_discount). Never
+    # snapshotted onto lines — recomputed on every read so it can expire.
     discount_percent: float = 0.0
     discount_label: Optional[str] = None
     discount_expires_at: Optional[int] = None
+    discount_promo_id: Optional[str] = None  # attributes a checkout to the AgentAction that granted it
     discount_amount: float = 0.0     # round(subtotal * percent / 100, 2)
     total: float = 0.0               # subtotal - discount_amount
     updated_at: int
