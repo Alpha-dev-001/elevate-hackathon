@@ -2,14 +2,16 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { AnimatePresence } from 'framer-motion'
 import { api, ApiError, type DashboardData, type Capability } from '@/lib/api'
 import { connectTerminal } from '@/lib/ws'
-import type { AgentAction, Merchant } from '@/types/schemas'
+import type { AgentAction, Merchant, Product } from '@/types/schemas'
 import { StoreSnapshot } from '@/components/terminal/StoreSnapshot'
 import { DecisionFeed } from '@/components/terminal/DecisionFeed'
 import { AttributionDashboard } from '@/components/terminal/AttributionDashboard'
 import { CapabilityProposals } from '@/components/terminal/CapabilityProposals'
 import { ConstraintsSettings } from '@/components/terminal/ConstraintsSettings'
+import { PendingProductCard } from '@/components/terminal/PendingProductCard'
 
 export default function TerminalPage() {
   const router = useRouter()
@@ -26,6 +28,7 @@ export default function TerminalPage() {
   const [lastTokens, setLastTokens] = useState<number | null>(null)
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [qwenFallback, setQwenFallback] = useState<{ message: string; type: string } | null>(null)
+  const [pendingProducts, setPendingProducts] = useState<Product[]>([])
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -92,6 +95,7 @@ export default function TerminalPage() {
     fetchActions(slug)
     fetchDashboard(slug)
     fetchCapabilities(slug)
+    api.listPendingProducts().then(setPendingProducts).catch(() => {})
 
     // 5s poll for new actions + capability gaps (capability changes originate in
     // the builder's point-and-edit flow, so the terminal learns of them by poll).
@@ -126,6 +130,14 @@ export default function TerminalPage() {
         }
         if (event === 'state_updated') {
           fetchDashboard(slug)
+        }
+        if (event === 'products_pending' && Array.isArray(payload.products)) {
+          const incoming = payload.products as Product[]
+          setPendingProducts((prev) => {
+            const existingIds = new Set(prev.map((p) => p.id))
+            const newOnes = incoming.filter((p) => !existingIds.has(p.id))
+            return newOnes.length ? [...newOnes, ...prev] : prev
+          })
         }
       },
     })
@@ -308,6 +320,25 @@ export default function TerminalPage() {
       <div className="px-6 pt-6 max-w-[1400px] mx-auto">
         <CapabilityProposals capabilities={capabilities} />
       </div>
+
+      {/* ── Product Vision — pending products awaiting approval, live via WS ── */}
+      {pendingProducts.length > 0 && (
+        <div className="px-6 pt-6 max-w-[1400px] mx-auto flex flex-col gap-3">
+          <p className="font-mono text-xs uppercase tracking-widest" style={{ color: 'var(--color-accent)' }}>
+            Product Vision · {pendingProducts.length} awaiting approval
+          </p>
+          <AnimatePresence>
+            {pendingProducts.map((p) => (
+              <PendingProductCard
+                key={p.id}
+                product={p}
+                onApproved={(approved) => setPendingProducts((prev) => prev.filter((x) => x.id !== approved.id))}
+                onDiscarded={(id) => setPendingProducts((prev) => prev.filter((x) => x.id !== id))}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
 
       {/* ── 3-column layout ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 px-6 pb-6 max-w-[1400px] mx-auto">
