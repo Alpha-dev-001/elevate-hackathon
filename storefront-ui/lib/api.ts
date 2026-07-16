@@ -83,6 +83,7 @@ export interface ConstraintsUpdateInput {
   max_discount_percent?: number
   min_price?: Record<string, number>
   accessibility_level?: 'AA' | 'AAA'
+  max_uplift_percent?: number
 }
 
 const enc = encodeURIComponent

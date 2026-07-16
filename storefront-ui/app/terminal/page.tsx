@@ -9,6 +9,7 @@ import { StoreSnapshot } from '@/components/terminal/StoreSnapshot'
 import { DecisionFeed } from '@/components/terminal/DecisionFeed'
 import { AttributionDashboard } from '@/components/terminal/AttributionDashboard'
 import { CapabilityProposals } from '@/components/terminal/CapabilityProposals'
+import { ConstraintsSettings } from '@/components/terminal/ConstraintsSettings'
 
 export default function TerminalPage() {
   const router = useRouter()
@@ -336,6 +337,11 @@ export default function TerminalPage() {
         <div className="lg:col-span-1">
           <AttributionDashboard data={dashboard} loading={dashboardLoading} />
         </div>
+      </div>
+
+      {/* ── Discount/pricing constraint settings — one-time-per-session config, not a live feed item ── */}
+      <div className="px-6 pb-6 max-w-[1400px] mx-auto flex justify-center">
+        <ConstraintsSettings />
       </div>
     </main>
   )
