@@ -460,6 +460,9 @@ async def vision_batch(
             image_urls=[url],
             is_active=False,  # pending — merchant approves before going live
             qwen_generated_description=True,
+            is_featured=False,  # explicit: db_to_product() below runs pre-flush,
+                                 # so the column's own DB-side default isn't
+                                 # materialized on this Python object yet.
         )
         db.add(product)
         created.append(VisionBatchProduct(
@@ -470,6 +473,17 @@ async def vision_batch(
     await _advance_to_products(merchant)
     await db.flush()
     await _sync_state_if_live(db, merchant.id)
+
+    if created:
+        await manager.push_to_terminal(
+            merchant.id,
+            WSMessage(
+                event=WSEventType.PRODUCTS_PENDING,
+                payload={"products": [p.product.model_dump() for p in created]},
+                merchant_id=merchant.id,
+                timestamp=_now(),
+            ),
+        )
 
     return VisionBatchResponse(products=created, failed_urls=failed_urls)
 

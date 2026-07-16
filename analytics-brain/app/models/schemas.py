@@ -538,6 +538,7 @@ class WSEventType(str, Enum):
     AGENT_ACTION = "agent_action"
     ACTION_EXPIRED = "action_expired"
     QWEN_FALLBACK = "qwen_fallback"
+    PRODUCTS_PENDING = "products_pending"
     # Client → Server
     APPROVE_ACTION = "approve_action"
     REJECT_ACTION = "reject_action"
