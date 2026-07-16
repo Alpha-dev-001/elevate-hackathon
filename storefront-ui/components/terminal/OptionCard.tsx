@@ -82,6 +82,17 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
   const [pendingUndo, setPendingUndo] = useState(false)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Merchant can override Qwen's proposed discount before approving — still
+  // clamped by the interceptor server-side, this just lets the merchant
+  // correct the number instead of only approve/reject as-is.
+  const DISCOUNT_ACTION_TYPES = new Set([
+    'flash_sale', 'scarcity_price', 'recovery_offer', 'cart_dwell_nudge',
+  ])
+  const hasDiscount = DISCOUNT_ACTION_TYPES.has(action.action_type) && typeof action.payload?.discount_percent === 'number'
+  const [overridePercent, setOverridePercent] = useState<string>(
+    hasDiscount ? String(action.payload.discount_percent) : ''
+  )
+
   useEffect(() => {
     return () => {
       if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
@@ -115,7 +126,11 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
     if (isLoading) return
     setIsApproving(true)
     try {
-      const { action: updated } = await api.approveAction(action.id)
+      const parsed = parseFloat(overridePercent)
+      const override = hasDiscount && !Number.isNaN(parsed) && parsed !== action.payload.discount_percent
+        ? { discount_percent_override: parsed }
+        : undefined
+      const { action: updated } = await api.approveAction(action.id, override)
       if (updated.status === 'blocked_at_execution') {
         // State drifted unsafe between proposal and approval (e.g. cost changed) —
         // the interceptor's execution-time re-check blocked it. Keep the card
@@ -358,6 +373,30 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
             <p className="text-xs italic mb-4" style={{ color: 'var(--color-warning)' }}>
               Constraint check: {action.constraint_check}
             </p>
+          )}
+
+          {/* Discount override — only for action types that carry a discount_percent */}
+          {hasDiscount && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <label className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                Discount %
+              </label>
+              <input
+                type="number" min={0} max={100} step={1}
+                value={overridePercent}
+                onChange={(e) => setOverridePercent(e.target.value)}
+                disabled={isLoading}
+                className="w-16 rounded px-2 py-1 text-xs font-mono outline-none disabled:opacity-50"
+                style={{
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text)',
+                }}
+              />
+              <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-muted)' }}>
+                Qwen proposed {action.payload.discount_percent}% — still clamped to your settings ceiling
+              </span>
+            </div>
           )}
 
           {/* Error */}

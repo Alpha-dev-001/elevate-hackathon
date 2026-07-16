@@ -332,9 +332,10 @@ export const api = {
   // ── Agent actions ────────────────────────────────────────────────────────
   getPendingActions: (slug: string) =>
     req<{ actions: AgentAction[] }>(`/api/agent/actions/${enc(slug)}/pending`),
-  approveAction: (actionId: string) =>
+  approveAction: (actionId: string, override?: { discount_percent_override: number }) =>
     req<{ action: AgentAction }>(`/api/agent/actions/${enc(actionId)}/approve`, {
       method: 'POST',
+      body: override ? JSON.stringify(override) : undefined,
     }),
   dismissAction: (actionId: string) =>
     req<{ action: AgentAction }>(`/api/agent/actions/${enc(actionId)}/dismiss`, {
