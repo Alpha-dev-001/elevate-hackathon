@@ -215,7 +215,15 @@ function ReviewCard({
   const hide = async () => {
     setBusy(true); setErr(null)
     try {
-      await api.updateProduct(product.id, { is_active: false })
+      // Hard-delete, not a PATCH to is_active:false — these products are
+      // already pending (is_active=false), so a PATCH to the same value is
+      // a no-op that leaves a permanent zombie entry: it never resurfaces
+      // here again, but it's still returned by every "pending approval"
+      // surface (the products page, the terminal) forever, since nothing
+      // ever removed it. DELETE matches the backend's own documented
+      // semantics for a never-approved product (hard-delete, no orders
+      // reference it).
+      await api.deleteProduct(product.id)
       onHidden(product.id)
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : 'Could not hide')
