@@ -64,6 +64,15 @@ class Keys:
         return f"elevate:price_check:{product_id}:escalation_streak"
 
     @staticmethod
+    def last_rollup_date() -> str:
+        """The date string (YYYY-MM-DD, UTC) pricing_signals.rollup_daily_signals
+        + flag_suspicious_signals last ran for — process-wide, not per-product,
+        since one rollup pass covers every merchant/product in one go. Gates
+        the pricing background loop's hourly tick down to actually running the
+        rollup once a day, not once an hour."""
+        return "elevate:pricing:last_rollup_date"
+
+    @staticmethod
     def reverting_products() -> str:
         """Global set of product_ids currently stepping back toward baseline
         after a comparable-informed move showed engagement without

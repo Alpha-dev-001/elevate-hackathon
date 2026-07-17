@@ -237,3 +237,30 @@ async def flag_suspicious_signals(db: "AsyncSession", *, target_date: str | None
 
     await db.commit()
     return flagged
+
+
+def should_run_daily_rollup(last_rollup_date: str | None, target_date: str) -> bool:
+    """Pure — no I/O. The pricing background loop ticks hourly (so escalated
+    products get checked hourly), but the rollup only needs to run once per
+    UTC day — this is what turns 'every hour' into 'once, whichever hour
+    crosses into a new day'. Absent last_rollup_date == never run == due now."""
+    return last_rollup_date != target_date
+
+
+async def run_daily_rollup_if_due(db: "AsyncSession", redis: "Redis") -> int:
+    """I/O wrapper called from pricing_cycle's tick, BEFORE reversion checks
+    and run_pricing_cycle — both depend on today's product_price_history rows
+    actually existing. Found live: neither rollup_daily_signals nor
+    flag_suspicious_signals was ever called from anywhere in the app, so
+    is_price_rebalance_eligible (which reads product_price_history) was
+    unconditionally False for every product forever — price_rebalance had
+    literally never fired. Returns rows written (0 if already run today)."""
+    target_date = _yesterday_utc()
+    last = await redis.get(Keys.last_rollup_date())
+    if not should_run_daily_rollup(last, target_date):
+        return 0
+
+    written = await rollup_daily_signals(db, redis, target_date=target_date)
+    await flag_suspicious_signals(db, target_date=target_date)
+    await redis.set(Keys.last_rollup_date(), target_date)
+    return written

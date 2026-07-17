@@ -657,6 +657,14 @@ def start_pricing_background_loop() -> None:
         try:
             async with factory() as db:
                 redis = await get_redis()
+                # Rollup runs FIRST — everything downstream (eligibility,
+                # reversion windows, trust evaluation) reads product_price_history,
+                # which only this call ever writes. Gated to once per UTC day
+                # internally; safe to call every tick.
+                from app.services.pricing_signals import run_daily_rollup_if_due
+                rolled_up = await run_daily_rollup_if_due(db, redis)
+                if rolled_up:
+                    logger.info("[pricing_cycle] daily rollup wrote %d row(s)", rolled_up)
                 # Reversion runs BEFORE fresh proposals so a reverted price is
                 # what run_pricing_cycle reasons over this same tick, not stale.
                 await check_reversion_triggers(db, redis)
