@@ -288,6 +288,22 @@ async def run_decision_cycle(
         entries = []
     memory_context = build_memory_context(entries)
 
+    # Quantified per-role learning — the measurable half of the loop. Derived
+    # from how this store has resolved this role's past proposals; rendered
+    # into a directive so the role's next proposal converges on what the store
+    # actually accepts. Rides the existing single decision call (no extra
+    # tokens) and is stored on context_snapshot below, so the Decision Trace
+    # page shows the stance that shaped each decision. role=None callers (non-
+    # swarm) keep today's behavior byte-identical.
+    learned_stance = ""
+    if role is not None:
+        try:
+            from app.services.learning import load_role_learning, render_learned_stance
+            learned_stance = render_learned_stance(await load_role_learning(merchant_id, role, db))
+        except Exception as e:  # noqa: BLE001 — learning must never block a decision
+            logger.warning("[decision] learning read failed for %s: %s", merchant_id, e)
+    memory_for_prompt = f"{memory_context}\n{learned_stance}".strip() if learned_stance else memory_context
+
     if prompt_override is not None:
         # A pricing cycle (run_pricing_cycle, pricing_cycle.py) builds its own
         # product-specific prompt via compose_pricing_prompt — the anomaly/
@@ -304,7 +320,7 @@ async def run_decision_cycle(
             brand_rules_summary=brand_rules_summary,
             products_summary=products_summary,
             anomaly_description=anomaly_desc,
-            memory_context=memory_context,
+            memory_context=memory_for_prompt,
             max_discount_percent=constraints.max_discount_percent,
             role=role,
         )
@@ -472,6 +488,7 @@ async def run_decision_cycle(
     context_snapshot = {
         "products_summary": products_summary,
         "memory_context": memory_context,
+        "learned_stance": learned_stance,
         "max_discount_percent": constraints.max_discount_percent,
         "avg_price": round(avg_price, 2),
     }

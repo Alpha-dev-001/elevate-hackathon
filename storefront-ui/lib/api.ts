@@ -168,6 +168,10 @@ export interface SearchInsight {
 export interface DecisionContextSnapshot {
   products_summary?: string
   memory_context?: string
+  /** Quantified per-role learning that shaped this decision — how the merchant
+   * has resolved this role's past proposals, rendered into a directive. Empty
+   * until the role has enough resolved history to say anything. */
+  learned_stance?: string
   max_discount_percent?: number
   avg_price?: number
 }

@@ -17,7 +17,7 @@ function DecisionRow({ d }: { d: DecisionLogEntry }) {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
   })
   const ctx = d.context_snapshot
-  const hasContext = !!(ctx && (ctx.products_summary || ctx.memory_context || ctx.max_discount_percent != null))
+  const hasContext = !!(ctx && (ctx.products_summary || ctx.memory_context || ctx.learned_stance || ctx.max_discount_percent != null))
 
   return (
     <div
@@ -101,6 +101,16 @@ function DecisionRow({ d }: { d: DecisionLogEntry }) {
                     Prior-outcome memory
                   </span>
                   <span className="whitespace-pre-wrap">{ctx.memory_context}</span>
+                </div>
+              )}
+              {ctx.learned_stance && (
+                <div className="pl-2 border-l-2" style={{ borderColor: 'var(--color-accent)' }}>
+                  <span className="uppercase text-[10px] tracking-widest block mb-0.5" style={{ color: 'var(--color-accent)' }}>
+                    ✦ Learned stance
+                  </span>
+                  <span className="whitespace-pre-wrap" style={{ color: 'var(--color-accent)', opacity: 0.9 }}>
+                    {ctx.learned_stance}
+                  </span>
                 </div>
               )}
               {ctx.max_discount_percent != null && (
