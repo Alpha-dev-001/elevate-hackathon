@@ -6,8 +6,10 @@ import '@/lib/registerVariants'
 import { resolveTheme } from '@/lib/storeTheme'
 import { StoreShell } from '@/components/store/StoreShell'
 import { sameCategory } from '@/lib/category'
+import { matchesSearch } from '@/lib/search'
 import { DSLSection } from './DSLSection'
 import { DSLNav } from './DSLNav'
+import { SearchBar } from './SearchBar'
 import { DSLFooter } from './DSLFooter'
 import { FallbackStorefront } from './FallbackStorefront'
 import { CustomCSSInjector } from './CustomCSSInjector'
@@ -19,6 +21,7 @@ import { useCustomer } from '@/lib/customerAuth'
 import { trackProductView, trackAddToCart, markInteracted } from '@/lib/behavior'
 import { useEffect } from 'react'
 import { IconCart, IconUser } from '@/components/icons'
+import { api } from '@/lib/api'
 
 import type { EditTarget } from '@/lib/dslRegistry'
 
@@ -48,6 +51,23 @@ export function DSLRenderer({
   // memory: elevate-dsl-category-filter-broken for why this used to be a
   // no-op cosmetic-only chip.
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Log the query for store-wide demand aggregation once typing settles —
+  // debounced so a full search phrase logs once, not once per keystroke.
+  // Never in preview (the builder isn't a real customer session).
+  useEffect(() => {
+    if (preview) return
+    const q = searchQuery.trim()
+    if (q.length < 2) return
+    const matched = store.products.some((p) => matchesSearch(p, q))
+    const t = window.setTimeout(() => {
+      api.logSearch(slug, q, matched).catch(() => {
+        // best-effort — a logging failure must never surface to the customer
+      })
+    }, 600)
+    return () => window.clearTimeout(t)
+  }, [searchQuery, store.products, slug, preview])
 
   // Resolve the signed-in customer for this store (guest = null). Not in preview.
   useEffect(() => {
@@ -196,15 +216,18 @@ export function DSLRenderer({
       <div data-store={slug} className={`relative ${parsed.global_config.nav_style === 'sidebar-text' ? 'md:pl-44' : ''}`}>
         <CustomCSSInjector css={parsed.custom_css} slug={slug} />
         {!hasAnnounce && (
-          <EditTargetWrap editMode={editMode} onClick={() => onSelectTarget?.({ kind: 'global', field: 'nav_style' })} label="Navigation">
-            <DSLNav
-              store={store}
-              navStyle={parsed.global_config.nav_style}
-              preview={preview}
-              activeCategory={activeCategory}
-              onSelectCategory={setActiveCategory}
-            />
-          </EditTargetWrap>
+          <>
+            <EditTargetWrap editMode={editMode} onClick={() => onSelectTarget?.({ kind: 'global', field: 'nav_style' })} label="Navigation">
+              <DSLNav
+                store={store}
+                navStyle={parsed.global_config.nav_style}
+                preview={preview}
+                activeCategory={activeCategory}
+                onSelectCategory={setActiveCategory}
+              />
+            </EditTargetWrap>
+            <SearchBar value={searchQuery} onChange={setSearchQuery} />
+          </>
         )}
         {parsed.sections.map((section, i) => (
           <EditTargetWrap key={`${section.type}-${i}`} editMode={editMode}
@@ -212,14 +235,19 @@ export function DSLRenderer({
                           label={`${section.type.replace('_', ' ')} · ${section.variant}`}>
             <DSLSection
               section={section}
-              // Only the product grid should ever be scoped by the category
-              // filter — a hero/banner/story section needs the full catalog
-              // for its own logic (e.g. a hero's featured product lookup),
-              // and must not disappear just because a customer filtered
-              // elsewhere on the page.
+              // Only the product grid should ever be scoped by the category/
+              // search filters — a hero/banner/story section needs the full
+              // catalog for its own logic (e.g. a hero's featured product
+              // lookup), and must not disappear just because a customer
+              // filtered elsewhere on the page.
               store={
-                section.type === 'product_grid' && activeCategory
-                  ? { ...store, products: store.products.filter((p) => sameCategory(p.category, activeCategory)) }
+                section.type === 'product_grid' && (activeCategory || searchQuery.trim())
+                  ? {
+                      ...store,
+                      products: store.products
+                        .filter((p) => !activeCategory || sameCategory(p.category, activeCategory))
+                        .filter((p) => matchesSearch(p, searchQuery)),
+                    }
                   : store
               }
               slug={slug}

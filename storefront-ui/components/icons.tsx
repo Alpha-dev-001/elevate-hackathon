@@ -57,3 +57,20 @@ export function IconSpark({ size = 16, className, style }: IconProps) {
     </svg>
   )
 }
+
+export function IconSearch({ size = 18, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </svg>
+  )
+}
+
+export function IconX({ size = 18, className, style }: IconProps) {
+  return (
+    <svg {...base(size, className, style)}>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  )
+}

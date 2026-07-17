@@ -12,6 +12,7 @@ import { AttributionDashboard } from '@/components/terminal/AttributionDashboard
 import { CapabilityProposals } from '@/components/terminal/CapabilityProposals'
 import { ConstraintsSettings } from '@/components/terminal/ConstraintsSettings'
 import { PendingProductCard, type PendingProduct } from '@/components/terminal/PendingProductCard'
+import { SearchDemandInsights } from '@/components/terminal/SearchDemandInsights'
 
 export default function TerminalPage() {
   const router = useRouter()
@@ -275,6 +276,13 @@ export default function TerminalPage() {
             Products
           </a>
           <a
+            href="/terminal/decisions"
+            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+          >
+            Decision trace
+          </a>
+          <a
             href={`/s/${merchant.slug}`}
             target="_blank"
             rel="noreferrer"
@@ -369,6 +377,7 @@ export default function TerminalPage() {
             reviewState={reviewState}
           />
           <AttributionDashboard data={dashboard} loading={dashboardLoading} />
+          <SearchDemandInsights slug={merchant.slug} />
           <ConstraintsSettings />
         </div>
       </div>

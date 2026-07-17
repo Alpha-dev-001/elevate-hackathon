@@ -268,6 +268,21 @@ async def list_capability_requests(
     return {"capabilities": await list_capabilities(merchant.id, db)}
 
 
+@router.get("/search-insights/{slug}")
+async def list_search_insights_route(
+    slug: str,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store-wide search demand — what customers have typed into this
+    store's search box, most-searched first, flagging queries that never
+    matched a product (real demand for something the store doesn't carry)."""
+    if merchant.slug != slug:
+        raise HTTPException(status_code=403, detail="Not your store")
+    from app.services.search_tracker import list_search_insights
+    return {"searches": await list_search_insights(merchant.id, db)}
+
+
 # ─── StoreBirth SSE — make the Qwen pipeline visible during generation ───────────
 
 # Ordered steps streamed to the StoreBirth animation. Labels carry the model name

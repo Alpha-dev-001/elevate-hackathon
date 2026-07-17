@@ -803,6 +803,12 @@ class ConstraintsUpdate(BaseModel):
     max_uplift_percent: Optional[float] = Field(default=None, ge=0, le=100)
 
 
+class SearchLogRequest(BaseModel):
+    """Client-side storefront search filter already ran (see DSLRenderer);
+    this just logs the query for store-wide demand aggregation."""
+    query: str
+    matched: bool
+
 class ApproveActionRequest(BaseModel):
     """Optional merchant override on a pending discount-bearing action. Still
     clamped by the interceptor exactly like Qwen's own number — an override

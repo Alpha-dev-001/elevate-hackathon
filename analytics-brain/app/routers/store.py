@@ -26,6 +26,7 @@ from app.models.schemas import (
     LayoutConfig,
     PublicProduct,
     PublicStore,
+    SearchLogRequest,
 )
 from app.services import delta as delta_svc
 from app.services.pricing import best_active_promo, effective_price, now_ms
@@ -150,3 +151,22 @@ async def get_public_store(slug: str, db: AsyncSession = Depends(get_db)):
         categories=categories,
         brand_token=brand_token_data,
     )
+
+
+@router.post("/{slug}/search")
+async def log_search(slug: str, body: SearchLogRequest, db: AsyncSession = Depends(get_db)):
+    """Fire-and-forget log of a storefront search query — the filtering
+    itself already happened client-side against the products already in
+    memory (same as the category chips); this just records the query for
+    store-wide demand aggregation. Never blocks or errors the customer's
+    search experience — a logging failure here must not surface to them."""
+    merchant = await db.scalar(select(MerchantDB).where(MerchantDB.slug == slug))
+    if merchant is None:
+        return {"logged": False}
+    from app.services.search_tracker import record_search
+    try:
+        result = await record_search(merchant.id, body.query, body.matched, db)
+    except Exception as e:  # noqa: BLE001 — logging a search must never break the storefront
+        logger.warning(f"[store] search log failed for {slug}: {e}")
+        return {"logged": False}
+    return {"logged": result is not None}
