@@ -153,7 +153,8 @@ async def run_store_review(
     _, description = found
 
     from app.services.decision_engine import run_decision_cycle
-    return await run_decision_cycle(merchant_id, description, db, redis)
+    from app.services.qwen_roles import STORE_CURATOR
+    return await run_decision_cycle(merchant_id, description, db, redis, role=STORE_CURATOR)
 
 
 def start_background_loop() -> None:

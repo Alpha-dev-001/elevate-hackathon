@@ -291,4 +291,5 @@ async def run_duplicate_scan(
         return None
 
     from app.services.decision_engine import run_decision_cycle
-    return await run_decision_cycle(merchant_id, description, db, redis)
+    from app.services.qwen_roles import INVENTORY_OVERSEER
+    return await run_decision_cycle(merchant_id, description, db, redis, role=INVENTORY_OVERSEER)

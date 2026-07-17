@@ -106,12 +106,14 @@ async def run_dwell_check(db: "AsyncSession", redis: "Redis") -> int:
                     if await _is_dwell_suppressed(merchant.id, session_id, redis):
                         continue
 
+                    from app.services.qwen_roles import SALES_REP
                     action = await run_decision_cycle(
                         merchant.id,
                         f"Cart dwell: an item has sat in a customer's cart for "
                         f"{CART_DWELL_MINUTES}+ minutes without completing checkout",
                         db, redis,
                         session_id=session_id,
+                        role=SALES_REP,
                     )
                     if action:
                         fired += 1

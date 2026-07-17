@@ -137,4 +137,5 @@ async def evaluate_new_products(
     _product_id, comparison = picked
 
     from app.services.decision_engine import run_decision_cycle
-    return await run_decision_cycle(merchant_id, comparison, db, redis)
+    from app.services.qwen_roles import SALES_REP
+    return await run_decision_cycle(merchant_id, comparison, db, redis, role=SALES_REP)

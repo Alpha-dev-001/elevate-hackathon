@@ -401,10 +401,11 @@ async def run_pricing_cycle(db: "AsyncSession", redis) -> list:
                         per_product_views.get(product.id, 0) >= behavior_tracker.ANOMALY_THRESHOLD * 4
                     )
 
+                    from app.services.qwen_roles import PRICING_STRATEGIST
                     action = await run_decision_cycle(
                         merchant.id, f"Price review: {product.name}", db, redis,
                         tools=price_rebalance_tools, target_product_id=product.id,
-                        prompt_override=prompt,
+                        prompt_override=prompt, role=PRICING_STRATEGIST,
                     )
                     if action:
                         actions.append(action)
