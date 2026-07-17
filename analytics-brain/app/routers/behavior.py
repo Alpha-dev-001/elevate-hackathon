@@ -76,7 +76,8 @@ async def ingest_event(
                             f"product {spiking_pid}",
                             f'"{product.name}" ({spiking_pid})',
                         )
-                await run_decision_cycle(merchant_id, desc, session, redis)
+                from app.services.qwen_roles import role_for_anomaly
+                await run_decision_cycle(merchant_id, desc, session, redis, role=role_for_anomaly(desc))
 
     background.add_task(_check)
     return {"ok": True}
@@ -180,7 +181,8 @@ async def simulate_activity(
                             f"product {spiking_pid}",
                             f'"{product.name}" ({spiking_pid})',
                         )
-                await run_decision_cycle(merchant_id, desc, session, redis)
+                from app.services.qwen_roles import role_for_anomaly
+                await run_decision_cycle(merchant_id, desc, session, redis, role=role_for_anomaly(desc))
 
     background.add_task(_run_scenario)
     return {"ok": True, "scenario": scenario, "events": len(DEMO_SCENARIO)}
