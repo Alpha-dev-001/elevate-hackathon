@@ -203,23 +203,95 @@ async def find_underperformer(
     return None
 
 
+async def check_scarcity_signals(merchant_id: str, db: "AsyncSession", redis) -> "AgentAction | None":
+    """Mechanism 3 (swarm coordination design): proactively looks for a
+    product whose stock is genuinely low AND has real recent view demand,
+    and if so proposes a scarcity price via Pricing Strategist — the same
+    propose_scarcity_price tool the REACTIVE velocity-spike path already
+    uses, just triggered proactively instead of only as a side effect of a
+    live spike. Runs once per product per UTC day (should_check_scarcity).
+    Per-product try/except — one product's failure must not skip the rest,
+    matching this file's own established discipline."""
+    from sqlalchemy import select
+    from app.models.db_models import ProductDB
+    from app.services import behavior_tracker
+    from app.services.search_tracker import list_search_insights
+    from app.services.decision_engine import run_decision_cycle
+    from app.services.qwen_roles import PRICING_STRATEGIST
+
+    products = (
+        await db.execute(
+            select(ProductDB)
+            .where(ProductDB.merchant_id == merchant_id)
+            .where(ProductDB.is_active == True)
+            .where(ProductDB.stock <= LOW_STOCK_THRESHOLD)
+        )
+    ).scalars().all()
+    if not products:
+        return None
+
+    per_product_views = await behavior_tracker.count_per_product_views_in_window(redis, merchant_id)
+
+    for product in products:
+        try:
+            if not await should_check_scarcity(product.id, redis):
+                continue
+            recent_views = per_product_views.get(product.id, 0)
+            if not scarcity_signal_holds(
+                product.stock, recent_views, LOW_STOCK_THRESHOLD, behavior_tracker.ANOMALY_THRESHOLD * 4,
+            ):
+                await mark_scarcity_checked(product.id, redis)
+                continue
+
+            insights = await list_search_insights(merchant_id, db)
+            search_insight = find_matching_search_insight(product.name, insights)
+            description = format_scarcity_description(product.name, product.stock, recent_views, search_insight)
+            action = await run_decision_cycle(
+                merchant_id, description, db, redis,
+                role=PRICING_STRATEGIST, target_product_id=product.id,
+            )
+            if action:
+                await mark_scarcity_checked(product.id, redis)
+                return action
+            # No action came back — Qwen declined, or (rarely, since priority
+            # arbitration usually lets a scarcity signal supersede a
+            # lower-priority card) a higher-priority pending card holds the
+            # one-card slot this tick. Deliberately NOT marked checked: the
+            # joint signal genuinely held, so let the next tick re-evaluate
+            # rather than burn this product's once-daily slot on a transient
+            # miss. The only cost is re-asking about a product that keeps
+            # qualifying yet keeps being declined — a small, self-limiting set
+            # whose stock/demand is worth a fresh look hourly anyway.
+        except Exception as e:  # noqa: BLE001 — one product's failure must not skip the rest
+            logger.warning("[store_review] scarcity check failed for product %s: %s", product.id, e)
+
+    return None
+
+
 async def run_store_review(
     merchant_id: str, db: "AsyncSession", redis
 ) -> "AgentAction | None":
     """Duplicate detection runs first — higher autopilot value (signal-driven,
-    genuine merge decision) than the underperformer check. See
-    docs/superpowers/specs/2026-07-12-duplicate-detection-autopilot-design.md.
-    run_decision_cycle's one-pending-action gate means only one of
-    {duplicate, underperformer} can fire a card per tick anyway, so checking
-    duplicates first simply prioritizes it.
+    genuine merge decision) than the other two checks. Call order here is a
+    reading-order convenience, not a correctness dependency: the
+    priority-arbitration gate in run_decision_cycle (see
+    learning.compute_effective_priority) now resolves any real conflict by
+    each signal's own priority, not by which check happens to run first in
+    this function. See
+    docs/superpowers/specs/2026-07-12-duplicate-detection-autopilot-design.md
+    and docs/superpowers/specs/2026-07-17-swarm-coordination-design.md.
 
-    Falls through to the underperformer check when duplicates find nothing.
-    Returns None (no-op, not an error) when both checks find nothing or a
+    Falls through each check in turn when the previous one finds nothing.
+    Returns None (no-op, not an error) when every check finds nothing or a
     decision is already pending — a correct, quiet outcome either way."""
     from app.services.duplicate_scan import run_duplicate_scan
     dup_action = await run_duplicate_scan(merchant_id, db, redis)
     if dup_action:
         return dup_action
+
+    scarcity_action = await check_scarcity_signals(merchant_id, db, redis)
+    if scarcity_action:
+        return scarcity_action
 
     found = await find_underperformer(merchant_id, db)
     if not found:
