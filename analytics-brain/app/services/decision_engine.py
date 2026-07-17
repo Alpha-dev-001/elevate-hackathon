@@ -159,6 +159,41 @@ def compose_decision_prompt(
     return prompt
 
 
+async def _dismiss_pending_action(action: AgentActionDB, merchant_id: str, redis: "Redis", reason: str) -> None:
+    """Mark a pending action dismissed and fire its side effects: dwell
+    suppression for a cart_dwell_nudge, and an ACTION_EXPIRED push so the
+    terminal removes the card immediately. Does NOT commit — the caller owns
+    the transaction boundary. The stale path commits right away; the
+    priority-supersede path commits together with the replacement action, so
+    the old card is never retired unless the new one is really created.
+
+    The dismissed action's `session_id` is read into a LOCAL (dwell_session_id)
+    rather than reassigning run_decision_cycle's own `session_id` parameter —
+    the old code reassigned the parameter, which could leak a stale
+    cart_dwell_nudge's session_id into an unrelated new action's tool_args via
+    the `if session_id:` line further down. Isolating it in the helper removes
+    that footgun entirely."""
+    action.status = "dismissed"
+    if action.action_type == "cart_dwell_nudge":
+        dwell_session_id = (action.payload or {}).get("session_id")
+        if dwell_session_id:
+            try:
+                from app.services.cart_dwell import suppress_dwell_session
+                await suppress_dwell_session(merchant_id, dwell_session_id, redis)
+            except Exception as e:  # noqa: BLE001 — suppression must never block the cycle
+                logger.warning("[decision] dwell suppression failed for %s: %s", action.id, e)
+    from app.models.schemas import WSMessage
+    await manager.push_to_terminal(
+        merchant_id,
+        WSMessage(
+            event=WSEventType.ACTION_EXPIRED,
+            payload={"action_id": action.id, "reason": reason},
+            merchant_id=merchant_id,
+            timestamp=int(time.time() * 1000),
+        ),
+    )
+
+
 async def run_decision_cycle(
     merchant_id: str,
     anomaly_desc: str,
@@ -201,46 +236,75 @@ async def run_decision_cycle(
     """
     from sqlalchemy import select
 
+    # Quantified per-role learning — computed here (moved ahead of the
+    # pending-action gate; it used to run only after products/memory were
+    # fetched) so BOTH the priority-arbitration gate below and the prompt/
+    # context_snapshot use further down share this one fetch. role=None
+    # callers (non-swarm) keep today's behavior byte-identical.
+    from app.services.learning import load_role_learning, render_learned_stance, compute_effective_priority
+    incoming_learning = None
+    if role is not None:
+        try:
+            incoming_learning = await load_role_learning(merchant_id, role, db)
+        except Exception as e:  # noqa: BLE001 — learning must never block a decision
+            logger.warning("[decision] learning read failed for %s: %s", merchant_id, e)
+    learned_stance = render_learned_stance(incoming_learning) if incoming_learning is not None else ""
+
     # Gate: only one pending action at a time per store.
-    # If the existing pending action is older than the TTL, the signal is stale —
-    # auto-dismiss it so new anomalies can trigger fresh decisions.
+    # A STALE pending action (older than the TTL) is dismissed here and now —
+    # it was expiring anyway. A NON-stale one can still be outranked by a
+    # higher-priority incoming signal (memory-informed priority arbitration,
+    # reusing the same per-role learning computed above plus one lookup for
+    # the existing action's own role). BUT that dismissal is DEFERRED: we only
+    # record the intent (supersede_existing) here and actually retire the old
+    # card down in the action-creation path, once a replacement really exists.
+    # Dismissing a valid card at the gate and THEN having the new cycle
+    # decline or get blocked would leave the merchant with a vanished card and
+    # nothing in its place — so the two must commit together, or not at all.
     existing = await db.scalar(
         select(AgentActionDB)
         .where(AgentActionDB.merchant_id == merchant_id)
         .where(AgentActionDB.status == "pending")
     )
+    superseded_prefix = ""
+    supersede_existing = None  # a non-stale, lower-priority action to retire IFF a replacement is created
     if existing:
         ttl = get_settings().pending_action_ttl_seconds
         age_seconds = (int(time.time() * 1000) - existing.created_at) / 1000
         if age_seconds > ttl:
-            existing.status = "dismissed"
+            # Stale — safe to dismiss immediately (unchanged from today).
+            await _dismiss_pending_action(existing, merchant_id, redis, "signal_stale")
             await db.commit()
             logger.info(
                 "[decision] auto-dismissed stale action %s (age: %.0fs, ttl: %ds) for %s",
                 existing.id, age_seconds, ttl, merchant_id,
             )
-            if existing.action_type == "cart_dwell_nudge":
-                session_id = (existing.payload or {}).get("session_id")
-                if session_id:
-                    try:
-                        from app.services.cart_dwell import suppress_dwell_session
-                        await suppress_dwell_session(merchant_id, session_id, redis)
-                    except Exception as e:  # noqa: BLE001 — suppression must never block the cycle
-                        logger.warning("[decision] dwell suppression failed for %s: %s", existing.id, e)
-            # Notify terminal so the stale card is removed immediately
-            from app.models.schemas import WSMessage
-            await manager.push_to_terminal(
-                merchant_id,
-                WSMessage(
-                    event=WSEventType.ACTION_EXPIRED,
-                    payload={"action_id": existing.id, "reason": "signal_stale"},
-                    merchant_id=merchant_id,
-                    timestamp=int(time.time() * 1000),
-                ),
-            )
         else:
-            logger.info(f"[decision] skipping cycle — pending action already exists for {merchant_id}")
-            return None
+            from app.services.qwen_roles import role_for_action_type, role_by_name
+            existing_role = role_by_name(existing.role or role_for_action_type(existing.action_type))
+            existing_learning = None
+            if existing_role is not None:
+                try:
+                    existing_learning = await load_role_learning(merchant_id, existing_role, db)
+                except Exception as e:  # noqa: BLE001 — learning must never block a decision
+                    logger.warning("[decision] existing-role learning read failed for %s: %s", merchant_id, e)
+            incoming_priority = (
+                compute_effective_priority(role.default_priority, incoming_learning)
+                if role is not None else 0
+            )
+            existing_priority = (
+                compute_effective_priority(existing_role.default_priority, existing_learning)
+                if existing_role is not None else 0
+            )
+            if incoming_priority <= existing_priority:
+                logger.info(f"[decision] skipping cycle — pending action already exists for {merchant_id}")
+                return None
+            # Outranked — but hold the dismissal until the replacement is real.
+            supersede_existing = existing
+            superseded_prefix = (
+                f"Superseded a pending {existing_role.name if existing_role else 'unclassified'} "
+                f"action ({existing.action_type}) — this signal ranked higher priority."
+            )
 
     merchant = await db.get(MerchantDB, merchant_id)
     if not merchant:
@@ -288,20 +352,8 @@ async def run_decision_cycle(
         entries = []
     memory_context = build_memory_context(entries)
 
-    # Quantified per-role learning — the measurable half of the loop. Derived
-    # from how this store has resolved this role's past proposals; rendered
-    # into a directive so the role's next proposal converges on what the store
-    # actually accepts. Rides the existing single decision call (no extra
-    # tokens) and is stored on context_snapshot below, so the Decision Trace
-    # page shows the stance that shaped each decision. role=None callers (non-
-    # swarm) keep today's behavior byte-identical.
-    learned_stance = ""
-    if role is not None:
-        try:
-            from app.services.learning import load_role_learning, render_learned_stance
-            learned_stance = render_learned_stance(await load_role_learning(merchant_id, role, db))
-        except Exception as e:  # noqa: BLE001 — learning must never block a decision
-            logger.warning("[decision] learning read failed for %s: %s", merchant_id, e)
+    # learned_stance was already computed above (ahead of the pending-action
+    # gate, so arbitration could use it too) — just fold it into the prompt here.
     memory_for_prompt = f"{memory_context}\n{learned_stance}".strip() if learned_stance else memory_context
 
     if prompt_override is not None:
@@ -398,6 +450,8 @@ async def run_decision_cycle(
         return None
 
     reasoning = extract_reasoning(tool_args, message)
+    if superseded_prefix:
+        reasoning = f"{superseded_prefix}\n\n{reasoning}"
 
     # Use the product Qwen actually targeted, not just the first in the list.
     # propose_duplicate_merge uses keep_product_id, not product_id — same
@@ -512,6 +566,18 @@ async def run_decision_cycle(
             streak, tool_args["new_price"], targeted_product.baseline_price, constraints,
         )
 
+    # Deferred priority-supersede (decided at the gate): the replacement is
+    # now real — Qwen proposed, the structural guard and interceptor passed,
+    # and we're about to persist it — so it's finally safe to retire the
+    # outranked card. It's dismissed here and committed in the SAME
+    # transaction as the new action_db below (one await db.commit() covers
+    # both), so the two are atomic: had the cycle declined or been blocked
+    # anywhere above, this line is never reached and the old card survives.
+    if supersede_existing is not None:
+        await _dismiss_pending_action(
+            supersede_existing, merchant_id, redis, "superseded_by_higher_priority"
+        )
+
     action_db = AgentActionDB(
         id=str(uuid4()),
         merchant_id=merchant_id,
@@ -575,6 +641,7 @@ async def run_decision_cycle(
         payload=action_db.payload,
         brand_check=action_db.brand_check,
         constraint_check=action_db.constraint_check,
+        reasoning=action_db.reasoning,
         status=AgentActionStatus(action_db.status),
         created_at=action_db.created_at,
     )

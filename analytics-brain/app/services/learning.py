@@ -134,6 +134,30 @@ def render_learned_stance(learning: RoleLearning) -> str:
     return " ".join(parts)
 
 
+def compute_effective_priority(default_priority: int, learning: Optional[RoleLearning]) -> int:
+    """A QwenRole's own default_priority (see qwen_roles.py), adjusted by this
+    merchant's own per-role learning for the priority-arbitration gate in
+    decision_engine.run_decision_cycle. Reuses THIS module's own signal
+    threshold (has_signal / MIN_SIGNAL) and approval-rate boundaries (0.75 /
+    0.34 — the same numbers render_learned_stance's own "stay the course" /
+    "only propose on a clearly strong signal" branches already use) rather
+    than inventing a second, slightly different notion of "enough history"
+    and "high/low approval" alongside them.
+
+    +10 if learning.has_signal and approval_rate >= 0.75.
+    -10 if learning.has_signal and approval_rate <= 0.34.
+    Otherwise (no learning passed, not enough signal yet, or a mixed rate)
+    stays at default_priority. Pure — no I/O; takes a plain int rather than
+    a QwenRole so this module has zero dependency on qwen_roles.py."""
+    if learning is None or not learning.has_signal:
+        return default_priority
+    if learning.approval_rate >= 0.75:
+        return default_priority + 10
+    if learning.approval_rate <= 0.34:
+        return default_priority - 10
+    return default_priority
+
+
 async def load_role_learning(merchant_id: str, role: "QwenRole", db: "AsyncSession") -> RoleLearning:
     """DB glue: pull this role's action history for the store and aggregate it.
     Thin wrapper over compute_role_learning — the logic lives there."""

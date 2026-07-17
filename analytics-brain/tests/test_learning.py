@@ -117,3 +117,35 @@ def test_stance_names_the_role_and_the_counts():
     stance = render_learned_stance(learning)
     assert "sales_rep" in stance
     assert "3 of 3" in stance
+
+
+# ── Priority arbitration — reuses RoleLearning, doesn't reinvent it ────────
+
+from app.services.learning import compute_effective_priority
+
+
+class TestComputeEffectivePriority:
+    def test_no_learning_returns_default(self):
+        assert compute_effective_priority(20, None) == 20
+
+    def test_below_min_signal_returns_default(self):
+        learning = compute_role_learning([_rec("approved", "approved")] * (MIN_SIGNAL - 1), "pricing_strategist")
+        assert compute_effective_priority(20, learning) == 20
+
+    def test_high_approval_rate_adds_bonus(self):
+        learning = compute_role_learning([_rec("approved", "approved")] * 3, "pricing_strategist")
+        assert compute_effective_priority(20, learning) == 30
+
+    def test_low_approval_rate_subtracts_penalty(self):
+        learning = compute_role_learning([_rec("dismissed", "dismissed")] * 3, "pricing_strategist")
+        assert compute_effective_priority(20, learning) == 10
+
+    def test_mixed_rate_with_signal_stays_at_default(self):
+        # 4 resolved (above MIN_SIGNAL) at a genuine 0.5 rate — between the
+        # 0.34/0.75 boundaries — so this exercises the real "mixed rate"
+        # branch, not the below-signal short-circuit test_below_min_signal
+        # already covers. (Two records would return default via has_signal,
+        # never touching the rate comparison at all.)
+        recs = [_rec("approved", "approved")] * 2 + [_rec("dismissed", "dismissed")] * 2
+        learning = compute_role_learning(recs, "pricing_strategist")
+        assert compute_effective_priority(20, learning) == 20
