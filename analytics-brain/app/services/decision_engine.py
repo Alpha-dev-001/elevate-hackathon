@@ -205,6 +205,8 @@ async def run_decision_cycle(
     prompt_override: str | None = None,
     session_id: str | None = None,
     role: "QwenRole | None" = None,
+    _escalation_depth: int = 0,
+    _escalation_prefix: str = "",
 ) -> AgentAction | None:
     """Run a full Qwen decision cycle and persist + broadcast the result.
 
@@ -233,6 +235,16 @@ async def run_decision_cycle(
     role.name (or None) written to its own `role` column regardless of
     which of these two effects actually applied, so a pricing_cycle call
     that already passed explicit `tools=` still gets correctly tagged.
+
+    _escalation_depth/_escalation_prefix are internal-only (never set by an
+    external caller) — used exclusively by this function's own recursive
+    self-call when a role escalates to another (see the ESCALATE_TOOL_NAME
+    branch below). _escalation_depth > 0 strips the escalation tool from
+    the inner call's own tool list regardless of what that role's own
+    can_escalate_to is configured as, which is what makes the single-hop
+    cap structural rather than a runtime-checked limit. _escalation_prefix
+    is prepended to the inner call's final `reasoning` so the merchant sees
+    both roles' reasoning on one card.
     """
     from sqlalchemy import select
 
@@ -381,8 +393,10 @@ async def run_decision_cycle(
     if tools is not None:
         effective_tools = tools
     elif role is not None:
-        from app.services.qwen_roles import get_role_tools
+        from app.services.qwen_roles import get_role_tools, ESCALATE_TOOL_NAME
         effective_tools = get_role_tools(role)
+        if _escalation_depth > 0:
+            effective_tools = [t for t in effective_tools if t["function"]["name"] != ESCALATE_TOOL_NAME]
     else:
         effective_tools = DECISION_TOOLS
 
@@ -422,6 +436,29 @@ async def run_decision_cycle(
         logger.warning("[decision] tool call missing function name")
         return None
 
+    from app.services.qwen_roles import ESCALATE_TOOL_NAME, ALL_ROLES
+    if tool_name == ESCALATE_TOOL_NAME:
+        target_role_name = tool_args.get("target_role", "")
+        target_role = next((r for r in ALL_ROLES if r.name == target_role_name), None)
+        allowed_names = {r.name for r in role.can_escalate_to} if role is not None else set()
+        if role is None or target_role is None or target_role.name not in allowed_names:
+            logger.warning(
+                "[decision] escalation to '%s' not permitted for role %s — treating as declined",
+                target_role_name, role.name if role else None,
+            )
+            return None
+        escalation_reasoning = (tool_args.get("reasoning") or "")[:1000]
+        logger.info(
+            "[decision] %s escalating to %s for %s: %s",
+            role.name, target_role.name, merchant_id, escalation_reasoning,
+        )
+        return await run_decision_cycle(
+            merchant_id, anomaly_desc, db, redis,
+            target_product_id=target_product_id, session_id=session_id,
+            role=target_role, _escalation_depth=_escalation_depth + 1,
+            _escalation_prefix=f"[Escalated from {role.name}] {escalation_reasoning}",
+        )
+
     # Map tool name → AgentActionType enum
     action_type_enum = TOOL_TO_ACTION_TYPE.get(tool_name)
     if action_type_enum is None:
@@ -450,8 +487,9 @@ async def run_decision_cycle(
         return None
 
     reasoning = extract_reasoning(tool_args, message)
-    if superseded_prefix:
-        reasoning = f"{superseded_prefix}\n\n{reasoning}"
+    reasoning_prefixes = [p for p in (superseded_prefix, _escalation_prefix) if p]
+    if reasoning_prefixes:
+        reasoning = "\n\n".join(reasoning_prefixes + [reasoning])
 
     # Use the product Qwen actually targeted, not just the first in the list.
     # propose_duplicate_merge uses keep_product_id, not product_id — same
