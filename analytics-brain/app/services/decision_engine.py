@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services.qwen_roles import QwenRole
 
 from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType, WSEventType
 from app.models.db_models import AgentActionDB, MerchantDB, BrandProfileDB, ProductDB
@@ -24,7 +25,7 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-DECISION_PROMPT = """You are the autonomous commerce brain for "{store_name}".
+DECISION_PROMPT = """{role_intro}
 Brand mood: {mood} | Voice: {brand_voice}
 Brand rules (never violate): {brand_rules_summary}
 
@@ -102,6 +103,7 @@ def compose_decision_prompt(
     memory_context: str = "",
     tool_calling: bool = True,
     max_discount_percent: float = 40.0,
+    role: "QwenRole | None" = None,
 ) -> str:
     """Build the decision prompt, injecting prior-outcome memory when present.
 
@@ -116,9 +118,25 @@ def compose_decision_prompt(
     max_discount_percent defaults to BusinessConstraints' own schema default
     (40.0) so any caller that hasn't been updated to pass the merchant's real
     constraints yet still gets a truthful number instead of a made-up one.
+
+    role=None (every caller not yet updated for the Qwen swarm) keeps
+    today's generic "autonomous commerce brain" framing byte-identical.
+    role=<a QwenRole> swaps in that role's mission_line as the prompt's
+    opening line only — the rest of the template (including the discount-
+    ceiling paragraph, even for a role with no discount-bearing tools) is
+    deliberately left unchanged in this first pass; a fully role-specific
+    template per role is a reasonable future refinement, not done here to
+    keep this change reviewable as one prompt-intro swap, not four new
+    prompt templates.
     """
+    role_intro = (
+        role.mission_line.format(store_name=store_name)
+        if role is not None
+        else f'You are the autonomous commerce brain for "{store_name}".'
+    )
     memory_block = f"\nPrior outcomes for this store (learn from them):\n{memory_context}\n" if memory_context else ""
     prompt = DECISION_PROMPT.format(
+        role_intro=role_intro,
         store_name=store_name,
         mood=mood,
         brand_voice=brand_voice,
@@ -150,6 +168,7 @@ async def run_decision_cycle(
     target_product_id: str | None = None,
     prompt_override: str | None = None,
     session_id: str | None = None,
+    role: "QwenRole | None" = None,
 ) -> AgentAction | None:
     """Run a full Qwen decision cycle and persist + broadcast the result.
 
@@ -166,6 +185,18 @@ async def run_decision_cycle(
     interceptor clamp run, so it is never something Qwen could hallucinate
     or overwrite; agent.py's _register_recovery reads it back at approval
     time to scope the discount to that one session.
+
+    role (the Qwen swarm — see qwen_roles.py) does two independent things:
+    (1) if `tools` was NOT explicitly passed, defaults it to
+    get_role_tools(role) instead of the full DECISION_TOOLS set; (2) is
+    passed through to compose_decision_prompt for that role's mission-line
+    framing (only when prompt_override is None — a prompt_override caller,
+    i.e. pricing_cycle.py, already built its own prompt text and only wants
+    role for tagging + the tool-scoping in (1), which it already does
+    explicitly via `tools=`). Every AgentActionDB row this creates gets
+    role.name (or None) written to its own `role` column regardless of
+    which of these two effects actually applied, so a pricing_cycle call
+    that already passed explicit `tools=` still gets correctly tagged.
     """
     from sqlalchemy import select
 
@@ -274,8 +305,17 @@ async def run_decision_cycle(
             anomaly_description=anomaly_desc,
             memory_context=memory_context,
             max_discount_percent=constraints.max_discount_percent,
+            role=role,
         )
     estimated_tokens = len(prompt) // 4  # rough char/4 heuristic for the terminal badge
+
+    if tools is not None:
+        effective_tools = tools
+    elif role is not None:
+        from app.services.qwen_roles import get_role_tools
+        effective_tools = get_role_tools(role)
+    else:
+        effective_tools = DECISION_TOOLS
 
     try:
         message = await _qwen_chat(
@@ -284,7 +324,7 @@ async def run_decision_cycle(
             max_tokens=1000,
             temperature=0.5,
             timeout=45.0,
-            tools=tools or DECISION_TOOLS,
+            tools=effective_tools,
             tool_choice="auto",
             merchant_id=merchant_id,
             step="decision_cycle",
@@ -441,6 +481,7 @@ async def run_decision_cycle(
         trigger=narrative["trigger"],
         reasoning=reasoning,
         context_snapshot=context_snapshot,
+        role=role.name if role is not None else None,
         title=narrative["title"][:200],
         description=narrative["description"][:500],
         estimated_gmv=est_gmv,
