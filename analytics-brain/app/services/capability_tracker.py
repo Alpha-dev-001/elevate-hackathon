@@ -41,7 +41,17 @@ async def record_unmet(
 
     key = slugify_capability(capability_label)
     reqs = dict(m.capability_requests or {})
-    entry = reqs.get(key) or {"count": 0, "label": capability_label, "status": "open"}
+    # dict(...) copy is required, not just reqs.get(key) — see
+    # search_tracker.record_search's extract_reasoning-adjacent comment for
+    # the full mechanism: reqs is only a SHALLOW copy of
+    # m.capability_requests, so mutating reqs[key] in place (without a fresh
+    # copy) also corrupts the OLD attribute value via the shared reference,
+    # making SQLAlchemy's dirty-check see old == new and silently skip the
+    # UPDATE. This meant every ask after the FIRST for the same capability
+    # never actually incremented in Postgres — PROPOSE_THRESHOLD (2) could
+    # never be reached in production, so "Qwen proposes a new capability
+    # after the same gap recurs" never actually fired for a real repeat ask.
+    entry = dict(reqs.get(key) or {"count": 0, "label": capability_label, "status": "open"})
     entry["count"] = int(entry.get("count", 0)) + 1
     entry["label"] = capability_label
     entry["last_intent"] = intent[:200]
