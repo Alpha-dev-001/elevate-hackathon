@@ -153,6 +153,25 @@ export interface Capability {
   last_intent: string      // the merchant's most recent wording
 }
 
+/** Store-wide search demand — a query customers typed into the storefront
+ * search box, aggregated (see analytics-brain's search_tracker.py). */
+export interface SearchInsight {
+  query: string             // stable slug key
+  label: string             // the query as typed
+  count: number
+  matched: boolean          // false = never found a matching product — real unmet demand
+  last_at: number
+}
+
+/** What Qwen actually saw when it made a decision — catalog snapshot, prior-
+ * outcome memory, discount ceiling — captured verbatim at decision time. */
+export interface DecisionContextSnapshot {
+  products_summary?: string
+  memory_context?: string
+  max_discount_percent?: number
+  avg_price?: number
+}
+
 /** A single autopilot decision as logged by the backend (Task 7's GET /merchant/decisions). */
 export interface DecisionLogEntry {
   id: string
@@ -161,6 +180,7 @@ export interface DecisionLogEntry {
   description: string
   trigger: string
   reasoning: string
+  context_snapshot: DecisionContextSnapshot
   status: string
   created_at: number
   approved_at: number | null
@@ -243,6 +263,14 @@ export const api = {
 
   // ── Public storefront ───────────────────────────────────────────────────
   getStore: (slug: string) => req<PublicStore>(`/api/store/${enc(slug)}`),
+  // Fire-and-forget: the search filter already ran client-side against
+  // store.products already in memory — this just logs the query for
+  // store-wide demand aggregation. Never awaited by the caller's UI state.
+  logSearch: (slug: string, query: string, matched: boolean) =>
+    req<{ logged: boolean }>(`/api/store/${enc(slug)}/search`, {
+      method: 'POST',
+      body: JSON.stringify({ query, matched }),
+    }),
 
   // ── Sprint 4: per-brand customer auth (RBAC role=customer) ────────────────
   customerRegister: (slug: string, body: CustomerCreate) =>
@@ -354,6 +382,10 @@ export const api = {
   // ── Self-extending config: capability gaps Qwen has noticed ───────────────
   getCapabilities: (slug: string) =>
     req<{ capabilities: Capability[] }>(`/api/brand/capabilities/${enc(slug)}`),
+
+  // ── Store-wide search demand — what customers type into the search box ────
+  getSearchInsights: (slug: string) =>
+    req<{ searches: SearchInsight[] }>(`/api/brand/search-insights/${enc(slug)}`),
 }
 
 export const WS_BASE =

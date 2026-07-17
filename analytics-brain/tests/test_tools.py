@@ -101,6 +101,24 @@ class TestToolDefinitions:
         props = tool["function"]["parameters"]["properties"]
         assert "discount_percent" in props
 
+    def test_every_tool_requires_reasoning_or_reasoning_signals(self):
+        """A real production gap: message.content (the old reasoning source)
+        is almost always empty once Qwen decides to call a tool, so the
+        decision log's reasoning column was empty for ~95% of real actions.
+        Every tool must now force a structured reasoning argument instead —
+        either its own "reasoning" field, or propose_price_rebalance's
+        pre-existing "reasoning_signals"."""
+        for tool in DECISION_TOOLS:
+            fn = tool["function"]
+            props = fn["parameters"]["properties"]
+            required = fn["parameters"]["required"]
+            has_reasoning = "reasoning" in props and "reasoning" in required
+            has_reasoning_signals = "reasoning_signals" in props and "reasoning_signals" in required
+            assert has_reasoning or has_reasoning_signals, (
+                f"{fn['name']} has neither a required 'reasoning' nor "
+                f"'reasoning_signals' argument"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Narrative generation

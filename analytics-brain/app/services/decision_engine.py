@@ -32,8 +32,10 @@ Current products: {products_summary}
 Behavior anomaly: {anomaly_description}
 {memory_block}
 Use the available tools to propose ONE action for the merchant to review.
-Include your step-by-step reasoning in your message — explain what you observed,
-why this action makes sense, and what outcome you expect (be specific with numbers).
+Every tool has a required "reasoning" argument — fill it with your step-by-step
+reasoning: what you observed, why this action makes sense, and what outcome you
+expect (be specific with numbers). This is what the merchant sees explaining
+your call, so it must stand on its own.
 
 A recovery_offer is an ORDER-LEVEL percentage discount on the shopper's existing
 cart to win back an abandoned checkout — this store has no shipping concept, so
@@ -55,6 +57,22 @@ def _extract_count(anomaly_desc: str) -> int:
     import re
     m = re.search(r"\d+", anomaly_desc or "")
     return int(m.group()) if m else 0
+
+
+def extract_reasoning(tool_args: dict, message: dict) -> str:
+    """Every DECISION_TOOLS entry (except propose_price_rebalance, which
+    already carries reasoning_signals) requires a "reasoning" argument in
+    its own schema — a structured field Qwen reliably fills, unlike the
+    freeform message.content alongside a tool call, which tool-calling
+    Qwen omits almost every time regardless of what the prompt asks for.
+    message.content is kept only as a last-resort fallback for a tool call
+    made under an older/external schema that carries neither field."""
+    return (
+        tool_args.get("reasoning")
+        or tool_args.get("reasoning_signals")
+        or message.get("content")
+        or ""
+    )[:1000]
 
 
 def grounded_gmv(action_type: str, anomaly_count: int, avg_price: float) -> float:
@@ -301,8 +319,7 @@ async def run_decision_cycle(
         logger.warning(f"[decision] unknown tool '{tool_name}', defaulting to flash_sale")
         action_type_enum = AgentActionType.FLASH_SALE
 
-    # Qwen's reasoning comes from the message content (alongside tool_calls)
-    reasoning = (message.get("content") or "")[:1000]
+    reasoning = extract_reasoning(tool_args, message)
 
     # Use the product Qwen actually targeted, not just the first in the list.
     # propose_duplicate_merge uses keep_product_id, not product_id — same
@@ -381,6 +398,22 @@ async def run_decision_cycle(
     promo_id = f"ELEV_{merchant_id[:4].upper()}_{secrets.token_hex(3).upper()}"
     now = int(time.time() * 1000)
 
+    # What Qwen actually saw when it made this call — the catalog snapshot,
+    # prior-outcome memory, and discount ceiling that went into the prompt.
+    # Captured verbatim (not reconstructed later) so the Decision Trace page
+    # can show inputs alongside the reasoning output for a real audit trail,
+    # not a summary. NOTE: for a prompt_override call (pricing cycle), the
+    # actual prompt Qwen saw was compose_pricing_prompt's own single-product
+    # framing, not this products_summary/memory_context pair — those are
+    # still the real top-10 catalog snapshot and real memory read for this
+    # cycle, just not verbatim what appeared in that specific prompt string.
+    context_snapshot = {
+        "products_summary": products_summary,
+        "memory_context": memory_context,
+        "max_discount_percent": constraints.max_discount_percent,
+        "avg_price": round(avg_price, 2),
+    }
+
     # Ground the revenue estimate in the real anomaly magnitude + catalog price
     anomaly_count = _extract_count(anomaly_desc)
     est_gmv = grounded_gmv(action_type_enum.value, anomaly_count, avg_price)
@@ -407,6 +440,7 @@ async def run_decision_cycle(
         action_type=action_type_enum.value,
         trigger=narrative["trigger"],
         reasoning=reasoning,
+        context_snapshot=context_snapshot,
         title=narrative["title"][:200],
         description=narrative["description"][:500],
         estimated_gmv=est_gmv,

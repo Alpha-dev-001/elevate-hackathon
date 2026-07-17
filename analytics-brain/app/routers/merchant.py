@@ -232,6 +232,7 @@ async def get_decisions(
                 "description": r.description,
                 "trigger": r.trigger,
                 "reasoning": r.reasoning or "",
+                "context_snapshot": r.context_snapshot or {},
                 "status": r.status,
                 "created_at": r.created_at,
                 "approved_at": r.approved_at,

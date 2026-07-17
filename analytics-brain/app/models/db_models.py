@@ -109,6 +109,10 @@ class MerchantDB(Base):
     qwen_memory: Mapped[dict] = mapped_column(JSON, default=lambda: {"entries": []})
     # Unmet point-and-edit intents → Qwen proposes new config when one recurs.
     capability_requests: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Store-wide search demand — every storefront search query, aggregated,
+    # so the merchant sees what customers are asking for even if nothing
+    # matched. Same shape as capability_requests.
+    search_queries: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
 
     products: Mapped[list["ProductDB"]] = relationship(back_populates="merchant")
@@ -243,6 +247,11 @@ class AgentActionDB(Base):
     brand_check: Mapped[str] = mapped_column(String, nullable=False)
     constraint_check: Mapped[str] = mapped_column(String, nullable=False, default="")
     reasoning: Mapped[str] = mapped_column(Text, default="")
+    # What Qwen actually saw when it made this call — catalog snapshot,
+    # prior-outcome memory, discount ceiling — captured at decision time so
+    # the Decision Trace page can show inputs alongside the reasoning
+    # output, not just the outcome. See decision_engine.run_decision_cycle.
+    context_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[int] = mapped_column(
         BigInteger, default=lambda: int(time.time() * 1000)

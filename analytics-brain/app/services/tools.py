@@ -15,6 +15,23 @@ from app.models.schemas import AgentActionType
 
 logger = logging.getLogger(__name__)
 
+# A required "reasoning" argument on every tool, not a free-text message
+# alongside the tool call. Tool-calling Qwen (like most function-calling
+# LLMs) reliably omits `message.content` once it decides to call a
+# function — the prompt asking for "step-by-step reasoning in your
+# message" was silently unenforceable, leaving the reasoning column empty
+# for ~95% of real decisions in production. A required JSON field the
+# model must fill to satisfy the tool call schema is reliably populated,
+# the same way any other structured Qwen output is (see CLAUDE.md's Qwen
+# Output Handling: always structured JSON, never freeform prose).
+REASONING_PARAM = {
+    "type": "string",
+    "description": (
+        "Why this action makes sense right now — the specific signal you "
+        "observed, and the outcome you expect. Be concrete with numbers."
+    ),
+}
+
 # ---------------------------------------------------------------------------
 # Tool definitions (OpenAI-compatible function-calling format)
 # ---------------------------------------------------------------------------
@@ -43,8 +60,9 @@ DECISION_TOOLS: list[dict] = [
                         "type": "integer",
                         "description": "How long the sale lasts in minutes (default 1440 = 24h)",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["product_id", "discount_percent"],
+                "required": ["product_id", "discount_percent", "reasoning"],
             },
         },
     },
@@ -67,8 +85,9 @@ DECISION_TOOLS: list[dict] = [
                         "type": "number",
                         "description": "Discount percentage, e.g. 10 for 10% off",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["product_id", "discount_percent"],
+                "required": ["product_id", "discount_percent", "reasoning"],
             },
         },
     },
@@ -91,8 +110,9 @@ DECISION_TOOLS: list[dict] = [
                             "'grid-3col', 'carousel-large')."
                         ),
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["new_grid"],
+                "required": ["new_grid", "reasoning"],
             },
         },
     },
@@ -111,8 +131,9 @@ DECISION_TOOLS: list[dict] = [
                         "type": "number",
                         "description": "Recovery discount percentage, e.g. 12 for 12% off cart total",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["discount_percent"],
+                "required": ["discount_percent", "reasoning"],
             },
         },
     },
@@ -136,8 +157,9 @@ DECISION_TOOLS: list[dict] = [
                         "type": "string",
                         "description": "Product ID if rewriting a specific product description",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["target"],
+                "required": ["target", "reasoning"],
             },
         },
     },
@@ -162,8 +184,9 @@ DECISION_TOOLS: list[dict] = [
                         "items": {"type": "string"},
                         "description": "IDs of the duplicate listings to remove",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["keep_product_id", "remove_product_ids"],
+                "required": ["keep_product_id", "remove_product_ids", "reasoning"],
             },
         },
     },
@@ -186,8 +209,9 @@ DECISION_TOOLS: list[dict] = [
                         "type": "string",
                         "description": "Short badge text in brand voice, e.g. 'New Arrival' or 'Trending Pick'",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["product_id", "featured_label"],
+                "required": ["product_id", "featured_label", "reasoning"],
             },
         },
     },
@@ -241,8 +265,9 @@ DECISION_TOOLS: list[dict] = [
                         "type": "number",
                         "description": "Nudge discount percentage, e.g. 8 for 8% off cart total",
                     },
+                    "reasoning": REASONING_PARAM,
                 },
-                "required": ["discount_percent"],
+                "required": ["discount_percent", "reasoning"],
             },
         },
     },
