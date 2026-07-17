@@ -206,6 +206,7 @@ async def get_decisions(
     'pending' until acted on."""
     from sqlalchemy import select, func
     from app.models.db_models import AgentActionDB
+    from app.services.qwen_roles import role_for_action_type
 
     limit = max(1, min(100, limit))
     offset = max(0, offset)
@@ -233,6 +234,7 @@ async def get_decisions(
                 "trigger": r.trigger,
                 "reasoning": r.reasoning or "",
                 "context_snapshot": r.context_snapshot or {},
+                "role": r.role or role_for_action_type(r.action_type),
                 "status": r.status,
                 "created_at": r.created_at,
                 "approved_at": r.approved_at,

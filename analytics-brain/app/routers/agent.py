@@ -29,6 +29,7 @@ def _to_schema(row: AgentActionDB) -> AgentAction:
         action_type=AgentActionType(row.action_type),
         trigger=row.trigger,
         reasoning=row.reasoning or "",
+        role=row.role,
         title=row.title,
         description=row.description,
         estimated_gmv=row.estimated_gmv,

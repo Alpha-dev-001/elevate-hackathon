@@ -517,6 +517,7 @@ class AgentAction(BaseModel):
     brand_check: str
     constraint_check: str = ""
     reasoning: str = ""
+    role: Optional[str] = None
     status: AgentActionStatus = AgentActionStatus.PENDING
     created_at: int
     approved_at: Optional[int] = None

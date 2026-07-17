@@ -528,6 +528,7 @@ async def run_decision_cycle(
         promo_id=action_db.promo_id,
         action_type=AgentActionType(action_db.action_type),
         trigger=action_db.trigger,
+        role=action_db.role,
         title=action_db.title,
         description=action_db.description,
         estimated_gmv=action_db.estimated_gmv,
