@@ -67,7 +67,7 @@ async def ingest_event(
         per_product = await count_per_product_views_in_window(redis, merchant_id)
         desc, spiking_pid = anomaly_description(abandons, views, per_product)
         if desc:
-            async with AsyncSession(get_engine()) as session:
+            async with AsyncSession(get_engine(), expire_on_commit=False) as session:
                 # Enrich with product name so Qwen sees the human-readable name
                 if spiking_pid:
                     product = await session.get(ProductDB, spiking_pid)
@@ -172,7 +172,7 @@ async def simulate_activity(
         per_product = await count_per_product_views_in_window(redis, merchant_id)
         desc, spiking_pid = anomaly_description(abandons, views, per_product)
         if desc:
-            async with AsyncSession(get_engine()) as session:
+            async with AsyncSession(get_engine(), expire_on_commit=False) as session:
                 # Enrich with product name so Qwen sees the human-readable name
                 if spiking_pid:
                     product = await session.get(ProductDB, spiking_pid)

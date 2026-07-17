@@ -56,6 +56,13 @@ function getTypeMeta(actionType: string): ActionTypeMeta {
   }
 }
 
+const ROLE_LABELS: Record<string, string> = {
+  pricing_strategist: 'Pricing Strategist',
+  sales_rep: 'Sales Rep',
+  inventory_overseer: 'Inventory Overseer',
+  store_curator: 'Store Curator',
+}
+
 // ── Props ────────────────────────────────────────────────────────────────────
 
 interface OptionCardProps {
@@ -234,8 +241,8 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
         </div>
       ) : (
         <>
-          {/* Action type badge + age */}
-          <div className="flex items-center gap-2 mb-3">
+          {/* Action type badge + role badge + age */}
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
             <span
               className="text-xs font-mono font-semibold px-2 py-0.5 rounded"
               style={{
@@ -247,6 +254,18 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
             >
               {isExpired ? 'Expired' : meta.label}
             </span>
+            {action.role && ROLE_LABELS[action.role] && (
+              <span
+                className="text-[10px] font-mono px-2 py-0.5 rounded"
+                style={{
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                ✦ {ROLE_LABELS[action.role]}
+              </span>
+            )}
             <span
               className="text-[10px] font-mono"
               style={{ color: isExpired ? 'var(--color-danger)' : 'var(--color-text-muted)' }}
