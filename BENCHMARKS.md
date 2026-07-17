@@ -96,6 +96,14 @@ PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m tests.bench_live
 calls (2 arms × 7 scenarios), run once manually via `bench_live.py`, not in
 CI.**
 
+> **An unguarded Qwen call proposed the identical 10% discount across all 7
+> scenarios — despite genuinely different cost, price, margin-floor, and
+> discount-ceiling data in each one (proven by the guarded pipeline clamping
+> those same 7 scenarios to 7 different values: 2.89%, 40.0%, 11.11%, 10.0%,
+> 10.0%, 15.0%, and "no discount dimension"). The interceptor is the only
+> thing standing between a model that pattern-matches to a safe-sounding
+> round number and a real margin or ceiling violation.**
+
 ### The bare arm's flat 10%
 
 Every single bare-arm call — across seven scenarios with genuinely
