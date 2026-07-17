@@ -20,6 +20,7 @@ from app.models.schemas import AgentAction, AgentActionStatus, AgentActionType, 
 from app.models.db_models import AgentActionDB, MerchantDB, BrandProfileDB, ProductDB
 from app.services.brand import _qwen_chat, _extract_json, BrandGenerationError
 from app.services.tools import DECISION_TOOLS, TOOL_TO_ACTION_TYPE, narrative_from_tool, parse_tool_args
+from app.services.action_guard import validate_tool_args, ActionValidationError
 from app.core.ws_manager import manager
 from app.core.config import get_settings
 
@@ -358,6 +359,27 @@ async def run_decision_cycle(
     if action_type_enum is None:
         logger.warning(f"[decision] unknown tool '{tool_name}', defaulting to flash_sale")
         action_type_enum = AgentActionType.FLASH_SALE
+
+    # Layer 0 — structural safety, ahead of the interceptor. Reject tool-call
+    # args that encode an impossible state (negative/>100% discount,
+    # non-positive price, empty target id, self-contradictory merge) before
+    # they can ever become an option card. This is distinct from the
+    # interceptor below, which CLAMPS valid-but-aggressive values and
+    # HARD-BLOCKS on live business state — here we reject the nonsensical,
+    # the fingerprint of a hallucinated call, not a bold-but-legal move.
+    try:
+        tool_args = validate_tool_args(tool_name, tool_args)
+    except ActionValidationError as e:
+        logger.info(
+            f"[decision] structural guard rejected {tool_name} for {merchant_id}: {e}"
+        )
+        from app.services import receipts
+        await receipts.append_receipt(
+            db, merchant_id, "blocked",
+            note=f"{tool_name} rejected by structural guard: {e}",
+        )
+        await db.commit()
+        return None
 
     reasoning = extract_reasoning(tool_args, message)
 

@@ -54,10 +54,13 @@ DECISION_TOOLS: list[dict] = [
                     },
                     "discount_percent": {
                         "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
                         "description": "Discount percentage, e.g. 15 for 15% off",
                     },
                     "duration_minutes": {
                         "type": "integer",
+                        "exclusiveMinimum": 0,
                         "description": "How long the sale lasts in minutes (default 1440 = 24h)",
                     },
                     "reasoning": REASONING_PARAM,
@@ -83,6 +86,8 @@ DECISION_TOOLS: list[dict] = [
                     },
                     "discount_percent": {
                         "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
                         "description": "Discount percentage, e.g. 10 for 10% off",
                     },
                     "reasoning": REASONING_PARAM,
@@ -129,6 +134,8 @@ DECISION_TOOLS: list[dict] = [
                 "properties": {
                     "discount_percent": {
                         "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
                         "description": "Recovery discount percentage, e.g. 12 for 12% off cart total",
                     },
                     "reasoning": REASONING_PARAM,
@@ -234,6 +241,7 @@ DECISION_TOOLS: list[dict] = [
                     },
                     "new_price": {
                         "type": "number",
+                        "exclusiveMinimum": 0,
                         "description": "The new live price to set",
                     },
                     "reasoning_signals": {
@@ -263,6 +271,8 @@ DECISION_TOOLS: list[dict] = [
                 "properties": {
                     "discount_percent": {
                         "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
                         "description": "Nudge discount percentage, e.g. 8 for 8% off cart total",
                     },
                     "reasoning": REASONING_PARAM,
