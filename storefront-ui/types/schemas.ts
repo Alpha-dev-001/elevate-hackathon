@@ -491,6 +491,7 @@ export const AgentActionSchema = z.object({
   brand_check: z.string(),
   constraint_check: z.string().default(''),
   reasoning: z.string().default(''),
+  role: z.string().nullable().optional(),
   status: AgentActionStatusSchema,
   created_at: z.number(),
   approved_at: z.number().nullable().optional(),

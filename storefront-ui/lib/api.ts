@@ -181,6 +181,7 @@ export interface DecisionLogEntry {
   trigger: string
   reasoning: string
   context_snapshot: DecisionContextSnapshot
+  role: string | null
   status: string
   created_at: number
   approved_at: number | null
