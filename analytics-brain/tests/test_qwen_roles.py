@@ -9,6 +9,7 @@ from app.services.qwen_roles import (
     get_role_tools,
     role_for_action_type,
     role_for_anomaly,
+    role_by_name,
 )
 from app.services.tools import DECISION_TOOLS
 
@@ -95,3 +96,21 @@ class TestRoleForAnomaly:
     def test_unrecognized_prefix_raises(self):
         with pytest.raises(ValueError):
             role_for_anomaly("Some other anomaly type nobody expected")
+
+
+def test_default_priority_values():
+    assert SALES_REP.default_priority == 30
+    assert PRICING_STRATEGIST.default_priority == 20
+    assert INVENTORY_OVERSEER.default_priority == 10
+    assert STORE_CURATOR.default_priority == 10
+
+
+class TestRoleByName:
+    def test_finds_a_real_role(self):
+        assert role_by_name("sales_rep") is SALES_REP
+
+    def test_unknown_name_returns_none(self):
+        assert role_by_name("not_a_real_role") is None
+
+    def test_none_returns_none(self):
+        assert role_by_name(None) is None

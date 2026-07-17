@@ -19,6 +19,7 @@ class QwenRole:
     name: str
     mission_line: str  # {store_name} placeholder — becomes DECISION_PROMPT's opening line
     tool_names: tuple[str, ...]
+    default_priority: int  # baseline for the priority-arbitration gate — see learning.compute_effective_priority
 
 
 PRICING_STRATEGIST = QwenRole(
@@ -30,6 +31,7 @@ PRICING_STRATEGIST = QwenRole(
         "layout, copy, or catalog hygiene."
     ),
     tool_names=("propose_flash_sale", "propose_scarcity_price", "propose_price_rebalance"),
+    default_priority=20,
 )
 
 SALES_REP = QwenRole(
@@ -42,6 +44,7 @@ SALES_REP = QwenRole(
         "hygiene."
     ),
     tool_names=("propose_recovery_offer", "propose_cart_dwell_nudge", "propose_feature_product"),
+    default_priority=30,
 )
 
 INVENTORY_OVERSEER = QwenRole(
@@ -53,6 +56,7 @@ INVENTORY_OVERSEER = QwenRole(
         "touch pricing, layout, or copy."
     ),
     tool_names=("propose_duplicate_merge",),
+    default_priority=10,
 )
 
 STORE_CURATOR = QwenRole(
@@ -65,6 +69,7 @@ STORE_CURATOR = QwenRole(
         "or catalog hygiene."
     ),
     tool_names=("propose_layout_morph", "propose_copy_rewrite"),
+    default_priority=10,
 )
 
 ALL_ROLES: tuple[QwenRole, ...] = (PRICING_STRATEGIST, SALES_REP, INVENTORY_OVERSEER, STORE_CURATOR)
@@ -116,3 +121,14 @@ def role_for_anomaly(desc: str) -> QwenRole:
     if desc.startswith("Velocity spike"):
         return PRICING_STRATEGIST
     raise ValueError(f"no role mapping for anomaly description: {desc!r}")
+
+
+def role_by_name(name: str | None) -> QwenRole | None:
+    """Reverse lookup: role name string -> the QwenRole object, or None if
+    name is None or unrecognized. Used wherever a persisted role name (e.g.
+    AgentActionDB.role, or a name string parsed from a tool call) needs to
+    become a real QwenRole to read its own fields (default_priority,
+    can_escalate_to). Pure — no I/O."""
+    if name is None:
+        return None
+    return next((r for r in ALL_ROLES if r.name == name), None)
