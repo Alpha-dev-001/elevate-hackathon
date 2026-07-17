@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react'
 import { api, type DecisionLogEntry } from '@/lib/api'
 
+const ROLE_LABELS: Record<string, string> = {
+  pricing_strategist: 'Pricing Strategist',
+  sales_rep: 'Sales Rep',
+  inventory_overseer: 'Inventory Overseer',
+  store_curator: 'Store Curator',
+}
+
 function DecisionRow({ d }: { d: DecisionLogEntry }) {
   const [showReasoning, setShowReasoning] = useState(false)
   const [showContext, setShowContext] = useState(false)
@@ -21,11 +28,21 @@ function DecisionRow({ d }: { d: DecisionLogEntry }) {
         <h4 className="text-sm font-bold" style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}>
           {d.title}
         </h4>
-        <span
-          className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded shrink-0"
-          style={{ background: 'var(--color-border)', color: 'var(--color-text-muted)' }}
-        >
-          {d.status}
+        <span className="flex items-center gap-2 shrink-0">
+          {d.role && ROLE_LABELS[d.role] && (
+            <span
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+              style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}
+            >
+              ✦ {ROLE_LABELS[d.role]}
+            </span>
+          )}
+          <span
+            className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded"
+            style={{ background: 'var(--color-border)', color: 'var(--color-text-muted)' }}
+          >
+            {d.status}
+          </span>
         </span>
       </div>
       <p className="text-[10px] font-mono mb-2" style={{ color: 'var(--color-text-muted)' }}>
