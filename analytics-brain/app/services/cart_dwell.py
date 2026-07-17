@@ -27,6 +27,29 @@ logger = logging.getLogger(__name__)
 
 CART_DWELL_MINUTES = int(os.getenv("CART_DWELL_MINUTES", "8"))
 CART_DWELL_CHECK_INTERVAL_SECONDS = int(os.getenv("CART_DWELL_CHECK_INTERVAL_SECONDS", "60"))
+# Same pattern as duplicate_scan.py's DUPLICATE_DISMISS_TTL_SECONDS, much
+# shorter: a cart sitting untouched is a live, fast-changing situation (the
+# customer may check out or leave within minutes), not a static catalog
+# issue — a week-long suppression would be far too long. 30 minutes is
+# enough to stop repeat-nagging for the same still-dwelling cart without
+# permanently exempting a session that genuinely comes back later.
+CART_DWELL_SUPPRESS_TTL_SECONDS = int(os.getenv("CART_DWELL_SUPPRESS_TTL_SECONDS", str(30 * 60)))
+
+
+async def suppress_dwell_session(merchant_id: str, session_id: str, redis: "Redis") -> None:
+    """Called whenever a cart_dwell_nudge action resolves — approved,
+    dismissed, or auto-expired (see routers/agent.py and decision_engine.py's
+    stale-action path) — so the same still-dwelling session doesn't get a
+    fresh proposal on the very next 60s tick."""
+    from app.core.redis import Keys
+    await redis.set(
+        Keys.dwell_suppressed(merchant_id, session_id), "1", ex=CART_DWELL_SUPPRESS_TTL_SECONDS,
+    )
+
+
+async def _is_dwell_suppressed(merchant_id: str, session_id: str, redis: "Redis") -> bool:
+    from app.core.redis import Keys
+    return bool(await redis.get(Keys.dwell_suppressed(merchant_id, session_id)))
 
 
 def is_dwelling(cart_updated_at_ms: int, has_items: bool, now_ms: int | None = None) -> bool:
@@ -79,6 +102,8 @@ async def run_dwell_check(db: "AsyncSession", redis: "Redis") -> int:
                     if not is_dwelling(cart.updated_at, bool(cart.items)):
                         continue
                     if await session_has_abandoned(redis, merchant.id, session_id):
+                        continue
+                    if await _is_dwell_suppressed(merchant.id, session_id, redis):
                         continue
 
                     action = await run_decision_cycle(

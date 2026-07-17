@@ -316,34 +316,50 @@ export default function TerminalPage() {
         </div>
       )}
 
-      {/* ── Qwen capability proposals (surfaces only when there are any) ── */}
-      <div className="px-6 pt-6 max-w-[1400px] mx-auto">
-        <CapabilityProposals capabilities={capabilities} />
-      </div>
+      {/* ── Two zones: what needs a decision now (left, wide) vs. store state
+          & config (right, narrower sidebar) — everything in the left column
+          shares one width so a pending-product card, a capability proposal,
+          and a decision card read as the same kind of thing (they are: all
+          three are "Qwen wants you to decide something"), instead of three
+          different layout conventions stacked with no visual relationship. ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6 px-6 pt-6 pb-10 max-w-[1400px] mx-auto items-start">
+        {/* Left: the decision feed — agent actions lead (these carry a 5-minute
+            TTL and can expire unacted-on, so they're the most time-sensitive
+            thing on the page), then capability proposals, then pending
+            products (no expiry — they just wait, so they're lowest urgency). */}
+        <div className="flex flex-col gap-6 min-w-0">
+          <DecisionFeed
+            actions={pendingActions}
+            slug={merchant.slug}
+            onApproveAction={handleApproveAction}
+            onDismissAction={handleDismissAction}
+          />
 
-      {/* ── Product Vision — pending products awaiting approval, live via WS ── */}
-      {pendingProducts.length > 0 && (
-        <div className="px-6 pt-6 max-w-[1400px] mx-auto flex flex-col gap-3">
-          <p className="font-mono text-xs uppercase tracking-widest" style={{ color: 'var(--color-accent)' }}>
-            Product Vision · {pendingProducts.length} awaiting approval
-          </p>
-          <AnimatePresence>
-            {pendingProducts.map((p) => (
-              <PendingProductCard
-                key={p.id}
-                product={p}
-                onApproved={(approved) => setPendingProducts((prev) => prev.filter((x) => x.id !== approved.id))}
-                onDiscarded={(id) => setPendingProducts((prev) => prev.filter((x) => x.id !== id))}
-              />
-            ))}
-          </AnimatePresence>
+          <CapabilityProposals capabilities={capabilities} />
+
+          {pendingProducts.length > 0 && (
+            <div className="flex flex-col gap-3">
+              <p className="font-mono text-xs uppercase tracking-widest" style={{ color: 'var(--color-accent)' }}>
+                Product Vision · {pendingProducts.length} awaiting approval
+              </p>
+              <AnimatePresence>
+                {pendingProducts.map((p) => (
+                  <PendingProductCard
+                    key={p.id}
+                    product={p}
+                    onApproved={(approved) => setPendingProducts((prev) => prev.filter((x) => x.id !== approved.id))}
+                    onDiscarded={(id) => setPendingProducts((prev) => prev.filter((x) => x.id !== id))}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
-      )}
 
-      {/* ── 3-column layout ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 px-6 pb-6 max-w-[1400px] mx-auto">
-        {/* Left: Store snapshot + simulate */}
-        <div className="lg:col-span-1">
+        {/* Right: store state, stats, and the limits Qwen operates within —
+            reference/glanceable, not time-sensitive, so it sits apart from
+            the decision feed rather than competing with it for attention. */}
+        <div className="flex flex-col gap-6 min-w-0">
           <StoreSnapshot
             merchant={merchant}
             slug={merchant.slug}
@@ -352,27 +368,9 @@ export default function TerminalPage() {
             onReview={handleReview}
             reviewState={reviewState}
           />
-        </div>
-
-        {/* Center: Decision feed */}
-        <div className="lg:col-span-1">
-          <DecisionFeed
-            actions={pendingActions}
-            slug={merchant.slug}
-            onApproveAction={handleApproveAction}
-            onDismissAction={handleDismissAction}
-          />
-        </div>
-
-        {/* Right: Attribution dashboard */}
-        <div className="lg:col-span-1">
           <AttributionDashboard data={dashboard} loading={dashboardLoading} />
+          <ConstraintsSettings />
         </div>
-      </div>
-
-      {/* ── Discount/pricing constraint settings — one-time-per-session config, not a live feed item ── */}
-      <div className="px-6 pb-6 max-w-[1400px] mx-auto flex justify-center">
-        <ConstraintsSettings />
       </div>
     </main>
   )

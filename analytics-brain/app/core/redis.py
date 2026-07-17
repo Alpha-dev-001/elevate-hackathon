@@ -90,6 +90,14 @@ class Keys:
         return f"elevate:{merchant_id}:dwell:{session_id}"
 
     @staticmethod
+    def dwell_suppressed(merchant_id: str, session_id: str) -> str:
+        """A cart_dwell_nudge that already resolved (approved, dismissed, or
+        auto-expired) for this session — blocks re-firing for a cooldown so a
+        cart that just sits there doesn't nag the merchant with a fresh card
+        every ~8 minutes forever. Mirrors duplicate_dismissed's pattern."""
+        return f"elevate:{merchant_id}:dwell_suppressed:{session_id}"
+
+    @staticmethod
     def qr_campaign(merchant_id: str, campaign_id: str) -> str:
         return f"elevate:{merchant_id}:qr:{campaign_id}"
 

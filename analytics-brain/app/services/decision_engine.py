@@ -169,6 +169,14 @@ async def run_decision_cycle(
                 "[decision] auto-dismissed stale action %s (age: %.0fs, ttl: %ds) for %s",
                 existing.id, age_seconds, ttl, merchant_id,
             )
+            if existing.action_type == "cart_dwell_nudge":
+                session_id = (existing.payload or {}).get("session_id")
+                if session_id:
+                    try:
+                        from app.services.cart_dwell import suppress_dwell_session
+                        await suppress_dwell_session(merchant_id, session_id, redis)
+                    except Exception as e:  # noqa: BLE001 — suppression must never block the cycle
+                        logger.warning("[decision] dwell suppression failed for %s: %s", existing.id, e)
             # Notify terminal so the stale card is removed immediately
             from app.models.schemas import WSMessage
             await manager.push_to_terminal(

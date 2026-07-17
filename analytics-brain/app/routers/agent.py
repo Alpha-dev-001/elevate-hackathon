@@ -113,6 +113,16 @@ async def approve_action(
     else:
         row.status = "blocked_at_execution"
 
+    if row.action_type == "cart_dwell_nudge":
+        session_id = (row.payload or {}).get("session_id")
+        if session_id:
+            try:
+                from app.services.cart_dwell import suppress_dwell_session
+                from app.core.redis import get_redis
+                await suppress_dwell_session(row.merchant_id, session_id, await get_redis())
+            except Exception as e:  # noqa: BLE001 — suppression must never block an approve
+                logger.warning("[agent] dwell suppression failed for %s: %s", row.id, e)
+
     from app.services import receipts
     await receipts.append_receipt(db, row.merchant_id, row.status, action_row=row)
     await db.commit()
@@ -182,6 +192,16 @@ async def dismiss_action(
                 await suppress_duplicate_group(row.merchant_id, group_ids, await get_redis())
         except Exception as e:  # noqa: BLE001 — suppression must never block a dismiss
             logger.warning("[agent] duplicate-merge suppression failed for %s: %s", row.id, e)
+
+    if row.action_type == "cart_dwell_nudge":
+        session_id = (row.payload or {}).get("session_id")
+        if session_id:
+            try:
+                from app.services.cart_dwell import suppress_dwell_session
+                from app.core.redis import get_redis
+                await suppress_dwell_session(row.merchant_id, session_id, await get_redis())
+            except Exception as e:  # noqa: BLE001 — suppression must never block a dismiss
+                logger.warning("[agent] dwell suppression failed for %s: %s", row.id, e)
 
     return {"action": _to_schema(row).model_dump()}
 
