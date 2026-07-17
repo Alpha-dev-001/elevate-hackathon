@@ -146,6 +146,15 @@ class Keys:
         expires (DUPLICATE_DISMISS_TTL_SECONDS, default 7 days)."""
         return f"elevate:{merchant_id}:dup_dismissed:{group_hash}"
 
+    @staticmethod
+    def scarcity_checked(product_id: str, date_str: str) -> str:
+        """Guards store_review.check_scarcity_signals to once per UTC day
+        per product — date_str is the caller's own utcnow date string, so
+        the key naturally rolls over at midnight UTC. A TTL is still set
+        defensively (see store_review.mark_scarcity_checked) rather than
+        relying on the date-suffixed key alone to bound Redis memory."""
+        return f"elevate:scarcity_check:{product_id}:{date_str}"
+
 
 # ─── TTLs (seconds) ───────────────────────────────────────────────────────────
 

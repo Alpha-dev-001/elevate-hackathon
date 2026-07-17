@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 STORE_REVIEW_WINDOW_HOURS = int(os.getenv("STORE_REVIEW_WINDOW_HOURS", "24"))
 STORE_REVIEW_MIN_VIEWS = int(os.getenv("STORE_REVIEW_MIN_VIEWS", "5"))
 STORE_REVIEW_INTERVAL_SECONDS = int(os.getenv("STORE_REVIEW_INTERVAL_SECONDS", "3600"))
+# Mechanism 3 (swarm coordination design): a product at or below this stock
+# level, WITH real view demand (see scarcity_signal_holds), is a genuine
+# scarcity-pricing candidate for Pricing Strategist.
+LOW_STOCK_THRESHOLD = int(os.getenv("LOW_STOCK_THRESHOLD", "5"))
 
 
 def extract_ordered_product_ids(order_items_list: list[list[dict] | None]) -> set[str]:
@@ -79,6 +83,76 @@ def format_review_description(product_name: str, views: float, window_hours: int
         f"Store review: {int(views)} views, 0 orders in the last "
         f'{window_hours}h for "{product_name}" — high interest, no conversion'
     )
+
+
+def scarcity_signal_holds(
+    stock: int, recent_views: int, low_stock_threshold: int, demand_threshold: int,
+) -> bool:
+    """Pure joint-condition check: a real scarcity-pricing opportunity exists
+    only when stock is genuinely low AND there's real recent demand (view
+    velocity) for the SAME product — either alone is not enough. A merchant
+    should never see a price-bump proposal from stock alone, or from view
+    interest alone. No I/O."""
+    return stock <= low_stock_threshold and recent_views >= demand_threshold
+
+
+def find_matching_search_insight(product_name: str, insights: list[dict]) -> dict | None:
+    """Best-effort supporting color only — a simple case-insensitive
+    substring match of a tracked search query against the product name,
+    nothing more elaborate. Returns the first hit (insights is already
+    sorted most-searched-first by search_tracker.list_search_insights) or
+    None. Never gates the scarcity check itself — see scarcity_signal_holds,
+    which only looks at stock + view velocity."""
+    name_lower = product_name.lower()
+    for insight in insights:
+        label_lower = insight["label"].lower()
+        if label_lower in name_lower or name_lower in label_lower:
+            return insight
+    return None
+
+
+def format_scarcity_description(
+    product_name: str, stock: int, recent_views: int, search_insight: dict | None,
+) -> str:
+    """View count leads the sentence (not the product name), same reasoning
+    as format_review_description: decision_engine._extract_count() greps
+    the first \\d+ for the grounded GMV estimate."""
+    demand_note = (
+        f", search demand also present ({search_insight['count']}x)"
+        if search_insight else ""
+    )
+    return (
+        f"Scarcity signal: {recent_views} recent views on \"{product_name}\" "
+        f"with only {stock} left in stock{demand_note} — a scarcity price "
+        f"could accelerate conversions before stockout"
+    )
+
+
+async def should_check_scarcity(product_id: str, redis) -> bool:
+    """Once-per-UTC-day dedup guard — simpler than pricing_cycle's
+    should_run_pricing_check (no escalation streak needed here, just a
+    daily gate keyed on today's UTC date string)."""
+    from datetime import datetime, timezone
+    from app.core.redis import Keys
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return not await redis.exists(Keys.scarcity_checked(product_id, date_str))
+
+
+async def mark_scarcity_checked(product_id: str, redis) -> None:
+    """Marks a product as evaluated-to-a-definite-outcome for the UTC day, so
+    it isn't re-evaluated again today. The caller (check_scarcity_signals)
+    fires this in exactly two cases — the joint condition didn't hold, or a
+    proposal was actually created — but NOT when the signal held yet no
+    proposal came back (a transient miss: Qwen declined, or a higher-priority
+    card held the one-card slot). Leaving that case unmarked lets the next
+    tick retry rather than burning the product's daily slot on a miss that may
+    have had nothing to do with this product. Same spirit as pricing_cycle's
+    record_pricing_check_result, just gated on outcome rather than
+    unconditional."""
+    from datetime import datetime, timezone
+    from app.core.redis import Keys
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    await redis.set(Keys.scarcity_checked(product_id, date_str), "1", ex=90000)  # 25h TTL — covers the day plus margin
 
 
 async def find_underperformer(
