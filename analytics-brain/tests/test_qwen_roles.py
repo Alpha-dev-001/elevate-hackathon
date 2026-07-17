@@ -45,7 +45,7 @@ def test_sales_rep_tools():
 
 def test_store_curator_tools():
     names = {t["function"]["name"] for t in get_role_tools(STORE_CURATOR)}
-    assert names == {"propose_layout_morph", "propose_copy_rewrite"}
+    assert {"propose_layout_morph", "propose_copy_rewrite"} <= names
 
 
 class TestRoleForActionType:
@@ -114,3 +114,31 @@ class TestRoleByName:
 
     def test_none_returns_none(self):
         assert role_by_name(None) is None
+
+
+from app.services.qwen_roles import ESCALATE_TOOL_NAME, ESCALATE_TOOL
+
+
+class TestEscalation:
+    def test_store_curator_can_escalate_to_pricing_strategist(self):
+        assert STORE_CURATOR.can_escalate_to == (PRICING_STRATEGIST,)
+
+    def test_every_other_role_defaults_to_no_escalation(self):
+        assert PRICING_STRATEGIST.can_escalate_to == ()
+        assert SALES_REP.can_escalate_to == ()
+        assert INVENTORY_OVERSEER.can_escalate_to == ()
+
+    def test_escalate_tool_shape_matches_decision_tools_convention(self):
+        assert ESCALATE_TOOL["type"] == "function"
+        assert ESCALATE_TOOL["function"]["name"] == ESCALATE_TOOL_NAME
+        params = ESCALATE_TOOL["function"]["parameters"]
+        assert set(params["required"]) == {"target_role", "reasoning"}
+
+    def test_get_role_tools_includes_escalate_tool_when_permitted(self):
+        names = {t["function"]["name"] for t in get_role_tools(STORE_CURATOR)}
+        assert ESCALATE_TOOL_NAME in names
+        assert names == {"propose_layout_morph", "propose_copy_rewrite", ESCALATE_TOOL_NAME}
+
+    def test_get_role_tools_omits_escalate_tool_when_not_permitted(self):
+        names = {t["function"]["name"] for t in get_role_tools(INVENTORY_OVERSEER)}
+        assert ESCALATE_TOOL_NAME not in names

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.services.tools import DECISION_TOOLS
+from app.services.tools import DECISION_TOOLS, REASONING_PARAM
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,7 @@ class QwenRole:
     mission_line: str  # {store_name} placeholder — becomes DECISION_PROMPT's opening line
     tool_names: tuple[str, ...]
     default_priority: int  # baseline for the priority-arbitration gate — see learning.compute_effective_priority
+    can_escalate_to: tuple["QwenRole", ...] = ()  # single-hop hand-off targets — see ESCALATE_TOOL
 
 
 PRICING_STRATEGIST = QwenRole(
@@ -70,16 +71,50 @@ STORE_CURATOR = QwenRole(
     ),
     tool_names=("propose_layout_morph", "propose_copy_rewrite"),
     default_priority=10,
+    can_escalate_to=(PRICING_STRATEGIST,),
 )
 
 ALL_ROLES: tuple[QwenRole, ...] = (PRICING_STRATEGIST, SALES_REP, INVENTORY_OVERSEER, STORE_CURATOR)
 
 
+ESCALATE_TOOL_NAME = "propose_escalate_to_role"
+
+ESCALATE_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": ESCALATE_TOOL_NAME,
+        "description": (
+            "Hand this decision off to a different specialist role because "
+            "the right fix here is outside your own tools — e.g. an "
+            "underperforming product that actually needs a price change, "
+            "not a layout or copy change. Only call this when your own "
+            "tools genuinely cannot address what you're seeing; otherwise "
+            "use your own tools as normal."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target_role": {
+                    "type": "string",
+                    "description": "The role name to hand off to, e.g. 'pricing_strategist'.",
+                },
+                "reasoning": REASONING_PARAM,
+            },
+            "required": ["target_role", "reasoning"],
+        },
+    },
+}
+
+
 def get_role_tools(role: QwenRole) -> list[dict]:
     """DECISION_TOOLS filtered to this role's tool_names, in DECISION_TOOLS'
-    own order. Pure — no I/O."""
+    own order, plus the escalation tool when this role is allowed to hand
+    off to another (see can_escalate_to). Pure — no I/O."""
     names = set(role.tool_names)
-    return [t for t in DECISION_TOOLS if t["function"]["name"] in names]
+    tools = [t for t in DECISION_TOOLS if t["function"]["name"] in names]
+    if role.can_escalate_to:
+        tools = tools + [ESCALATE_TOOL]
+    return tools
 
 
 _ACTION_TYPE_TO_TOOL = {
