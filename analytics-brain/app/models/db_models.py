@@ -252,6 +252,11 @@ class AgentActionDB(Base):
     # the Decision Trace page can show inputs alongside the reasoning
     # output, not just the outcome. See decision_engine.run_decision_cycle.
     context_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Which named Qwen role (see qwen_roles.py) proposed this decision —
+    # pricing_strategist / sales_rep / inventory_overseer / store_curator.
+    # NULL for any row predating this column or created via a caller that
+    # doesn't pass role= (e.g. the MCP server's free-text decision-cycle tool).
+    role: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default="pending")
     created_at: Mapped[int] = mapped_column(
         BigInteger, default=lambda: int(time.time() * 1000)
