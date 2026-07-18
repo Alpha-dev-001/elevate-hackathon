@@ -7,9 +7,21 @@ from app.services.cart import cap_discount_for_cost
 
 
 class _L:
-    def __init__(self, unit_price, cost_price=None):
+    def __init__(self, unit_price, cost_price=None, floor_price=None):
         self.unit_price = unit_price
         self.cost_price = cost_price
+        self.floor_price = floor_price  # margin/min-price floor snapshotted at add-time
+
+
+def test_margin_floor_takes_precedence_over_bare_cost():
+    # $10 line, cost $6 but margin floor $8 → max safe discount is 20% (to $8),
+    # NOT the 40% the raw cost would allow.
+    assert cap_discount_for_cost([_L(10.0, 6.0, floor_price=8.0)], 50.0) == 20.0
+
+
+def test_falls_back_to_cost_when_no_floor_snapshot():
+    # Legacy line without a floor snapshot still gets the below-cost guarantee.
+    assert cap_discount_for_cost([_L(10.0, 6.0)], 50.0) == 40.0
 
 
 def test_discount_within_margin_is_unchanged():

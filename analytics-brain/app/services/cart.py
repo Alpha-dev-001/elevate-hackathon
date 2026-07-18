@@ -16,7 +16,7 @@ from app.core.redis import get_redis, Keys, TTL
 from app.models.db_models import ProductDB
 from app.models.schemas import Cart, CartItem, RecoveryOffer
 from app.services import delta as delta_svc
-from app.services.pricing import best_active_promo, effective_price, now_ms
+from app.services.pricing import best_active_promo, effective_price, margin_floor_price, now_ms
 
 __all__ = ["CartError", "get_cart", "add_item", "set_item", "clear_cart"]
 
@@ -75,22 +75,25 @@ async def _get_dwell_offer(merchant_id: str, session_id: str) -> RecoveryOffer |
 
 def cap_discount_for_cost(items, requested_pct: float) -> float:
     """Largest order-level discount % (<= requested) that keeps every line's final
-    price at or above its cost. The recovery/dwell discount applies uniformly to
-    the subtotal — effectively the same % off each line — so a line already
-    carrying a flash_sale can't be stacked below cost. Lines with no cost snapshot
-    (legacy carts) are skipped rather than over-clamped. Pure — no I/O.
+    price at or above its floor. The floor is the same one the interceptor enforces
+    per-action — `margin_floor_price` = max(cost x (1+margin%), per-product min_price)
+    — snapshotted onto the line as `floor_price`; a line with only a `cost_price`
+    (legacy) falls back to the below-cost guarantee. The recovery/dwell discount
+    applies uniformly to the subtotal (same % off each line), so this stops a
+    flash_sale line from being stacked below its floor. Lines with neither snapshot
+    are skipped rather than over-clamped. Pure — no I/O.
 
-    unit * (1 - d/100) >= cost  =>  d <= (1 - cost/unit) * 100
+    unit * (1 - d/100) >= floor  =>  d <= (1 - floor/unit) * 100
     """
     if requested_pct <= 0:
         return 0.0
     cap = requested_pct
     for it in items:
-        cost = getattr(it, "cost_price", None)
+        floor = getattr(it, "floor_price", None) or getattr(it, "cost_price", None)
         unit = getattr(it, "unit_price", 0.0) or 0.0
-        if cost is None or unit <= 0:
+        if floor is None or unit <= 0:
             continue
-        cap = min(cap, max(0.0, (1.0 - cost / unit) * 100.0))
+        cap = min(cap, max(0.0, (1.0 - floor / unit) * 100.0))
     return round(cap, 2)
 
 
@@ -197,6 +200,19 @@ async def _snapshot_price(merchant_id: str, product: ProductDB) -> float:
     return price
 
 
+async def _snapshot_floor(db: AsyncSession, merchant_id: str, product: ProductDB) -> float:
+    """The interceptor's Layer-2 floor for this product, captured at add-time so the
+    stacked-discount clamp (cap_discount_for_cost) can never take a line below it —
+    max(cost x (1+margin%), the merchant's per-product min_price)."""
+    from app.services.profile import load_constraints
+    c = await load_constraints(db, merchant_id)
+    return margin_floor_price(
+        product.cost_price,
+        c.min_profit_margin_percent,
+        c.min_price.get(product.id, 0.0),
+    )
+
+
 async def add_item(
     db: AsyncSession, merchant_id: str, session_id: str, product_id: str, qty: int
 ) -> Cart:
@@ -228,6 +244,7 @@ async def add_item(
                 name=product.name,
                 unit_price=unit,
                 cost_price=product.cost_price,
+                floor_price=await _snapshot_floor(db, merchant_id, product),
                 qty=desired,
                 image_url=product.image_urls[0] if product.image_urls else None,
                 line_total=round(unit * desired, 2),
@@ -270,6 +287,7 @@ async def set_item(
                 name=product.name,
                 unit_price=unit,
                 cost_price=product.cost_price,
+                floor_price=await _snapshot_floor(db, merchant_id, product),
                 qty=qty,
                 image_url=product.image_urls[0] if product.image_urls else None,
                 line_total=round(unit * qty, 2),

@@ -11,7 +11,7 @@
 
 [License: MIT](./LICENSE) · [Built with Qwen](https://qwencloud.com) · [Alibaba Cloud](https://alibabacloud.com)
 
-**A swarm of 4 role-scoped Qwen specialists · 2 models (incl. multimodal) · 10 typed tools · a Layer-0 structural guard + 3-layer interceptor + tamper-evident decision ledger · reactive *and* proactive triggers · per-store learning · 500+ backend tests across 105 test files · live Qwen benchmark: 100% valid, 5.6s avg**
+**A swarm of 4 role-scoped Qwen specialists (extensible — not fixed at four) · 2 models (incl. multimodal) · 10 typed tools · a Layer-0 structural guard + 3-layer interceptor + tamper-evident decision ledger · reactive *and* proactive triggers · per-store learning · 500+ backend tests across 105 test files · live Qwen benchmark: 100% valid, 5.6s avg**
 
 <!-- TODO(hero): 1280×640 — merchant terminal mid-decision, an option card visible + Decision Trace panel open. See docs/IMAGE_GALLERY.md #01 -->
 ![Elevate — autonomous autopilot for running a store](docs/images/01-hero.png)
@@ -86,7 +86,7 @@ Every arrow in that diagram is real, tested code — not a roadmap.
 
 ---
 
-## The swarm: four role-scoped specialists
+## The swarm — four role-scoped specialists (not fixed at four)
 
 Instead of one generalist prompt holding all nine tools, each trigger routes to
 a **named role that owns a disjoint subset of tools and cannot call outside it.**
@@ -176,7 +176,7 @@ and the design reflects that on purpose.
 | Judging criterion | Weight | Where Elevate proves it |
 | --- | --- | --- |
 | Technical Depth & Engineering | 30% | 4 role-scoped agents with disjoint tools + escalation + learned arbitration · Layer-0 guard + 3-layer interceptor + hash-chained ledger · 2 models, 7 distinct Qwen call types, native tool-calling · concurrency-safe checkout + self-healing state · Redis + Postgres · 500+ tests |
-| Innovation & AI Creativity | 30% | A Qwen *swarm* that self-governs: roles that can't exceed their tools, escalate to each other, and adapt priority + proposals from per-store learning — plus an MCP server exposing the store to external agents |
+| Innovation & AI Creativity | 30% | A self-governing *swarm* of role-scoped Qwen agents: roles that can't exceed their tools, escalate to each other, and adapt priority + proposals from per-store learning — extensible beyond the four shown — plus an MCP server exposing the store to external agents |
 | Problem Value & Impact | 25% | A real store runs and improves itself without the merchant hiring a CRO agency — reactive to live behavior, proactive on pricing/scarcity/catalog health |
 | Presentation & Documentation | 15% | [Architecture](./docs/ARCHITECTURE.md) · [Technical deep dive](./docs/TECHNICAL-DEEP-DIVE.md) · [Benchmarks](./BENCHMARKS.md) · [Testing](./docs/TESTING.md) |
 

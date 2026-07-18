@@ -724,6 +724,7 @@ class CartItem(BaseModel):
     name: str
     unit_price: float          # SNAPSHOT — the effective price when added; never re-derived
     cost_price: Optional[float] = None  # SNAPSHOT — unit cost at add-time, for the below-cost clamp
+    floor_price: Optional[float] = None  # SNAPSHOT — margin/min-price floor (interceptor's Layer-2 floor) at add-time
     qty: int = Field(gt=0)
     image_url: Optional[str] = None
     line_total: float          # round(unit_price * qty, 2)
