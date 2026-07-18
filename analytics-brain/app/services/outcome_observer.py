@@ -45,12 +45,17 @@ async def observe_outcome(
         logger.warning("[observer] action %s vanished before observation", action_id)
         return None
 
+    # promo_applied is a ", "-joined list when discounts stack (flash_sale +
+    # recovery), so an exact `== promo_id` match silently dropped stacked orders
+    # (revenue landed but the loop mis-saw "no conversion"). Narrow in SQL with a
+    # substring match, then confirm the exact token in Python. See attribution.py.
+    from app.services.attribution import promo_ids_of
     rows = await db.execute(
         select(OrderDB)
         .where(OrderDB.merchant_id == action.merchant_id)
-        .where(OrderDB.promo_applied == action.promo_id)
+        .where(OrderDB.promo_applied.contains(action.promo_id))
     )
-    orders = rows.scalars().all()
+    orders = [o for o in rows.scalars().all() if action.promo_id in promo_ids_of(o.promo_applied)]
     count = len(orders)
     revenue = sum(float(o.total) for o in orders)
 

@@ -1,7 +1,8 @@
 # Elevate — autonomous autopilot for running a store
 
-> The same relationship Claude Code has to writing software, applied to
-> commerce. Qwen doesn't assist the merchant — it **runs the store**:
+> An autonomous operator for an online store — the way AI agents changed how
+> software gets written, brought to commerce. Qwen doesn't assist the merchant —
+> it **runs the store**:
 > reasoning over every signal the store produces, proposing and executing
 > changes behind a safety layer it cannot override, and getting better at
 > growing *that specific store* over time.

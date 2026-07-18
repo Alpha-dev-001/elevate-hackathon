@@ -2,7 +2,7 @@
 Elevate Autopilot — MCP (Model Context Protocol) Server
 
 Exposes the autonomous commerce agent to any MCP-compatible client
-(Claude Desktop, Cursor, or another AI agent) so external systems can:
+(any MCP-compatible client or AI agent) so external systems can:
 
   - Read the current store state
   - Trigger a decision cycle with a custom anomaly description

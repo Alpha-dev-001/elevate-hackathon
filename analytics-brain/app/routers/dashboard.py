@@ -40,20 +40,17 @@ async def get_dashboard(slug: str, db: AsyncSession = Depends(get_db)):
     )
     actions = list(executed_result)
 
-    # Build promo_id → orders map
-    promo_to_orders: dict[str, list[OrderDB]] = {}
-    for order in orders:
-        if order.promo_applied:
-            promo_to_orders.setdefault(order.promo_applied, []).append(order)
+    # Attribute orders to actions. An order can carry two stacked promos
+    # (product flash_sale + order-level recovery), so promo_applied is a
+    # ", "-joined list — split it so a stacked order is credited to every action
+    # that drove it, and count it once in the store total. See attribution.py.
+    from app.services.attribution import attribute_orders, total_attributed_gmv
+    attributed_map = attribute_orders(orders, [a.promo_id for a in actions])
 
     action_rows = []
-    elevate_attributed_gmv = 0.0
-
     for action in actions:
-        attributed = promo_to_orders.get(action.promo_id, [])
-        attributed_gmv = sum(float(o.total) for o in attributed)
-        fee = round(attributed_gmv * ELEVATE_FEE_RATE, 2)
-        elevate_attributed_gmv += attributed_gmv
+        attributed = attributed_map.get(action.promo_id, [])
+        attributed_gmv = round(sum(float(o.total) for o in attributed), 2)
 
         action_rows.append({
             "promo_id": action.promo_id,
@@ -63,9 +60,12 @@ async def get_dashboard(slug: str, db: AsyncSession = Depends(get_db)):
             "estimated_gmv": action.estimated_gmv,
             "executed_at": action.executed_at,
             "attributed_orders": len(attributed),
-            "attributed_gmv": round(attributed_gmv, 2),
-            "fee": fee,
+            "attributed_gmv": attributed_gmv,
+            "fee": round(attributed_gmv * ELEVATE_FEE_RATE, 2),
         })
+
+    # Distinct orders only — a stacked order matched by two actions counts once.
+    elevate_attributed_gmv = total_attributed_gmv(attributed_map)
 
     # Memory count — how many decisions Qwen has learned from for this store
     from app.services.memory import get_memory

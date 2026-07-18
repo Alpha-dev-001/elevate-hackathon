@@ -573,7 +573,7 @@ WebSocket event pushes the removal to all connected terminals.
 ## MCP Server — External Agent Integration
 
 Elevate exposes its autonomous agent via the **Model Context Protocol
-(MCP)**, allowing any MCP-compatible client (Claude Desktop, Cursor, or
+(MCP)**, allowing any MCP-compatible client (Cursor, or
 another AI agent) to drive the store's autopilot programmatically.
 
 **6 tools:**
