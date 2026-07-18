@@ -723,6 +723,7 @@ class CartItem(BaseModel):
     product_id: str
     name: str
     unit_price: float          # SNAPSHOT — the effective price when added; never re-derived
+    cost_price: Optional[float] = None  # SNAPSHOT — unit cost at add-time, for the below-cost clamp
     qty: int = Field(gt=0)
     image_url: Optional[str] = None
     line_total: float          # round(unit_price * qty, 2)

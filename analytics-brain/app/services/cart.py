@@ -73,6 +73,27 @@ async def _get_dwell_offer(merchant_id: str, session_id: str) -> RecoveryOffer |
     return None
 
 
+def cap_discount_for_cost(items, requested_pct: float) -> float:
+    """Largest order-level discount % (<= requested) that keeps every line's final
+    price at or above its cost. The recovery/dwell discount applies uniformly to
+    the subtotal — effectively the same % off each line — so a line already
+    carrying a flash_sale can't be stacked below cost. Lines with no cost snapshot
+    (legacy carts) are skipped rather than over-clamped. Pure — no I/O.
+
+    unit * (1 - d/100) >= cost  =>  d <= (1 - cost/unit) * 100
+    """
+    if requested_pct <= 0:
+        return 0.0
+    cap = requested_pct
+    for it in items:
+        cost = getattr(it, "cost_price", None)
+        unit = getattr(it, "unit_price", 0.0) or 0.0
+        if cost is None or unit <= 0:
+            continue
+        cap = min(cap, max(0.0, (1.0 - cost / unit) * 100.0))
+    return round(cap, 2)
+
+
 async def get_effective_discount(merchant_id: str, session_id: str) -> RecoveryOffer | None:
     """The discount that actually applies to THIS session's order right now:
     the merchant-wide recovery_offer (applies to every session) or this
@@ -114,11 +135,17 @@ async def _apply_recovery(merchant_id: str, cart: Cart) -> Cart:
     except Exception as e:  # noqa: BLE001
         logger.warning(f"[cart] recovery overlay failed for {merchant_id}: {e}")
 
-    cart.discount_percent = offer.percent if offer else 0.0
-    cart.discount_label = offer.label if offer else None
-    cart.discount_expires_at = offer.expires_at if offer else None
-    cart.discount_promo_id = offer.promo_id if offer else None
-    cart.discount_amount = round(cart.subtotal * cart.discount_percent / 100, 2) if offer else 0.0
+    # Clamp the order-level discount so stacking it on a line that may already
+    # carry a product-level flash_sale never pushes any line below cost. If it
+    # clamps to zero there's no room to apply — treat it as no discount (and
+    # don't attribute a $0-effect offer to the order).
+    safe_pct = cap_discount_for_cost(cart.items, offer.percent) if offer else 0.0
+    applies = offer is not None and safe_pct > 0
+    cart.discount_percent = safe_pct if applies else 0.0
+    cart.discount_label = offer.label if applies else None
+    cart.discount_expires_at = offer.expires_at if applies else None
+    cart.discount_promo_id = offer.promo_id if applies else None
+    cart.discount_amount = round(cart.subtotal * safe_pct / 100, 2) if applies else 0.0
     cart.total = round(cart.subtotal - cart.discount_amount, 2)
     return cart
 
@@ -200,6 +227,7 @@ async def add_item(
                 product_id=product.id,
                 name=product.name,
                 unit_price=unit,
+                cost_price=product.cost_price,
                 qty=desired,
                 image_url=product.image_urls[0] if product.image_urls else None,
                 line_total=round(unit * desired, 2),
@@ -241,6 +269,7 @@ async def set_item(
                 product_id=product.id,
                 name=product.name,
                 unit_price=unit,
+                cost_price=product.cost_price,
                 qty=qty,
                 image_url=product.image_urls[0] if product.image_urls else None,
                 line_total=round(unit * qty, 2),
