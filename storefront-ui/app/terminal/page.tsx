@@ -22,7 +22,6 @@ export default function TerminalPage() {
   const [pendingActions, setPendingActions] = useState<AgentAction[]>([])
   const [dashboard, setDashboard] = useState<DashboardData | null>(null)
   const [dashboardLoading, setDashboardLoading] = useState(false)
-  const [simulateState, setSimulateState] = useState<'idle' | 'sending' | 'done'>('idle')
   const [reviewState, setReviewState] = useState<'idle' | 'sending' | 'found' | 'clean' | 'error'>('idle')
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting')
   const [memoryCount, setMemoryCount] = useState<number | null>(null)
@@ -164,35 +163,6 @@ export default function TerminalPage() {
   const handleDismissAction = useCallback((id: string) => {
     setPendingActions((prev) => prev.filter((a) => a.id !== id))
   }, [])
-
-  const handleSimulate = useCallback(
-    async (scenario: 'cart_abandon_surge' | 'velocity_spike') => {
-      if (!merchant || simulateState !== 'idle') return
-      setSimulateState('sending')
-      try {
-        await api.simulateActivity(merchant.slug, scenario)
-      } catch {
-        // the scenario may still be queued server-side — keep waiting for the decision
-      }
-      // Stay in 'sending' until a new decision card arrives (effect below). Safety
-      // timeout so the button never gets stuck if no anomaly ends up firing.
-      window.setTimeout(() => {
-        setSimulateState((s) => (s === 'sending' ? 'idle' : s))
-      }, 30000)
-    },
-    [merchant, simulateState],
-  )
-
-  // Flip 'sending' → 'done' the moment Qwen's decision card actually lands, so
-  // the merchant sees the loop resolve instead of a button that seems to do nothing.
-  const prevActionCount = useRef(0)
-  useEffect(() => {
-    if (simulateState === 'sending' && pendingActions.length > prevActionCount.current) {
-      setSimulateState('done')
-      window.setTimeout(() => setSimulateState('idle'), 4000)
-    }
-    prevActionCount.current = pendingActions.length
-  }, [pendingActions.length, simulateState])
 
   const handleReview = useCallback(async () => {
     if (!merchant || reviewState !== 'idle') return
@@ -371,8 +341,6 @@ export default function TerminalPage() {
           <StoreSnapshot
             merchant={merchant}
             slug={merchant.slug}
-            onSimulate={handleSimulate}
-            simulateState={simulateState}
             onReview={handleReview}
             reviewState={reviewState}
           />

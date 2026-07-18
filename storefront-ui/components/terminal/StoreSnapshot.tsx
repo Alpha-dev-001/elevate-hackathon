@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { IconCart, IconTrend, IconSpark } from '@/components/icons'
+import { IconSpark } from '@/components/icons'
 import type { Merchant } from '@/types/schemas'
 
 // ── Reduced-motion hook ──────────────────────────────────────────────────────
@@ -21,20 +21,16 @@ function useReducedMotion() {
   return reduced
 }
 
-type Scenario = 'cart_abandon_surge' | 'velocity_spike'
-
 type ReviewState = 'idle' | 'sending' | 'found' | 'clean' | 'error'
 
 interface StoreSnapshotProps {
   merchant: Merchant
   slug: string
-  onSimulate: (scenario: Scenario) => void
-  simulateState: 'idle' | 'sending' | 'done'
   onReview: () => void
   reviewState: ReviewState
 }
 
-export function StoreSnapshot({ merchant, slug, onSimulate, simulateState, onReview, reviewState }: StoreSnapshotProps) {
+export function StoreSnapshot({ merchant, slug, onReview, reviewState }: StoreSnapshotProps) {
   const prefersReduced = useReducedMotion()
 
   return (
@@ -87,53 +83,6 @@ export function StoreSnapshot({ merchant, slug, onSimulate, simulateState, onRev
             {merchant.is_live ? 'Live' : 'Offline'}
           </span>
         </div>
-      </div>
-
-      {/* Simulate Activity — the demo's money button. Two scenarios so Qwen
-          produces different decision types (abandon → recovery, spike → sale). */}
-      <div className="flex flex-col gap-2">
-        <span className="text-[10px] font-mono uppercase tracking-widest" style={{ color: 'var(--color-text-muted)', letterSpacing: '0.1em' }}>
-          Simulate customer activity
-        </span>
-
-        {simulateState !== 'idle' ? (
-          <div
-            className="w-full py-3 rounded-xl text-sm font-semibold font-mono flex items-center justify-center gap-2"
-            style={{
-              border: `2px solid ${simulateState === 'done' ? '#4ade80' : 'var(--color-accent)'}`,
-              color: simulateState === 'done' ? '#4ade80' : 'var(--color-accent)',
-              background: 'var(--color-surface-2)',
-            }}
-          >
-            {simulateState === 'sending' ? (
-              <>
-                <SpinnerIcon prefersReduced={prefersReduced} />
-                ✦ Qwen is analyzing… (~15s)
-              </>
-            ) : (
-              '✓ Decision ready — see the feed'
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-2">
-            <motion.button
-              onClick={() => onSimulate('cart_abandon_surge')}
-              whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
-              style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
-            >
-              <span className="inline-flex items-center justify-center gap-2"><IconCart size={16} /> Cart-abandon surge</span>
-            </motion.button>
-            <motion.button
-              onClick={() => onSimulate('velocity_spike')}
-              whileTap={{ scale: 0.97 }} transition={{ duration: 0.15 }}
-              className="w-full py-2.5 rounded-xl text-sm font-semibold font-mono cursor-pointer"
-              style={{ border: '2px solid var(--color-accent)', color: 'var(--color-accent)', background: 'transparent' }}
-            >
-              <span className="inline-flex items-center justify-center gap-2"><IconTrend size={16} /> Traffic spike</span>
-            </motion.button>
-          </div>
-        )}
       </div>
 
       {/* Proactive review — Qwen looks at the catalog without waiting for an
