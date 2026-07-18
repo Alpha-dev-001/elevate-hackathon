@@ -8,7 +8,7 @@
 ## Contents
 
 - [Onboarding (5 steps, < 30 seconds to live store)](#onboarding-5-steps--30-seconds-to-live-store)
-- [The Three-Layer Interceptor](#the-three-layer-interceptor)
+- [The Safety Stack — Structural Guard + 3-Layer Interceptor](#the-safety-stack--structural-guard--3-layer-interceptor)
 - [Validation Architecture — Defense in Depth](#validation-architecture--defense-in-depth)
 - [Fault-Tolerant Storefront — Three Defense Layers](#fault-tolerant-storefront--three-defense-layers)
 - [CSS Sanitization Guardrail](#css-sanitization-guardrail)
@@ -18,6 +18,10 @@
 - [Duplicate Detection + Catalog Audit](#duplicate-detection--catalog-audit)
 - [Qwen Creative Extension](#qwen-creative-extension)
 - [Qwen Reasoning — Transparent Decisions](#qwen-reasoning--transparent-decisions)
+- [The Qwen Swarm — Four Role-Scoped Specialists](#the-qwen-swarm--four-role-scoped-specialists)
+- [Per-Role Learning — Measurable, Visible Adaptation](#per-role-learning--measurable-visible-adaptation)
+- [Graduated Trust + The Decision Ledger](#graduated-trust--the-decision-ledger)
+- [Production-Grade Details (the parts that aren't a demo shortcut)](#production-grade-details-the-parts-that-arent-a-demo-shortcut)
 - [Per-Product Targeting + Signal Freshness](#per-product-targeting--signal-freshness)
 - [MCP Server — External Agent Integration](#mcp-server--external-agent-integration)
 - [Token Efficiency + Cost Metering](#token-efficiency--cost-metering)
@@ -61,13 +65,14 @@ is persisted to `brand_tokens.layout_dsl` (JSONB in Postgres).
 
 ---
 
-## The Three-Layer Interceptor
+## The Safety Stack — Structural Guard + 3-Layer Interceptor
 
-Every Qwen-proposed action passes through three validation layers before
-reaching the merchant. This is the brand's immune system:
+Every Qwen-proposed action passes through a structural guard and then three
+validation layers before reaching the merchant. This is the brand's immune system:
 
 | Layer                    | Source                           | Behavior                                                                                  |
 | ------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Layer 0 — Structural Guard** | Constrained Pydantic (`action_guard.py`) | Rejects a *structurally-illegal* tool call — discount ∉ [0,100], price ≤ 0, phantom/empty target, self-contradictory merge, invalid enum — before it can become an action. Declines the cycle, like Qwen declining to act. |
 | **Brand Guard**          | Qwen-authored at brand gen time  | Fires Qwen's own warning about color conflicts, voice mismatches. Does not block — flags. |
 | **Business Constraints** | Merchant's margin/discount rules | Auto-clamps values with warning shown to merchant. Price below margin floor → clamped.    |
 | **System Safety**        | Hardcoded                        | Price below cost, stock below zero, expired promo → **hard block**. No exceptions.        |
@@ -228,13 +233,17 @@ over WebSocket — not video, not streams. `push_event()` in
 per insertion. `count_views_in_window()` uses `ZRANGEBYSCORE` to count
 events in the configured time window. When the threshold is exceeded,
 `run_decision_cycle()` in `decision_engine.py` uses **Qwen's native
-tool-calling API** — 5 tools defined in `tools.py` (one per action type:
-`propose_flash_sale`, `propose_scarcity_price`, `propose_layout_morph`,
-`propose_recovery_offer`, `propose_copy_rewrite`). Qwen selects which
-tool to call and fills typed parameters — no JSON output parsing needed.
-Tool arguments become the execution payload directly. Reasoning comes
-from Qwen's message content alongside the tool call. Memory context and
-business constraints are injected into the prompt.
+tool-calling API** — 9 typed tools in `tools.py` (one per action type) plus a
+10th `escalate_to_role` hand-off tool. But the model never sees all of them at
+once: the trigger routes to one of four **role-scoped specialists** (see "The Qwen
+Swarm"), and `get_role_tools()` exposes only that role's disjoint subset. Qwen
+selects a tool and fills typed, **schema-bounded** parameters (discount capped
+`[0,100]` at the schema level); the args become the execution payload directly —
+no JSON parsing. Reasoning comes from a **required `reasoning` argument on every
+tool** (tool-calling Qwen reliably omits free-text `message.content` once it calls
+a function, so a required structured field is the only way to reliably capture it).
+Memory context, the per-role learned stance, and business constraints are injected
+into the prompt.
 
 ---
 
@@ -303,7 +312,7 @@ Merchant record. Two memory sources feed the learning loop:
 **Why context injection, not fine-tuning:** Memory is implemented as
 structured context injection — not fine-tuning or embedding-based
 retrieval. Each memory entry records what the merchant changed and what
-happened when Qwen's proposal was executed. The last 5 entries are
+happened when Qwen's proposal was executed. The last 8 entries are
 injected into the next decision cycle's prompt as plain text. This is
 intentional: for a real-time commerce system, prompt-level memory is
 auditable (you can read every entry), reversible (delete an entry and
@@ -315,9 +324,10 @@ improvement over well-structured context injection.
 **Technical implementation:** `write_memory()` in `memory.py` inserts
 into `merchants.qwen_memory` (JSONB column via SQLAlchemy) and mirrors to
 Redis key `merchant_memory:{id}` — both in one transaction.
-`build_memory_context()` formats the last 5 entries as plain-text prompt
+`build_memory_context()` formats the last 8 entries as plain-text prompt
 injection: "The merchant preferred X over Y" / "A flash-sale at 15%
-drove 3 orders." `OutcomeObserver` (`observe_outcome()`) is scheduled
+drove 3 orders." (Quantified per-role adaptation is layered on top — see
+"Per-Role Learning" below.) `OutcomeObserver` (`observe_outcome()`) is scheduled
 via `schedule_observation()` — a background task that fires when the
 promo expires, counts orders joined by `promo_id`, and writes an outcome
 `MemoryEntry` with `summarize_outcome()` (e.g., "flash_sale at 15% → 3
@@ -390,13 +400,132 @@ visible in a collapsible section on each option card:
 The reasoning is stored alongside the action and surfaced on demand —
 subtle by default, deep when the merchant wants to understand why.
 
-**Technical implementation:** When Qwen calls a tool via the decision
-cycle's tool-calling API, the response includes both `message.content`
-(free-text reasoning) and `message.tool_calls` (structured parameters).
-The reasoning is extracted from `message.content` and stored in
-`agent_actions.reasoning` (JSONB in Postgres). Rendered in the option
-card's collapsible `<details>` element. No additional Qwen call needed
-— reasoning is part of the same tool-calling response.
+**Technical implementation:** Reasoning is captured as a **required `reasoning`
+argument on every decision tool**, not scraped from `message.content`. This was a
+real fix: tool-calling Qwen reliably omits free-text `message.content` once it
+decides to call a function, so the earlier "reasoning from the message" approach
+left the column empty for ~95% of real decisions. A required schema field the model
+must fill to satisfy the tool call is reliably populated. It's stored in
+`agent_actions.reasoning` (Postgres) and rendered in the option card's collapsible
+`<details>` element — no additional Qwen call, part of the same tool-calling response.
+
+---
+
+## The Qwen Swarm — Four Role-Scoped Specialists
+
+The decision cycle is not one generalist prompt holding all nine tools. Each
+trigger routes to a **named role that owns a disjoint subset of tools and cannot
+call outside it** — a hallucinated cross-domain action isn't caught after the
+fact; the tool simply isn't on that role's menu. Same single `qwen-max` call per
+event: the scoping adds structure, not tokens.
+
+| Role | Owns | Tools (and only these) |
+|------|------|------------------------|
+| **Pricing Strategist** | live pricing, flash sales, scarcity | `flash_sale`, `scarcity_price`, `price_rebalance` |
+| **Sales Rep** | cart recovery, dwell nudges, spotlight | `recovery_offer`, `cart_dwell_nudge`, `feature_product` |
+| **Store Curator** | layout + copy presentation | `layout_morph`, `copy_rewrite` |
+| **Inventory Overseer** | catalog hygiene | `duplicate_merge` |
+
+Two behaviors make it a *team*:
+
+- **Escalation** (`qwen_roles.py · ESCALATE_TOOL`) — a role hands a decision to
+  another specialist when the fix is outside its own tools. The Store Curator,
+  seeing a product with real interest but no conversions, escalates to the Pricing
+  Strategist via a typed `escalate_to_role` tool instead of forcing a useless
+  layout change.
+- **Priority arbitration tuned by learning** (`learning.compute_effective_priority`)
+  — each role has a base priority; this store's approval history nudges it up or
+  down, so competing signals resolve the way *this* merchant has taught the system.
+
+**Technical implementation:** `get_role_tools(role)` filters `DECISION_TOOLS` to
+the role's `tool_names` (plus `ESCALATE_TOOL` when `can_escalate_to` is set) before
+the call. `role_for_anomaly()` maps a reactive trigger's anomaly prefix to a role;
+`decision_engine.run_decision_cycle` accepts the scoped tool list + role-specific
+prompt intro. The role that proposed each decision is persisted on
+`AgentActionDB.role` and shown on the Decision Trace page.
+
+---
+
+## Per-Role Learning — Measurable, Visible Adaptation
+
+Beyond remembering *what happened* (Decision Memory, above), the swarm quantifies
+*what to do differently per role*. `learning.py` aggregates how this merchant has
+resolved a role's past proposals — kept vs. dismissed, and the discount level kept
+vs. rejected — into a directive injected into that role's next prompt:
+
+> *"Learned for this store: the merchant kept 2 of 6 recent Pricing Strategist
+> proposals. Kept offers averaged 9% off vs. 35% for dismissed ones — lead with
+> about 9%."*
+
+Proposals measurably converge on what this store accepts. The stance is stored on
+each decision's `context_snapshot` and rendered on the Decision Trace page, so the
+adaptation is *visible*, not asserted — and it stays silent below 3 resolved
+proposals (no wasted tokens, no dishonest claim). A stateless one-shot agent cannot
+produce this; it has no history.
+
+**Technical implementation:** `compute_role_learning(records, role)` classifies each
+resolved `AgentActionDB` row (executed/approved/approved_then_modified → kept;
+dismissed → dismissed; pending/blocked → ignored) and averages the kept vs.
+dismissed `discount_percent`. `render_learned_stance()` emits the directive (empty
+below `MIN_SIGNAL=3`); `run_decision_cycle` appends it to the memory block and
+stores it on the snapshot. Wrapped in try/except — learning can never block a
+decision.
+
+---
+
+## Graduated Trust + The Decision Ledger
+
+**Graduated autonomy** (`autopilot_trust.py`). Human-in-the-loop is the default, but
+trust is *earned per (store, product)*. Only `price_rebalance` — and only a move
+already inside the interceptor-clamped safe band — can auto-apply once a trust
+streak is earned; everything else still takes the option-card path. **Trust only
+removes the gate — it never widens the safe range** — and a single dismissal resets
+the streak. An auto-applied move surfaces as an `action_auto_executed` FYI card, so
+nothing happens invisibly. (Full autonomy everywhere would score *worse* on Track 4;
+the bound is deliberate.)
+
+**The Decision Ledger** (`receipts.py`). Every lifecycle transition — proposed,
+blocked, approved, executed, dismissed — is written to a hash-chained, HMAC-signed
+Postgres log. Because each entry attests to the action row's *real current values*,
+`verify_row_consistency()` detects a quietly-edited action row after the fact — not
+just reordering/deletion of the log itself (`verify_chain()`). Both approval
+surfaces (REST + MCP) write a ledger entry, so neither can mutate status without a
+receipt. Verify offline: `python scripts/verify_ledger.py <store>`.
+
+---
+
+## Production-Grade Details (the parts that aren't a demo shortcut)
+
+Small, load-bearing engineering that shows this is built to actually run a store,
+not just to pass a happy-path demo:
+
+- **Oversell-proof concurrent checkout** (`orders.py`) — checkout decrements stock
+  with a **conditional `UPDATE ... WHERE stock >= qty`**, so two shoppers racing for
+  the last unit can't both succeed. Real transactional correctness under concurrency.
+- **Cart price-snapshot** (`cart.py`) — the effective price is frozen into the cart
+  line **at add-time**, so the autopilot morphing prices live can never change a
+  cart mid-checkout. It's what keeps constant repricing honest for the shopper.
+- **Self-healing SystemState** (`delta.py`) — a state blob cached before a schema
+  field existed **backfills a sensible default and re-validates** instead of 500-ing
+  the store forever. Graceful schema evolution, not a crash.
+- **Permanent image mirroring** (`image_mirror.py`) — an externally-hosted product
+  image is copied into Elevate's own OSS bucket once, so the storefront never breaks
+  when a third-party host goes down.
+- **Durable daily price-history rollup** (`pricing_signals.py`) — capped/TTL'd Redis
+  behavior events are rolled into permanent per-product-per-day Postgres rows. This
+  is the substrate that lets dynamic pricing reason over a product's *real history*,
+  not a 30-second window.
+- **Store-wide search-demand tracking** (`search_tracker.py` + `SearchDemandInsights`)
+  — every store search is logged, **especially zero-result queries** (products the
+  store doesn't carry). A concrete "what to stock next" signal, with a full merchant
+  UI, feeding proactive review.
+- **Per-brand customer accounts** (`customer_auth.py` + `CustomerAccount`) — beyond
+  the guest cart, storefronts have real registered shopper accounts scoped per store
+  (the same email at two stores = two separate accounts, a distinct `role=customer`
+  cookie).
+- **Advisory catalog review with strict redaction** (`catalog.py`) — the catalog
+  pricing audit sends Qwen names/categories/prices only — never `cost_price`, margin,
+  or PII.
 
 ---
 

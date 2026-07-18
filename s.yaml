@@ -1,8 +1,11 @@
-# Serverless Devs config for Alibaba Cloud Function Compute (FC 3.0).
-# Fill in <PLACEHOLDERS>, then:  s deploy
+# NOTE: The PRODUCTION Elevate backend runs on Alibaba Cloud ECS — FastAPI,
+# PostgreSQL, and Redis as Docker containers on a single Hong Kong instance
+# (see the README "Stack" section). This Serverless Devs / Function Compute
+# (FC 3.0) config is an ALTERNATIVE deploy path kept for reference; it is not
+# the live deployment.
 #
-# See ALIBABA_DEPLOY.md for the full walkthrough. Secrets here should come from
-# CI/CD variables or `s` global vars in real use — do not commit real keys.
+# Fill in <PLACEHOLDERS>, then:  s deploy
+# Secrets here should come from CI/CD variables or `s` global vars — never commit real keys.
 
 edition: 3.0.0
 name: elevate

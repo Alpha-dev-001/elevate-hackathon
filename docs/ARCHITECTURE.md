@@ -6,6 +6,11 @@
 > the brand, *runs* the store from live behavior, and *learns* what works for
 > each store over time. The merchant stays in control through option cards, not
 > chat: **human-in-the-loop at every critical decision** (Track 4: Autopilot Agent).
+>
+> "Runs the store" is concrete: a **swarm of four role-scoped Qwen specialists**
+> (§2c) that reason, escalate to each other, and adapt from per-store learning —
+> behind a **structural guard + 3-layer interceptor** they cannot override (§3), a
+> **graduated-trust gate** (§3b), and a **tamper-evident decision ledger** (§3b).
 
 These diagrams render natively on GitHub. To export a PNG for the demo/Devpost,
 paste any block into <https://mermaid.live> or use the VS Code Mermaid extension.
@@ -77,7 +82,7 @@ hosted anywhere (only the backend must run on Alibaba per the hackathon rules).
 
 ---
 
-## 2. The Qwen cognitive loop — 6+ distinct call types, 2 models
+## 2. The Qwen cognitive loop — 7 distinct call types, 2 models
 
 This is the heart of the "60%" (Technical Depth + Innovation). One logo becomes
 a fully-branded, self-running store, and **the loop closes** so Qwen gets smarter
@@ -177,7 +182,7 @@ Merchant approves Qwen action (e.g. flash_sale at 15%)
 ```
 Any Qwen call that benefits from memory (vision, descriptions, decisions):
   → get_memory(merchant_id) reads from Redis (O(1)), falls back to Postgres
-  → build_memory_context(entries, limit=5) formats last 5 as plain text:
+  → build_memory_context(entries, limit=8) formats the last 8 as plain text:
       "The merchant raised price from $80 to $95"
       "flash_sale at 15% → 3 orders, $127 revenue"
   → Context string injected into Qwen prompt (zero extra tokens when empty)
@@ -196,36 +201,151 @@ Any Qwen call that benefits from memory (vision, descriptions, decisions):
 | Outcome scheduling | `app/services/outcome_observer.py` | `schedule_observation()` — background task |
 | Outcome counting | `app/services/outcome_observer.py` | `observe_outcome()` — joins orders by `promo_id` |
 | Outcome summary | `app/services/outcome_observer.py` | `summarize_outcome()` — plain-text result |
-| DB table | `app/models/db.py` | `MerchantDB.qwen_memory` — JSONB column |
+| DB table | `app/models/db_models.py` | `MerchantDB.qwen_memory` — JSONB column |
 | Tests | `tests/test_memory.py` | Write/read/context/failure resilience |
 | Integration tests | `tests/test_memory_live.py` | Postgres + Redis round-trip |
 | Outcome tests | `tests/test_outcome_observer.py` | Scheduling + counting + summary |
 
 ---
 
-## 3. The Subconscious Interceptor — 3 layers, immutable
+## 2c. The Qwen swarm — four role-scoped specialists
 
-Every proposed action (Qwen's *or* the merchant's) passes through all three layers
-before it can take effect. Qwen authored Layer 1 at brand-generation time but can
-never override the stack.
+The decision cycle (call ⑤ above) is not one generalist prompt holding all nine
+tools. Each trigger routes to a **named role that owns a disjoint subset of tools
+and cannot call outside it** — a hallucinated cross-domain action isn't caught
+after the fact, the tool simply isn't on that role's menu. It's the same single
+`qwen-max` call per event either way: the scoping adds structure, not tokens
+(`get_role_tools` filters `DECISION_TOOLS` before the call).
+
+```mermaid
+flowchart TD
+    SIG["Signal (reactive OR proactive)"] --> ROUTER{"Role router<br/>role_for_anomaly() ·<br/>learned priority arbitration"}
+
+    ROUTER --> PS["💲 Pricing Strategist<br/>flash_sale · scarcity_price · price_rebalance"]
+    ROUTER --> SR["🛒 Sales Rep<br/>recovery_offer · cart_dwell_nudge · feature_product"]
+    ROUTER --> SC["🎨 Store Curator<br/>layout_morph · copy_rewrite"]
+    ROUTER --> IO["📦 Inventory Overseer<br/>duplicate_merge"]
+
+    SC -.->|"escalate_to_role()<br/>(real fix is a price change,<br/>not a layout change)"| PS
+
+    PS --> GUARD["→ Layer-0 guard → interceptor → trust gate → ledger → learn"]
+    SR --> GUARD
+    SC --> GUARD
+    IO --> GUARD
+
+    style PS fill:#1f2a44,color:#fff
+    style SR fill:#1f2a44,color:#fff
+    style SC fill:#1f2a44,color:#fff
+    style IO fill:#1f2a44,color:#fff
+    style ROUTER fill:#3b1f44,color:#fff
+    style GUARD fill:#6EE7B7,color:#000
+```
+
+Two behaviors make this a *team*, not four isolated prompts:
+
+- **Escalation** (`qwen_roles.py · ESCALATE_TOOL`) — a role can hand a decision to
+  another specialist when the real fix is outside its own tools. The Store Curator,
+  seeing a product with real interest but no conversions, escalates to the Pricing
+  Strategist via a typed `escalate_to_role` tool instead of forcing a layout change
+  that won't help.
+- **Priority arbitration tuned by learning** (`learning.compute_effective_priority`)
+  — each role has a base priority; this store's own approval history nudges it up or
+  down, so competing signals resolve the way *this* merchant has taught the system to.
+
+### Per-role learning — the measurable, visible half of the loop
+
+Beyond remembering *what happened* (§2b), the swarm quantifies *what to do
+differently per role*. `learning.py` aggregates how this merchant has resolved a
+role's past proposals — kept vs. dismissed, and the discount level kept vs.
+rejected — into a directive injected into that role's next prompt:
+
+> *"Learned for this store: the merchant kept 2 of 6 recent Pricing Strategist
+> proposals. Kept offers averaged 9% off vs. 35% for dismissed ones — lead with
+> about 9%."*
+
+Proposals measurably converge on what this store accepts. The stance is stored on
+each decision's `context_snapshot` and shown on the Decision Trace page, so the
+learning is *visible*, not asserted — and it stays silent below 3 resolved
+proposals (no wasted tokens, no dishonest claim). A stateless one-shot agent
+cannot produce this; it has no history.
+
+| Step | File | Function |
+|------|------|----------|
+| Role definitions + scoped tools | `app/services/qwen_roles.py` | `QwenRole`, `get_role_tools`, `ESCALATE_TOOL` |
+| Trigger → role routing | `app/services/qwen_roles.py` | `role_for_anomaly`, `role_for_action_type` |
+| Structural guard | `app/services/action_guard.py` | `validate_tool_args` |
+| Per-role learning | `app/services/learning.py` | `compute_role_learning`, `render_learned_stance`, `compute_effective_priority` |
+
+---
+
+## 3. The safety stack — a structural guard + a 3-layer interceptor, immutable
+
+Every proposed action (Qwen's *or* the merchant's) passes through the whole stack
+before it can take effect. Layer 0 makes a structurally-illegal action
+*unrepresentable* (a hallucinated value can't even become an action); Layers 1–3
+then govern a well-formed-but-aggressive action. Qwen authored Layer 1 at
+brand-generation time but can never override any of it — structural safety **and**
+runtime safety, belt and suspenders.
 
 ```mermaid
 flowchart LR
-    IN["Proposed action<br/>(Qwen decision · merchant edit · price change)"] --> L1
+    IN["Proposed action<br/>(Qwen tool call · merchant edit · price change)"] --> L0
 
+    L0["Layer 0 — Structural Guard<br/>action_guard.py · constrained Pydantic<br/>discount∈[0,100] · price&gt;0 · real target · closed enums"]
+    L0 -.->|illegal / hallucinated → declined| STOP
+    L0 -->|well-formed| L1
     L1["Layer 1 — Brand Guard<br/>Qwen-authored rules<br/>(color/layout coherence)"]
     L1 -->|flags, does not block| L2
     L2["Layer 2 — Business Constraints<br/>margin floor · discount ceiling<br/>→ auto-clamp + warn"]
     L2 --> L3
     L3["Layer 3 — System Safety<br/>price &lt; cost · stock &lt; 0 · expired promo<br/>→ HARD BLOCK"]
     L3 -->|passes| OUT["Applied · pushed to all sockets"]
-    L3 -.->|violation| STOP["Blocked (409) — surfaced to merchant"]
+    L3 -.->|violation| STOP["Blocked / declined — surfaced to merchant + ledger"]
 
+    style L0 fill:#8B5CF6,color:#fff
     style L1 fill:#FFD166,color:#000
     style L2 fill:#FFD166,color:#000
     style L3 fill:#FF6B6B,color:#000
     style OUT fill:#6EE7B7,color:#000
 ```
+
+**Layer 0 vs. the interceptor — a deliberate split.** The interceptor *clamps* a
+valid-but-too-aggressive value (a 60% discount pulled to the merchant's 40%
+ceiling) and *hard-blocks* on live business state (below cost). Layer 0 rejects a
+value that is not aggressive but *nonsensical* — a negative or >100% discount, a
+zero price, a phantom product id, a self-contradictory merge — the fingerprint of
+a hallucinated tool call, before it can become an `AgentAction` at all. Neither
+layer is redundant: a bad value that slipped past Layer 0 still hits the
+interceptor; a merely-aggressive value that passes Layer 0 still gets clamped.
+
+---
+
+## 3b. Graduated trust + the Decision Ledger
+
+**Graduated autonomy** (`autopilot_trust.py`). Human-in-the-loop is the default,
+but trust is *earned per (store, product)*. Only `price_rebalance` — and only a
+move already inside the interceptor-clamped safe band — can auto-apply once a
+trust streak is earned; every other action type, and every rebalance below the
+threshold or outside the band, still takes the option-card path. **Trust only ever
+removes the gate — it never widens the safe range** — and a single dismissal resets
+the streak. An auto-applied move surfaces as an `action_auto_executed` FYI card, so
+nothing happens invisibly. Full autonomy everywhere would score *worse* on Track 4;
+the design is deliberately bounded.
+
+**The Decision Ledger** (`receipts.py`). Every lifecycle transition — proposed,
+blocked, approved, executed, dismissed — is written to a hash-chained, HMAC-signed
+log in Postgres. Because each entry attests to the action row's *real current
+values*, a later check detects not just reordering or deletion of the log (standard
+hash-chain) but a quietly-edited action row *after the fact* (`verify_row_consistency`).
+Both approval surfaces — the REST routes and the MCP tools — write a ledger entry,
+so neither can mutate an action's status without a receipt. Verify offline:
+`python scripts/verify_ledger.py <store>`.
+
+| Concern | File | Function |
+|---|---|---|
+| Earned autonomy | `app/services/autopilot_trust.py` | `get_trust_streak`, `should_auto_apply`, `update_trust_streak` |
+| Audit chain | `app/services/receipts.py` | `append_receipt`, `verify_chain`, `verify_row_consistency` |
+| Offline verifier | `scripts/verify_ledger.py` | CLI over a store's full chain |
 
 ---
 

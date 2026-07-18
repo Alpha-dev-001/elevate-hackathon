@@ -80,6 +80,7 @@ UPDATES.md
 docs/Read.md
 docs/CHAIN.md
 docs/DEMO_SCRIPT.md
+docs/FINAL_DEMO_SCRIPT.md
 docs/VIDEO_GUIDE.md
 docs/DEMO_NARRATION.md
 docs/DEVPOST_SUBMISSION.md
@@ -88,6 +89,11 @@ docs/DEVPOST_ABOUT.md
 docs/DEVPOST_ADDITIONAL_INFO.md
 docs/architecture-sprint3.md
 docs/superpowers/
+# Internal presentation-prep — the 5/10 lens + capture checklist are our
+# playbook, never judge-facing.
+docs/PRESENTATION_STRATEGY.md
+docs/IMAGE_GALLERY.md
+docs/Diagram.md
 .impeccable/
 .claude/commands/
 # Internal build guide + operational setup runbooks — not judge-facing.

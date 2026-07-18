@@ -1,284 +1,307 @@
-# Elevate — Your store, alive.
+# Elevate — autonomous autopilot for running a store
 
-> AI-native commerce where Qwen is not a feature — it is the runtime.
-> Upload a logo. Qwen builds the brand, runs the store, and learns
-> from every decision.
+> The same relationship Claude Code has to writing software, applied to
+> commerce. Qwen doesn't assist the merchant — it **runs the store**:
+> reasoning over every signal the store produces, proposing and executing
+> changes behind a safety layer it cannot override, and getting better at
+> growing *that specific store* over time.
+>
+> The codebase is the body. **Qwen is the brain.**
 
-[License: MIT](./LICENSE)
-·
-[Built with Qwen](https://qwencloud.com)
-·
-[Alibaba Cloud](https://alibabacloud.com)
+[License: MIT](./LICENSE) · [Built with Qwen](https://qwencloud.com) · [Alibaba Cloud](https://alibabacloud.com)
 
-**300+ tests passing · 62 adversarial edge cases · 7 distinct Qwen call types (vision, tool-calling, brand gen, DSL composition, CSS, descriptions, decisions) · MCP server exposing the store to external agents**
+**A swarm of 4 role-scoped Qwen specialists · 2 models (incl. multimodal) · 10 typed tools · a Layer-0 structural guard + 3-layer interceptor + tamper-evident decision ledger · reactive *and* proactive triggers · per-store learning · 500+ backend tests across 105 test files · live Qwen benchmark: 100% valid, 5.6s avg**
 
-**Live Qwen benchmark (real API, not mocked): 100% valid rate across all 5 call types, avg 5.6s latency, 5/5 scenarios rated "good".** Reproduce it yourself: `docker compose exec api python -m tests.bench_live` — full breakdown in [BENCHMARKS.md](./BENCHMARKS.md).
+<!-- TODO(hero): 1280×640 — merchant terminal mid-decision, an option card visible + Decision Trace panel open. See docs/IMAGE_GALLERY.md #01 -->
+![Elevate — autonomous autopilot for running a store](docs/images/01-hero.png)
 
----
-
-## At a glance
-
-**1. Qwen authors its own constraints.**
-At brand generation time, Qwen writes the guard rules that govern its
-future behavior — color conflicts, layout coherence, voice consistency.
-These rules are enforced by deterministic Python (Pydantic + Zod +
-3-layer interceptor), not by prompting. The AI literally cannot violate
-the brand it created.
-
-**2. The store runs itself in real-time.**
-Customer browser events (click, hover, cart_add) flow through WebSocket
-→ Redis velocity tracking → anomaly detection → qwen-max decision cycle
-→ option card in the merchant terminal → approve → storefront morphs.
-The trigger is deterministic by design — a configurable velocity
-threshold. The autonomy is in the response: Qwen reasons about which
-product, what action, what discount, in what words — informed by every
-prior approval and rejection.
-
-**3. A broken AI response cannot produce a broken store.**
-Three defense layers guarantee a renderable, on-brand storefront
-regardless of what Qwen returns: variant coercion, structural
-normalization, and deterministic fallback. If the Qwen call fails
-entirely, a brand-seeded hash generates a distinct layout.
-The customer never sees a blank page.
-
-**4. Pricing that reasons, not just reacts.**
-A merchant sets a baseline price once. Qwen continuously reasons about
-where the *live* price should actually sit — up or down, not just
-discount-down — from each product's own sales history, borrowing a
-similar product's history while it's new, always inside a merchant-set
-range the interceptor enforces on every move. A graduated trust counter
-earns Qwen the right to apply small, already-safe moves without a human
-tap over time — trust only ever removes the gate, it never widens the
-range — while an engagement-without-conversion signal walks a misjudged
-move back toward baseline on its own, no human intervention required.
-
-### What Qwen actually does here vs. a typical AI integration
-
-| What most "AI-powered" apps do | What Elevate does |
-| --- | --- |
-| Qwen answers questions in a chat box | Qwen builds the entire store from a logo |
-| One model, one job (text in → text out) | Two models, **7+ distinct call types** (vision, tool-calling, brand gen, DSL composition, CSS, descriptions, decisions) |
-| AI suggests, human implements manually | AI proposes → human approves → **store morphs live** |
-| Generic safety rules written by developers | **Qwen authors its own guard rules** at brand creation — enforced by deterministic Python |
-| No memory between sessions | Every merchant correction + outcome feeds the **next decision cycle** |
-| JSON output parsed with regex | **Native tool-calling API** — Qwen selects which tool, fills typed parameters |
+**▶ [3-minute demo video](TODO_DEMO_VIDEO_URL)**  ·  **🌐 [Live backend](http://47.243.86.14/api/health)** (on Alibaba Cloud ECS)  ·  **🖼 [Screenshots](TODO_DEVPOST_GALLERY_URL)**
 
 ---
 
-## Why this hits Track 4's mandate
+## The one result that explains the whole architecture
 
-Track 4 asks for agents that "**automate real-world business workflows
-end-to-end with human-in-the-loop checkpoints at critical decisions.**"
-Here's the feature-to-criterion map, not just a claim:
+Same `qwen-max` model. Same seven scenarios — each with genuinely different
+cost, price, margin floor, and discount ceiling. We ran it two ways: **bare**
+(the raw model proposal, nothing between it and execution) and **through
+Elevate's pipeline** (role-scoped tool call → structural guard → interceptor).
+
+> **The bare model proposed the *identical* flat `10%` discount on all seven.**
+> The exact same model, run through Elevate, reasoned each one to a different,
+> provably-safe value: **2.89%, 40.0%, 11.11%, 10.0%, 10.0%, 15.0%**, and "no
+> discount dimension" for a catalog-merge control.
+
+An unguarded LLM doesn't reason about the cost in front of it — it reaches for
+a safe-sounding round number and calls it a day. *The architecture is what
+makes Qwen actually reason.* Real API calls, reproducible:
+`python -m tests.bench_live` — full breakdown in [BENCHMARKS.md](./BENCHMARKS.md).
+
+This is the thesis of the whole project: **the intelligence isn't the model,
+it's the model wired into a system that forces it to be right.**
+
+---
+
+## How it actually works
+
+Elevate is not "one model with a system prompt." It's a small operations team
+of role-scoped Qwen specialists, each gated by an immutable safety stack, fed
+by two equally-first-class trigger sources:
+
+```
+Customer event (WebSocket) ─┐                         reactive
+                            ├─► signal ─► ROLE ROUTER ─► Qwen specialist (role-scoped tools only)
+Scheduled tick (proactive) ─┘   │                              │
+   pricing · scarcity · catalog │                              │ proposes ONE typed tool call
+   health, checked on a cadence │                              ▼
+                                │                    ┌─ LAYER 0 · Structural guard ─┐  illegal state?
+                                │                    │  (discount∈[0,100], price>0,  │  → declined, never
+                                │                    │   real target, closed enums)  │     becomes an action
+                                │                    └───────────────┬───────────────┘
+                                │                                    ▼
+                                │                    ┌─ 3-LAYER INTERCEPTOR (immutable) ─┐
+                                │                    │  1 Brand guard (Qwen-authored)     │
+                                │                    │  2 Business constraints → clamp    │
+                                │                    │  3 System safety → hard block      │
+                                │                    └───────────────┬────────────────────┘
+                                │                                    ▼
+                                │                          TRUST GATE — earned?
+                                │                        ┌───────────┴───────────┐
+                                │                 human-in-the-loop        auto-apply (bounded,
+                                │                 option card, merchant     already-safe moves only)
+                                │                 approves / rejects              │
+                                │                        └───────────┬───────────┘
+                                ▼                                    ▼
+                        DECISION LEDGER  ◄──── every status change ──► EXECUTE → storefront morphs
+                    (hash-chained, HMAC, Postgres)                        │
+                                ▲                                         ▼
+                                └──────────── LEARN ◄──── outcome + merchant verdict
+                                        per-role stance shifts the next proposal
+```
+
+Every arrow in that diagram is real, tested code — not a roadmap.
+
+<!-- TODO(diagram): rendered version of the pipeline above (Mermaid export or designed graphic), 1600px wide. See docs/IMAGE_GALLERY.md #02 -->
+![The Elevate decision pipeline — signal to ledger to learning](docs/images/02-pipeline.png)
+
+---
+
+## The swarm: four role-scoped specialists
+
+Instead of one generalist prompt holding all nine tools, each trigger routes to
+a **named role that owns a disjoint subset of tools and cannot call outside it.**
+A hallucinated cross-domain action isn't caught after the fact — the tool
+literally isn't on the model's menu for that role.
+
+| Role | Owns | Tools (and *only* these) |
+| --- | --- | --- |
+| **Pricing Strategist** | live pricing, flash sales, scarcity | `flash_sale`, `scarcity_price`, `price_rebalance` |
+| **Sales Rep** | cart recovery, dwell nudges, new-arrival spotlight | `recovery_offer`, `cart_dwell_nudge`, `feature_product` |
+| **Store Curator** | layout + copy presentation | `layout_morph`, `copy_rewrite` |
+| **Inventory Overseer** | catalog hygiene | `duplicate_merge` |
+
+Two behaviors make this a *team*, not four isolated prompts:
+
+- **Escalation.** A role can hand a decision to another specialist when the real
+  fix is outside its own tools — the Store Curator, seeing a product with real
+  interest but no conversions, can escalate to the Pricing Strategist via a typed
+  `escalate_to_role` tool instead of forcing a layout change that won't help.
+- **Priority arbitration tuned by learning.** Each role has a base priority;
+  this store's own approval history nudges it up or down (a role the merchant
+  keeps agreeing with gets a louder voice), so competing signals resolve the way
+  *this* merchant has taught the system to resolve them.
+
+Same one Qwen call per triggered event either way — the scoping adds structure,
+not tokens.
+
+---
+
+## Why a broken (or hallucinating) model cannot break the store
+
+Three independent layers stand between any proposal and the live store. **Qwen
+authored parts of this layer, but it can never override it.**
+
+1. **Layer 0 — Structural guard.** Every tool call is parsed through a
+   constrained Pydantic model *before* it can become an action: discount ∈
+   [0, 100], price > 0, duration > 0, targets that must resolve to a real
+   product, closed enums for copy targets. An illegal value is *unrepresentable*
+   — it declines the cycle instead of being caught downstream.
+2. **The 3-layer interceptor (immutable).** Brand guard (fires Qwen's own
+   brand-consistency warnings) → business constraints (auto-**clamps** an
+   over-aggressive discount to the merchant's ceiling) → system safety
+   (**hard-blocks** below-cost, negative-stock, expired-promo moves, no
+   exceptions).
+3. **Decision Ledger.** Every lifecycle transition — proposed, blocked,
+   approved, executed, dismissed — is written to a hash-chained, HMAC-signed
+   Postgres log that attests to the action row's *real current values*, so a
+   later check detects tampering, reordering, or a quietly-edited history.
+   Verify offline: `python scripts/verify_ledger.py <store>`.
+
+Structural safety **and** runtime safety **and** an audit trail — belt,
+suspenders, and a receipt.
+
+---
+
+## The store learns — something a stateless agent structurally cannot do
+
+After an action resolves, the outcome and the merchant's verdict feed the next
+decision. Beyond remembering *what happened*, Elevate quantifies *what to do
+differently*: for each role it aggregates how this merchant has resolved that
+role's past proposals — kept vs dismissed, and the discount level kept vs
+rejected — into a directive injected into the role's next prompt:
+
+> *"Learned for this store: the merchant kept 2 of 6 recent Pricing Strategist
+> proposals. Kept offers averaged 9% off vs 35% for dismissed ones — lead with
+> about 9%."*
+
+Proposals measurably converge on what *this* store accepts. The stance is stored
+on each decision's context snapshot and shown on the **Decision Trace** page, so
+the learning is visible, not a claim. It rides the existing decision call — zero
+extra tokens — and stays silent until there's enough history to be honest.
+
+---
+
+## Human-in-the-loop is the architecture, not a button
+
+Track 4 asks for agents that *"automate real-world business workflows end-to-end
+with human-in-the-loop checkpoints at critical decisions."* In Elevate the option
+card **is** that checkpoint — it's the only path a gated decision can take to
+reach the live storefront. The merchant approves or rejects, and **both outcomes
+are written to the ledger and the learning loop.** Trust is *earned per
+(store, product)*: only small, already-interceptor-safe pricing moves auto-apply,
+trust only ever removes the gate — it never widens the safe range — and a single
+dismissal resets it. Full autonomy everywhere would score *worse* on this track,
+and the design reflects that on purpose.
 
 | Judging criterion | Weight | Where Elevate proves it |
 | --- | --- | --- |
-| Technical Depth & Engineering | 30% | 2 models, **7 distinct Qwen call types**, native tool-calling (9 typed tools), 3-layer interceptor, Redis + Postgres two-layer state, 300+ tests |
-| Innovation & AI Creativity | 30% | Qwen authors its own brand guard rules at creation time — not developer-written safety rules. LayoutDSL gives every store a genuinely distinct layout, not a template swap |
-| Problem Value & Impact | 25% | Every independent brand deserves a store that looks like *them*, not a Shopify theme — and the store improves itself without a merchant hiring a CRO agency |
-| Presentation & Documentation | 15% | Architecture diagram ([docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)), full test suite ([docs/TESTING.md](./docs/TESTING.md)), technical deep dive ([docs/TECHNICAL-DEEP-DIVE.md](./docs/TECHNICAL-DEEP-DIVE.md)) |
-
-The human-in-the-loop checkpoint isn't a button that exists for show — it's
-the only path a decision can take to reach the live storefront. Qwen
-proposes, the interceptor validates, the merchant approves or rejects, and
-**both outcomes are written back into memory** and read by the next
-decision cycle. See [Qwen Memory](./docs/TECHNICAL-DEEP-DIVE.md#decision-memory--not-fine-tuning-by-design).
+| Technical Depth & Engineering | 30% | 4 role-scoped agents with disjoint tools + escalation + learned arbitration · Layer-0 guard + 3-layer interceptor + hash-chained ledger · 2 models, 7 distinct Qwen call types, native tool-calling · concurrency-safe checkout + self-healing state · Redis + Postgres · 500+ tests |
+| Innovation & AI Creativity | 30% | A Qwen *swarm* that self-governs: roles that can't exceed their tools, escalate to each other, and adapt priority + proposals from per-store learning — plus an MCP server exposing the store to external agents |
+| Problem Value & Impact | 25% | A real store runs and improves itself without the merchant hiring a CRO agency — reactive to live behavior, proactive on pricing/scarcity/catalog health |
+| Presentation & Documentation | 15% | [Architecture](./docs/ARCHITECTURE.md) · [Technical deep dive](./docs/TECHNICAL-DEEP-DIVE.md) · [Benchmarks](./BENCHMARKS.md) · [Testing](./docs/TESTING.md) |
 
 ---
 
-## A real decision cycle, not a mockup
+## Reactive *and* proactive — both first-class
 
-This is the actual output of `narrative_from_tool()` — the function that
-turns a Qwen tool call into what the merchant sees on an option card.
-Verified by `test_tools.py::test_flash_sale_narrative`, not written for
-this README:
+A signal is a signal regardless of source. Elevate acts on what's happening
+*right now* and initiates on its own without waiting for an event:
 
-```
-Input (from a real velocity-spike anomaly):
-  tool:          propose_flash_sale
-  args:          { discount_percent: 15, duration_minutes: 1440 }
-  product:       "Leather Slides"
-  anomaly:       "Velocity spike: 12 views in 30s"
-  brand_voice:   "warm and confident"
-
-Output (rendered on the option card):
-  title:         "Flash Sale: 15% off Leather Slides"
-  description:   "24.0-hour flash sale to capture velocity spike"
-  trigger:       "Velocity spike: 12 views in 30s"
-  brand_check:   "Aligned with warm and confident voice"
-```
-
-Qwen chose the tool, the discount, and the duration from the anomaly and
-the store's live state (`reasoning` is stored verbatim alongside this and
-shown on demand in the terminal) — `narrative_from_tool()` is the
-deterministic formatting layer downstream of that decision, so the option
-card text is always well-formed even if Qwen's free-text reasoning is not.
+- **Reactive** — a velocity spike, a cart abandoning, a cart dwelling untouched,
+  a catalog anomaly. Customer DOM events (`view`, `hover`, `cart_add`,
+  `purchase`, `abandon`) stream over WebSocket → Redis velocity tracking →
+  threshold crossing → the right role's decision cycle.
+- **Proactive** — pricing reasoned on a cadence against each product's baseline,
+  a scarcity check on low-stock high-demand items, catalog health / duplicate
+  scans — caught before a merchant would ever notice, folded into a per-store
+  tick.
 
 ---
 
-## Demo
+## The spice on top: Qwen builds the store it then runs
 
-> **[Demo video]** — *[link coming — recording in progress]*
->
-> **[Live instance]** — *[link coming — deploying to Alibaba Cloud FC]*
-
-### What happens in the 3-minute demo
+The autopilot is the product. But the same brain also *builds* the storefront
+it operates — which is what makes every decision above land somewhere real and
+visibly distinct, not on a Shopify theme:
 
 ```
-0:00  Merchant uploads a logo
-0:15  Qwen analyzes it, generates full brand — store shell appears live
-0:40  Merchant drops product photos — Qwen reads every one
-1:20  Store goes live — customer session begins
-2:00  Velocity spike detected — Qwen fires decision cycle
-2:20  Merchant taps Approve — storefront morphs instantly
-2:40  Outcome measured — Qwen learns from the result
-3:00  Done
+Logo → qwen-vl-max reads geometry, palette, mood
+     → qwen-max generates the brand: palette, voice, SVG icons, and the guard
+       rules it will later be held to (the AI literally cannot violate the brand
+       it authored — those rules are enforced by deterministic Python)
+     → a LayoutDSL composes a genuinely distinct store (not a template swap) —
+       no two brands get the same store
+     → merchant drops a folder of raw phone photos → qwen-vl-max reads each into a
+       structured product: a sellable name from what it can see, a description in
+       the store's brand voice, category, the colorways/variants in the shot, and a
+       price anchored to the merchant's baseline (never a scraped MSRP) — and it
+       flags low-confidence reads for review instead of guessing wrong
+     → a client-side perceptual hash (aHash, ~2ms/image) dedups near-identical
+       shots into one product before a single token is spent
+     → store goes live → the autopilot above takes over
 ```
+
+That product-vision call is itself a sophisticated use of Qwen: one photo in,
+a full catalog entry out — *naming, describing, categorizing, and variant-detecting*
+from pixels, while knowing what **not** to guess (it won't invent a resale price it
+can't see). The adversarial vision suite proves it stays graceful on the messy real
+world too — a selfie, a blank image, a garbage price all degrade to "needs review,"
+never a silent wrong product going live.
+
+Seven distinct Qwen jobs power this (logo analysis · brand generation · LayoutDSL
+composition · scoped CSS · product vision · batched descriptions · decision
+cycles) — two models, never seven calls to the same prompt. If a Qwen call fails
+entirely, variant coercion → structural normalization → a brand-seeded
+deterministic fallback still yield a renderable, on-brand store. The customer
+never sees a blank page.
 
 ---
 
-## What makes Elevate different
+## What Elevate is NOT (to prevent common misreads)
 
-Most AI commerce tools bolt a chatbot onto a Shopify clone. You ask
-questions, get answers, then go do the work yourself.
-
-Elevate is the opposite. Qwen builds the store from a single logo
-upload, defines the brand rules, catalogs products from photos,
-watches customer behavior in real-time, and surfaces decisions as
-option cards — not chat. The merchant stays in control. Qwen does
-the work.
-
-```
-Logo → qwen-vl-max reads it
-     → qwen-max generates brand (palette, voice, guard rules, layout)
-     → Store shell appears live
-     → Merchant drops product photos
-     → qwen-vl-max identifies each (Vision Fingerprinting deduplicates)
-     → Store goes live
-     → Customer session begins
-     → Telemetry streams in real-time
-     → Qwen detects patterns, proposes actions
-     → Merchant taps Approve
-     → Storefront morphs instantly
-     → Qwen remembers every decision for next time
-```
-
----
-
-## What Elevate is NOT
-
-To prevent common misreads:
-
-- **No video processing.** Customer behavior = discrete WebSocket DOM
-  events (`view`, `hover`, `cart_add`, `purchase`, `abandon`) — not
-  video frames, not camera feeds.
-- **No physical stores.** Pure online commerce. Browser only.
-- **"Vision" = static image analysis.** `qwen-vl-max` analyzes uploaded
-  product photos — still images, not live video.
-
-**What this doesn't do yet** (honest scope — it's a hackathon, not a product):
-no payment processing, no multi-tenant isolation, no production-grade RBAC,
-no order fulfillment. It proves the autopilot concept end-to-end — a real
-merchant uploading a real logo gets a real store that runs itself. That's
-the thesis, and it works.
-
----
-
-## Two-Model Architecture
-
-Two Qwen models. Each chosen for what it does best. No routing complexity.
-
-| Task                                      | Model           | Why                                                        |
-| ----------------------------------------- | --------------- | ---------------------------------------------------------- |
-| Logo analysis + product identification    | **qwen-vl-max** | Multimodal — reads images, identifies products from photos |
-| Brand generation, descriptions, decisions | **qwen-max**    | Best quality text, structured JSON output                  |
-
-**Every Qwen call in the system — 7 distinct jobs, not 7 calls to the same prompt:**
-
-1. **Logo analysis** (VL) — geometry, palette, mood from one image
-2. **Brand generation** — palette, typography, voice, guard rules, SVG icons
-3. **Layout DSL composition** — section order, variants, nav style
-4. **Custom CSS** — scoped micro-interactions (sanitized before storage)
-5. **Product vision** (VL) — identify + describe from photo, price anchored
-6. **Batched descriptions** — 20 products per call, parallelized chunks
-7. **Decision cycles** — native tool-calling (9 typed tools), memory-informed
-
-**Vision Fingerprinting** — before any image reaches Qwen, a perceptual
-hash (aHash, 64-bit) runs client-side in `fingerprint.ts`. Near-duplicate
-photos collapse into one product with multiple images. Hamming distance
-≤ 5 = near-duplicate. ~2ms per image. Zero wasted tokens.
-
-Both models are called via OpenAI-compatible chat completions with
-`response_format: {type: "json_object"}` for structured output.
-Responses are validated through Pydantic — malformed output triggers one
-retry before falling back to deterministic defaults.
+- **No video.** "Vision" = `qwen-vl-max` on still uploaded images. Customer
+  behavior = discrete WebSocket DOM events, not camera feeds or video frames.
+- **No template store.** Every store's layout is composed per brand, not themed —
+  no two stores are the same.
+- **It *is* multi-merchant — and multi-account.** Per-merchant auth (JWT in an
+  httpOnly cookie + bcrypt), every table scoped to `merchant_id`, Redis keys
+  namespaced per merchant. Storefronts also have real **per-brand shopper accounts**
+  (the same email at two stores = two separate accounts) alongside the guest cart.
+- **Honest hackathon scope** — no payment processing, no order fulfillment, and
+  product variants are *detected* (a red vs. blue listing won't be wrongly merged)
+  but not yet selectable on the storefront. It proves the autopilot end-to-end:
+  a real merchant uploads a real logo and gets a real store that runs itself.
 
 ---
 
 ## Stack
 
-| Layer     | Technology                                                               |
-| --------- | ------------------------------------------------------------------------ |
-| Frontend  | Next.js 15, TypeScript, Tailwind, Framer Motion, Zustand                 |
-| Backend   | FastAPI, Python 3.11, Pydantic v2, SQLAlchemy (async)                    |
-| AI        | **qwen-vl-max** (vision) + **qwen-max** (text/decisions)                 |
-| Real-time | WebSocket (full-duplex, event-driven, zero polling)                      |
-| Database  | PostgreSQL (Alibaba Cloud RDS) — persistent source of truth              |
-| Cache     | Redis (Alibaba Cloud Tair) — telemetry, sessions, state                  |
-| Storage   | Alibaba Cloud OSS — logos, product images (presigned PUT, never through backend) |
-| Deploy    | Alibaba Cloud Function Compute (serverless) + Docker Compose (local)     |
+| Layer | Technology |
+| --- | --- |
+| Frontend | Next.js 15, TypeScript, Tailwind, Framer Motion, Zustand |
+| Backend | FastAPI, Python 3.11, Pydantic v2, SQLAlchemy (async) |
+| AI | **qwen-vl-max** (vision) + **qwen-max** (text / decisions), OpenAI-compatible tool-calling |
+| Real-time | WebSocket (full-duplex, event-driven, zero polling) |
+| Database | PostgreSQL (Alibaba Cloud RDS) — persistent source of truth |
+| Cache | Redis (Alibaba Cloud Tair) — telemetry, sessions, velocity, pending actions |
+| Storage | Alibaba Cloud OSS — logos & product images (presigned PUT, never through the backend) |
+| Deploy | Alibaba Cloud (backend live on ECS) + Docker Compose (local) |
+| Agents | MCP server (FastMCP) exposing the store to external agents |
 
-**300+ tests passing · 62 adversarial edge cases · 5/5 Qwen benchmark scenarios passing live (100% valid rate) · MCP server for external agent integration**
+**Proof of deployment** — the backend runs on Alibaba Cloud ECS (Hong Kong), and the health endpoint answers live:
 
----
-
-## Architecture
-
-See **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** for the full
-system design with Mermaid diagrams.
+![Elevate backend running on Alibaba Cloud ECS, health check returning ok](docs/images/15-alibaba-deploy.png)
 
 ```
 elevate/
 ├── storefront-ui/          # Next.js 15 frontend
-│   ├── app/
-│   │   ├── (onboarding)/  # Setup, brand review, products (5-step flow)
-│   │   ├── terminal/      # Merchant command center (decisions, attribution)
-│   │   ├── builder/       # Point-and-click store builder
-│   │   └── s/[slug]/      # Public storefront (DSL-rendered, themed)
-│   ├── components/        # 80+ React components
-│   ├── lib/
-│   │   ├── ws.ts          # WebSocket client
-│   │   ├── store.ts       # Zustand global state
-│   │   └── fingerprint.ts # Vision Fingerprinting (perceptual dedup)
-│   └── types/schemas.ts   # Zod schemas (mirror Pydantic exactly)
-│
+│   ├── app/                # onboarding · terminal (decisions, attribution) · builder · s/[slug] storefront
+│   ├── components/         # 80+ React components
+│   └── lib/                # ws.ts · store.ts (Zustand) · fingerprint.ts (perceptual dedup)
 └── analytics-brain/        # FastAPI backend
-    ├── app/
-    │   ├── core/          # Config, Redis, WebSocket manager, security
-    │   ├── models/        # Pydantic schemas (source of truth) + DB models
-    │   ├── routers/       # 13 routers — products, onboarding, agent, behavior
-    │   └── services/      # 18 services — Qwen, brand, vision, interceptor, telemetry
-    └── tests/             # 29 test files (unit + integration + adversarial + benchmarks)
+    └── app/
+        ├── models/         # Pydantic schemas (source of truth) + DB models
+        ├── routers/        # products · onboarding · agent · behavior · …
+        └── services/       # decision_engine · qwen_roles · action_guard · interceptor ·
+                            #  learning · autopilot_trust · receipts (ledger) · pricing · mcp_server · …
 ```
 
 ---
 
-## Deep Dives
+## Deep dives
 
-The README keeps the pitch tight. Everything below lives in dedicated
-docs for anyone who wants to go deeper.
+The README keeps the pitch tight. Everything goes deeper in dedicated docs.
 
 | Topic | Where |
-| ----- | ----- |
-| **How it works** — onboarding, 3-layer interceptor, fault-tolerant storefront, CSS sanitization, telemetry pipeline, product vision, memory loop, catalog audit, MCP server, token efficiency | [docs/TECHNICAL-DEEP-DIVE.md](./docs/TECHNICAL-DEEP-DIVE.md) |
-| **Testing** — 48 test files, adversarial suites, benchmarks | [docs/TESTING.md](./docs/TESTING.md) |
-| **Live Qwen benchmarks** — real API run, latency + validity per call type, reproducible | [BENCHMARKS.md](./BENCHMARKS.md) |
+| --- | --- |
+| **How it works** — interceptor, guard, roles, learning, MCP, telemetry, token efficiency | [docs/TECHNICAL-DEEP-DIVE.md](./docs/TECHNICAL-DEEP-DIVE.md) |
+| **Live Qwen benchmarks** — real API, latency + validity, guarded-vs-bare ablation | [BENCHMARKS.md](./BENCHMARKS.md) |
 | **Architecture diagrams** — Mermaid flowcharts, data flow | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
+| **Testing** — 105 test files (78 backend, 27 frontend), adversarial suites, benchmarks | [docs/TESTING.md](./docs/TESTING.md) |
 | **Qwen model usage** — which models, which jobs, token costs | [QWEN_USAGE.md](./QWEN_USAGE.md) |
 
 ---
 
-## Getting Started
+## Getting started
 
 ```bash
 git clone https://github.com/Alpha-dev-001/elevate-hackathon
@@ -286,37 +309,30 @@ cd elevate
 
 # Backend
 cd analytics-brain
-cp .env.example .env      # Fill in Qwen API key, OSS credentials, DB URL
+cp .env.example .env      # Qwen API key, OSS credentials, DB URL
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 9000
+uvicorn app.main:app --port 9000
 
 # Frontend (separate terminal)
 cd ../storefront-ui
 cp .env.example .env.local
-npm install
-npm run dev
+npm install && npm run dev
 ```
 
 Open `http://localhost:3000/setup` to start onboarding.
-
-### Environment Variables
 
 ```bash
 # Qwen Cloud
 QWEN_API_KEY=sk-...
 QWEN_VL_MODEL=qwen-vl-max
 QWEN_TEXT_MODEL=qwen-max
-
 # Alibaba Cloud OSS
 OSS_REGION=cn-hongkong
 OSS_ACCESS_KEY_ID=...
 OSS_ACCESS_KEY_SECRET=...
 OSS_BUCKET=elevate-assets
-
-# Database
+# Data
 DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/elevate
-
-# Redis
 REDIS_URL=redis://localhost:6379
 ```
 
@@ -324,16 +340,9 @@ REDIS_URL=redis://localhost:6379
 
 ## Hackathon
 
-Built for the **Global AI Hackathon Series with Qwen Cloud** —
-**Track 4: Autopilot Agent**.
-
----
-
-## Blog Post
-
+Built for the **Global AI Hackathon Series with Qwen Cloud** — **Track 4:
+Autopilot Agent**. Blog:
 [Elevate: Making Qwen the Brain of a Store That Runs Itself](https://dev.to/alpha-dev-001/elevate-making-qwen-the-brain-of-a-store-that-runs-itself-582p)
-
----
 
 ## License
 
