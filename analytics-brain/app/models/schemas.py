@@ -101,6 +101,16 @@ class LogoAnalysis(BaseModel):
     mood: str = Field(..., description="e.g., 'bold', 'minimalist', 'playful'")
     style: str = Field(..., description="e.g., 'geometric', 'organic', 'vintage'")
     geometry_notes: str = Field(..., description="Notes on shapes, lines, symmetry")
+    # Qwen's own judgment call on whether the image is actually a logo, not
+    # an unrelated photo — defaults True so a compliant response that simply
+    # omits this new field (prompt-compliance drift, not a rejection) falls
+    # back to the pre-existing "just trust it" behavior rather than
+    # spuriously blocking a real logo. An explicit False is what actually
+    # blocks brand generation — see analyze_logo.
+    is_logo: bool = True
+    rejection_reason: str | None = Field(
+        default=None, description="Only set when is_logo is False — what the image looks like instead"
+    )
 
 
 # ─── 2. The Brain: qwen-max output ───────────────────────────────────────────

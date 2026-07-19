@@ -98,11 +98,15 @@ _FETCH_UA = (
 # NOTE: every prompt MUST contain the literal word "json" — DashScope rejects
 # response_format=json_object with a 400 otherwise.
 
-LOGO_ANALYSIS_PROMPT = """You are a brand designer's trained eye. Look at this store logo.
+LOGO_ANALYSIS_PROMPT = """You are a brand designer's trained eye. First judge whether the
+image is actually a logo or brand mark — not a photo, a screenshot, a person, a landscape,
+or anything else unrelated to branding a store.
 
 Return ONLY a JSON object with exactly these fields — no prose, no markdown:
 
 {
+  "is_logo": true or false,                // your honest judgment — is this actually a logo/brand mark?
+  "rejection_reason": "one short phrase, e.g. 'a photo of a beach' — ONLY if is_logo is false, otherwise null",
   "primary_colors": ["#hex", "#hex"],     // dominant brand colors, extracted directly from the image
   "secondary_colors": ["#hex"],            // supporting colors, may be empty
   "mood": "one or two words, e.g. 'bold', 'minimalist', 'playful', 'luxury'",
@@ -110,6 +114,8 @@ Return ONLY a JSON object with exactly these fields — no prose, no markdown:
   "geometry_notes": "one sentence on shapes, lines, symmetry, weight"
 }
 
+If is_logo is false, still fill the other fields with your best-effort read of the image's
+colors and mood — the caller decides whether to use them, but never leave the JSON incomplete.
 Extract hex colors precisely from the actual pixels — do not guess generic values.
 Pure JSON. Nothing else."""
 
@@ -566,9 +572,19 @@ async def _run_vl(image_ref: str) -> LogoAnalysis:
     )
     data = _extract_json(raw)
     try:
-        return LogoAnalysis.model_validate(data)
+        analysis = LogoAnalysis.model_validate(data)
     except ValueError as e:
         raise BrandGenerationError(f"Logo analysis failed schema validation: {e!s}") from e
+
+    if not analysis.is_logo:
+        # Stop here — build_brand_package's caller chain never reaches
+        # generate_brand for a rejected image. Qwen's own judgment call,
+        # not a hardcoded content filter; see LOGO_ANALYSIS_PROMPT.
+        reason = analysis.rejection_reason or "not a logo or brand mark"
+        raise BrandGenerationError(
+            f"That doesn't look like a logo ({reason}) — try uploading your actual logo or brand mark."
+        )
+    return analysis
 
 
 async def _fetch_as_data_url(logo_url: str) -> str:
@@ -1004,7 +1020,7 @@ async def generate_descriptions(
 ) -> tuple[dict[str, str], set[str]]:
     """Write descriptions for a catalog, chunked and run in parallel.
 
-    Never loops Qwen *per product* (CLAUDE.md), but does split large catalogs
+    Never loops Qwen *per product*, but does split large catalogs
     into ~20-product chunks so the output never overflows and one bad chunk
     can't sink the whole import. Returns ({name: description}, fallback_names)
     where fallback_names are products that didn't get real Qwen copy.

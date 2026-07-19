@@ -8,6 +8,11 @@ export const LogoAnalysisSchema = z.object({
   mood: z.string(),
   style: z.string(),
   geometry_notes: z.string(),
+  // Qwen's own judgment on whether the dropped image is actually a logo —
+  // defaults true to mirror the backend's fall-back-to-trusting behavior
+  // when older/compliant responses simply omit the field.
+  is_logo: z.boolean().default(true),
+  rejection_reason: z.string().nullable().default(null),
 })
 
 // ─── 2. The Brain ─────────────────────────────────────────────────────────────

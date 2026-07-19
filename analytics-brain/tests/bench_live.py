@@ -165,11 +165,11 @@ async def bench_batch_descriptions(report: BenchmarkReport):
 
 
 # ─── "With a Subconscious vs. Without One" ───────────────────────────────────
-# Reframed from a competitor's "pipeline vs. single-prompt baseline" table —
-# CLAUDE.md already names the interceptor "the Subconscious Interceptor," so
-# the bare arm is literally Qwen with no subconscious: same model, same
-# prompt information, no DECISION_TOOLS, no enforce_action_discount. Every
-# call in both arms is real — no mocked Qwen response anywhere.
+# A pipeline-vs-single-prompt-baseline comparison — Qwen Output Handling already names
+# the interceptor "the Subconscious Interceptor," so the bare arm is
+# literally Qwen with no subconscious: same model, same prompt information,
+# no DECISION_TOOLS, no enforce_action_discount. Every call in both arms is
+# real — no mocked Qwen response anywhere.
 
 from app.models.schemas import AgentActionType, BusinessConstraints
 from app.services import interceptor

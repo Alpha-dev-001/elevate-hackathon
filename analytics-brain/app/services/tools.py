@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # message" was silently unenforceable, leaving the reasoning column empty
 # for ~95% of real decisions in production. A required JSON field the
 # model must fill to satisfy the tool call schema is reliably populated,
-# the same way any other structured Qwen output is (see CLAUDE.md's Qwen
+# the same way any other structured Qwen output is (see Qwen Output Handling
 # Output Handling: always structured JSON, never freeform prose).
 REASONING_PARAM = {
     "type": "string",

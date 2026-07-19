@@ -13,7 +13,7 @@ Layer 2 — Business Constraints (margin floor, discount ceiling, per-product mi
           price)  -> auto-clamp with a warning the merchant sees.
 Layer 3 — System Safety (price/discounted price below cost)  -> hard block.
 
-Rewritten for the current schema (CLAUDE.md): the old brand-tweak / colour-
+Rewritten for the current schema (Qwen Output Handling): the old brand-tweak / colour-
 temperature code referenced fields that no longer exist. Brand-tweak warnings
 are a frontend-local check against BrandGuardRules.allowed_color_palette with
 zero round-trip — they do not belong here.

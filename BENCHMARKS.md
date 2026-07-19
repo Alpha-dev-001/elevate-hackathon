@@ -64,7 +64,7 @@ instead of asserting "under 2 seconds perceived" without ever measuring it.
 
 ## "With a subconscious vs. without one" — 2026-07-13
 
-CLAUDE.md names the interceptor "the Subconscious Interceptor" — the
+Elevate names the interceptor "the Subconscious Interceptor" — the
 merchant never sees it fire, but every proposed action passes through it
 before reaching a decision card. This run tests what that name is worth
 in real dollars and real percentage points. The **pipeline** arm is a real
