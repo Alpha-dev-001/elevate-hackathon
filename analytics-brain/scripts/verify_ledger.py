@@ -4,7 +4,11 @@ hasn't been reordered/deleted/re-signed, and (optionally) that the
 underlying AgentActionDB rows still match what was attested at the time.
 
 Usage:
-    docker compose exec api python -m scripts.verify_ledger <merchant_id_or_slug>
+    docker compose exec api python -m scripts.verify_ledger <merchant_id_or_slug> [--chain]
+
+--chain prints the full sequence table (event type, action, hash prefix)
+so a failure's reported sequence number can be located visually against
+its neighbors, and so a healthy chain is visibly a chain, not just a count.
 """
 import asyncio
 import sys
@@ -24,7 +28,19 @@ async def _resolve_merchant(db, merchant_id_or_slug: str) -> str | None:
     return merchant.id if merchant else None
 
 
-async def main(merchant_id_or_slug: str) -> int:
+def _print_chain(receipts) -> None:
+    print()
+    print(f"  {'seq':>3}  {'event':<10}  {'action':<10}  hash")
+    print(f"  {'---':>3}  {'-'*10}  {'-'*10}  {'-'*10}")
+    ordered = sorted(receipts, key=lambda r: r.sequence)
+    for i, r in enumerate(ordered):
+        action = (r.action_id or "—")[:8]
+        arrow = " -> " if i < len(ordered) - 1 else "    "
+        print(f"  [{r.sequence:>2}]  {r.event_type:<10}  {action:<10}  {r.entry_hash[:8]}{arrow}")
+    print()
+
+
+async def main(merchant_id_or_slug: str, show_chain: bool = False) -> int:
     factory = get_session_factory()
     async with factory() as db:
         merchant_id = await _resolve_merchant(db, merchant_id_or_slug)
@@ -34,6 +50,9 @@ async def main(merchant_id_or_slug: str) -> int:
 
         receipts = await load_ledger(db, merchant_id)
         print(f"{len(receipts)} ledger entries for {merchant_id_or_slug}")
+
+        if show_chain:
+            _print_chain(receipts)
 
         valid, err = verify_chain(receipts)
         if not valid:
@@ -53,7 +72,10 @@ async def main(merchant_id_or_slug: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("usage: python -m scripts.verify_ledger <merchant_id_or_slug>")
+    args = sys.argv[1:]
+    show_chain = "--chain" in args
+    positional = [a for a in args if a != "--chain"]
+    if len(positional) != 1:
+        print("usage: python -m scripts.verify_ledger <merchant_id_or_slug> [--chain]")
         raise SystemExit(2)
-    raise SystemExit(asyncio.run(main(sys.argv[1])))
+    raise SystemExit(asyncio.run(main(positional[0], show_chain)))

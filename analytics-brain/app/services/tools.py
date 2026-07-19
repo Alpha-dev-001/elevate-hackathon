@@ -11,6 +11,7 @@ from the tool call + context, not from Qwen's structured params.
 
 import json
 import logging
+from app.core.config import get_settings
 from app.models.schemas import AgentActionType
 
 logger = logging.getLogger(__name__)
@@ -320,7 +321,10 @@ def narrative_from_tool(
     d = args.get("discount_percent", 10)
 
     if tool_name == "propose_flash_sale":
-        mins = args.get("duration_minutes", 1440)
+        # Same fallback _register_promo actually applies (agent.py) when Qwen's
+        # payload omits duration_minutes — otherwise the card can promise a
+        # duration the executed promo doesn't honor.
+        mins = args.get("duration_minutes") or get_settings().agent_action_duration_minutes
         hours = round(mins / 60, 1)
         return {
             "title": f"Flash Sale: {d:g}% off {name}",

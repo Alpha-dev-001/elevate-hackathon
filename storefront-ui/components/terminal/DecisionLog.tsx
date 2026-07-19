@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { api, type DecisionLogEntry } from '@/lib/api'
+import { connectTerminal } from '@/lib/ws'
 
 const ROLE_LABELS: Record<string, string> = {
   pricing_strategist: 'Pricing Strategist',
@@ -132,7 +133,16 @@ function DecisionRow({ d }: { d: DecisionLogEntry }) {
 
 const PAGE_SIZE = 20
 
-export function DecisionLog() {
+interface DecisionLogProps {
+  /** Opens a WS subscription so newly resolved decisions appear without a
+   *  manual refresh — this page previously had none at all, so a decision
+   *  resolved live (approve, dismiss, or an auto-applied trust move) never
+   *  showed up here until the merchant reloaded. Optional so existing
+   *  callers/tests that don't care about live updates keep working. */
+  merchantId?: string
+}
+
+export function DecisionLog({ merchantId }: DecisionLogProps) {
   const [decisions, setDecisions] = useState<DecisionLogEntry[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -155,6 +165,42 @@ export function DecisionLog() {
     })
     return () => { cancelled = true }
   }, [])
+
+  // Re-fetch just the first page and merge in anything not already loaded,
+  // by id — never discards pages the merchant already paged into via
+  // "load more". Ordering is created_at DESC (newest first) server-side,
+  // so new/updated rows always land in this first page.
+  const refreshTop = useCallback(async () => {
+    try {
+      const res = await api.getDecisions(PAGE_SIZE, 0)
+      setTotal(res.total)
+      setDecisions((prev) => {
+        // The fresh page-1 fetch always wins for any id it contains (an
+        // entry can change status between fetches, e.g. pending -> executed)
+        // — only entries beyond page 1 that the merchant paged into via
+        // "load more" get preserved from the stale list.
+        const freshIds = new Set(res.decisions.map((d) => d.id))
+        const rest = prev.filter((d) => !freshIds.has(d.id))
+        return [...res.decisions, ...rest]
+      })
+    } catch {
+      // next event (or a manual reload) will retry — no error surfaced for
+      // a background refresh the merchant didn't explicitly ask for
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!merchantId) return
+    const conn = connectTerminal(merchantId, {
+      onEvent: (event) => {
+        // Every path that resolves a decision (approve, dismiss, auto-apply)
+        // already broadcasts state_updated — reusing it here means no new
+        // backend event type is needed just for this page.
+        if (event === 'state_updated') refreshTop()
+      },
+    })
+    return () => conn.close()
+  }, [merchantId, refreshTop])
 
   const loadMore = async () => {
     if (loadingMore) return

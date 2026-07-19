@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { api } from '@/lib/api'
 import { ProductImage } from '@/components/storefront/ProductImage'
@@ -30,12 +31,21 @@ export function PendingProductCard({
   onApproved: (p: Product) => void
   onDiscarded: (id: string) => void
 }) {
+  const [error, setError] = useState<string | null>(null)
+
+  function showError(msg: string) {
+    setError(msg)
+    setTimeout(() => setError(null), 3000)
+  }
+
   const approve = async () => {
     try {
       const approved = await api.approveProduct(product.id)
       onApproved(approved)
     } catch {
-      // leave the card in place — merchant can retry
+      // Leave the card in place — merchant can retry — but say so. A
+      // silent failure here reads as "the button doesn't work."
+      showError('Approve failed — try again')
     }
   }
 
@@ -44,7 +54,7 @@ export function PendingProductCard({
       await api.deleteProduct(product.id)
       onDiscarded(product.id)
     } catch {
-      // leave the card in place — merchant can retry
+      showError('Discard failed — try again')
     }
   }
 
@@ -97,6 +107,11 @@ export function PendingProductCard({
         </div>
         {product.description && (
           <p className="text-sm mt-1 leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>{product.description}</p>
+        )}
+        {error && (
+          <p className="text-xs mt-2 font-mono" style={{ color: 'var(--color-danger)' }}>
+            {error}
+          </p>
         )}
         <div className="flex gap-2 mt-3">
           <button

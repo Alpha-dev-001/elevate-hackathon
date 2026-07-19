@@ -143,6 +143,18 @@ export interface EditIntentResult {
   request_count?: number
 }
 
+/** A (product, action_type) pair that has earned the trust streak — the
+ *  merchant's own opt-in for auto-apply, not auto-apply itself. Earning the
+ *  streak just makes this row exist / cross the threshold; auto_apply_enabled
+ *  only changes when the merchant explicitly toggles it. */
+export interface EligibleTrust {
+  product_id: string
+  product_name: string
+  action_type: string
+  streak: number
+  auto_apply_enabled: boolean
+}
+
 /** A capability gap Qwen noticed via point-and-edit intents it couldn't satisfy.
  *  status flips 'open' → 'proposed' once the same gap recurs (self-extending config). */
 export interface Capability {
@@ -260,6 +272,13 @@ export const api = {
     }),
   deleteProduct: (id: string) =>
     req<null>(`/products/${enc(id)}`, { method: 'DELETE' }),
+  listAutopilotTrust: () =>
+    req<{ eligible: EligibleTrust[] }>('/products/autopilot-trust'),
+  toggleAutopilotTrust: (productId: string, actionType: string, enabled: boolean) =>
+    req<{ product_id: string; action_type: string; enabled: boolean; streak: number }>(
+      `/products/${enc(productId)}/autopilot-trust`,
+      { method: 'POST', body: JSON.stringify({ action_type: actionType, enabled }) },
+    ),
   visionBatch: (image_urls: string[]) =>
     req<{ products: Array<{ product: Product; confident: boolean }>; failed_urls: string[] }>(
       '/products/vision-batch',

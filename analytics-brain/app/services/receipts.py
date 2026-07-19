@@ -153,17 +153,32 @@ def verify_chain(receipts: list[ReceiptDB]) -> tuple[bool, str | None]:
 
 
 async def verify_row_consistency(db: "AsyncSession", receipts: list[ReceiptDB]) -> list[str]:
-    """For every receipt that attests to a real AgentActionDB row, recompute
-    the attested body from the row's CURRENT content and compare. Returns a
-    list of human-readable mismatches (empty means every still-existing row
-    matches what the ledger attested at the time). This is the check unique
-    to a continuously-operating store: it catches someone quietly editing
-    history in the merchant's own database after the fact, not just
-    tampering with the receipt log itself."""
-    mismatches: list[str] = []
+    """For each action, recompute the attested body from the row's CURRENT
+    content and compare it against only that action's MOST RECENT receipt.
+    Returns a list of human-readable mismatches (empty means every
+    still-existing row matches what the ledger last attested).
+
+    An action accrues multiple receipts across its lifecycle (proposed,
+    then executed/dismissed/etc.) and each one correctly attests the row's
+    state at that transition — an earlier receipt is a legitimate
+    point-in-time snapshot, not a claim about the row's final state, and
+    verify_chain already proves it wasn't altered after being written. Only
+    the latest receipt for a given action_id describes what the row should
+    look like right now, so that's the one checked against the live row —
+    this is the check unique to a continuously-operating store: it catches
+    someone quietly editing history in the merchant's own database after
+    the fact, not just tampering with the receipt log itself.
+    """
+    latest_by_action: dict[str, ReceiptDB] = {}
     for r in receipts:
         if r.action_id is None:
             continue
+        current = latest_by_action.get(r.action_id)
+        if current is None or r.sequence > current.sequence:
+            latest_by_action[r.action_id] = r
+
+    mismatches: list[str] = []
+    for r in latest_by_action.values():
         row = await db.get(AgentActionDB, r.action_id)
         if row is None:
             mismatches.append(f"sequence {r.sequence}: action {r.action_id} no longer exists")

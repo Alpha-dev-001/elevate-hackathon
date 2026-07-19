@@ -37,12 +37,12 @@ from app.services.simulation import (  # noqa: E402
 )
 
 
-async def _drive(db_factory, redis, store, *, scenario=None, proactive=None, customers=30):
+async def _drive(db_factory, redis, store, *, scenario=None, proactive=None, customers=30, product=None):
     async with db_factory() as db:
         if proactive:
             res = await run_proactive(store, proactive, db, redis)
         else:
-            res = await run_reactive_scenario(store, scenario, customers, db, redis)
+            res = await run_reactive_scenario(store, scenario, customers, db, redis, target_product_id=product)
         await db.commit()
     return res
 
@@ -67,7 +67,9 @@ async def _main_async(args):
             return results
         if args.proactive:
             return await _drive(factory, redis, args.store, proactive=args.proactive)
-        return await _drive(factory, redis, args.store, scenario=args.scenario, customers=args.customers)
+        return await _drive(
+            factory, redis, args.store, scenario=args.scenario, customers=args.customers, product=args.product
+        )
     finally:
         # Close Redis explicitly so its connection isn't GC'd after the loop
         # closes (which prints a harmless-but-ugly "Event loop is closed").
@@ -90,6 +92,7 @@ def main():
     p.add_argument("--scenario", choices=list(SCENARIOS), help="reactive scenario to fire")
     p.add_argument("--proactive", choices=list(PROACTIVE), help="proactive check to fire")
     p.add_argument("--customers", type=int, default=30, help="simulated customer count (default 30)")
+    p.add_argument("--product", help="product id to target (reactive scenarios only; default: store's first active product)")
     p.add_argument("--all", action="store_true",
                    help="fire every scenario in sequence — seeds the state screenshots need")
     p.add_argument("--list", action="store_true", help="list scenarios and exit")

@@ -44,37 +44,50 @@ class TestShouldAutoApply:
 
     def test_below_threshold_never_auto_applies(self):
         assert should_auto_apply(
-            TRUST_STREAK_THRESHOLD - 1, 21.0, 20.0, self._constraints(),
+            TRUST_STREAK_THRESHOLD - 1, True, 21.0, 20.0, self._constraints(),
         ) is False
 
     def test_at_threshold_within_band_auto_applies(self):
         # 21.0 vs baseline 20.0 = +5%, well within the 10% band and the 10% ceiling.
         assert should_auto_apply(
-            TRUST_STREAK_THRESHOLD, 21.0, 20.0, self._constraints(max_uplift=10.0),
+            TRUST_STREAK_THRESHOLD, True, 21.0, 20.0, self._constraints(max_uplift=10.0),
         ) is True
 
     def test_upward_move_capped_by_merchants_own_uplift_ceiling_not_flat_ten_percent(self):
         # max_uplift_percent=5 means the effective band is min(10, 5) = 5%, not 10%.
         # A +8% move is inside the flat 10% but OUTSIDE the merchant's real 5% ceiling.
         assert should_auto_apply(
-            100, 21.6, 20.0, self._constraints(max_uplift=5.0),
+            100, True, 21.6, 20.0, self._constraints(max_uplift=5.0),
         ) is False
 
     def test_upward_move_within_the_narrower_uplift_ceiling_auto_applies(self):
         assert should_auto_apply(
-            100, 21.0, 20.0, self._constraints(max_uplift=5.0),
+            100, True, 21.0, 20.0, self._constraints(max_uplift=5.0),
         ) is True
 
     def test_downward_move_within_ten_percent_auto_applies_regardless_of_streak_size(self):
         # Explicit high-streak test per the spec's own testing requirement.
         assert should_auto_apply(
-            100, 19.0, 20.0, self._constraints(),
+            100, True, 19.0, 20.0, self._constraints(),
         ) is True
 
     def test_downward_move_beyond_ten_percent_always_gates_even_at_streak_100(self):
         assert should_auto_apply(
-            100, 17.0, 20.0, self._constraints(),
+            100, True, 17.0, 20.0, self._constraints(),
         ) is False
 
     def test_zero_baseline_never_auto_applies(self):
-        assert should_auto_apply(100, 21.0, 0.0, self._constraints()) is False
+        assert should_auto_apply(100, True, 21.0, 0.0, self._constraints()) is False
+
+    def test_not_enabled_never_auto_applies_even_at_full_streak_and_safe_band(self):
+        # The merchant hasn't opted in — earning the streak unlocks the
+        # OPTION, it never flips the switch by itself.
+        assert should_auto_apply(
+            100, False, 19.0, 20.0, self._constraints(),
+        ) is False
+
+    def test_enabled_but_below_threshold_still_gates(self):
+        # Toggled on doesn't retroactively grant a streak that was never earned.
+        assert should_auto_apply(
+            TRUST_STREAK_THRESHOLD - 1, True, 19.0, 20.0, self._constraints(),
+        ) is False

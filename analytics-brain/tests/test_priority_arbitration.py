@@ -71,6 +71,7 @@ class TestPriorityArbitrationGate:
              patch("app.core.ws_manager.manager.push_to_terminal", new=AsyncMock()), \
              patch("app.services.receipts.append_receipt", new=AsyncMock()):
             mock_settings.return_value.pending_action_ttl_seconds = 300
+            mock_settings.return_value.pending_action_ttl_seconds_durable = 86400
             mock_interceptor.return_value = (
                 {"product_id": "p1", "discount_percent": 15, "reasoning": "Going viral — capture it."}, "", False,
             )
@@ -110,6 +111,7 @@ class TestPriorityArbitrationGate:
              patch("app.services.profile.load_constraints", new=AsyncMock(return_value=MagicMock(max_discount_percent=40.0))), \
              patch("app.core.ws_manager.manager.push_to_terminal", new=AsyncMock()) as mock_push:
             mock_settings.return_value.pending_action_ttl_seconds = 300
+            mock_settings.return_value.pending_action_ttl_seconds_durable = 86400
             action = await run_decision_cycle(
                 "merchant-1", "Velocity spike: 24 views on product p1 in 30s", db, redis,
                 role=PRICING_STRATEGIST,

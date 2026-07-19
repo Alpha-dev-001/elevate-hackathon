@@ -370,6 +370,7 @@ export default function ProductsPage() {
                 key={p.id}
                 product={p}
                 onUpdated={(updated) => setProducts((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))}
+                onDeleted={(id) => setProducts((prev) => prev.filter((x) => x.id !== id))}
               />
             ))}
           </AnimatePresence>
@@ -427,9 +428,11 @@ export default function ProductsPage() {
 function EditableProductRow({
   product,
   onUpdated,
+  onDeleted,
 }: {
   product: Product
   onUpdated: (p: Product) => void
+  onDeleted: (id: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -438,6 +441,21 @@ function EditableProductRow({
   const [name, setName] = useState(product.name)
   const [price, setPrice] = useState(String(product.price))
   const [category, setCategory] = useState(product.category || '')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const remove = async () => {
+    setDeleting(true)
+    setErr(null)
+    try {
+      await api.deleteProduct(product.id)
+      onDeleted(product.id)
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'Delete failed')
+      setDeleting(false)
+      setConfirmingDelete(false)
+    }
+  }
 
   const startEdit = () => {
     setName(product.name)
@@ -481,6 +499,7 @@ function EditableProductRow({
       layout
       initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, x: -40, transition: { duration: 0.25 } }}
       transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1] }}
       className="card p-4 flex gap-4 items-start"
     >
@@ -516,14 +535,42 @@ function EditableProductRow({
               {product.qwen_generated && (
                 <span className="text-[10px] font-mono text-muted border border-border rounded-full px-1.5 py-0.5">qwen</span>
               )}
-              <button
-                onClick={startEdit}
-                className="text-[11px] font-mono text-muted hover:text-accent transition-colors ml-auto"
-              >
-                Edit
-              </button>
+              <div className="ml-auto flex items-center gap-3">
+                <button
+                  onClick={startEdit}
+                  className="text-[11px] font-mono text-muted hover:text-accent transition-colors"
+                >
+                  Edit
+                </button>
+                {confirmingDelete ? (
+                  <span className="flex items-center gap-2">
+                    <button
+                      onClick={remove}
+                      disabled={deleting}
+                      className="text-[11px] font-mono text-danger hover:text-red-400 transition-colors disabled:opacity-50"
+                    >
+                      {deleting ? 'Removing…' : 'Confirm remove'}
+                    </button>
+                    <button
+                      onClick={() => setConfirmingDelete(false)}
+                      disabled={deleting}
+                      className="text-[11px] font-mono text-muted hover:text-text transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirmingDelete(true)}
+                    className="text-[11px] font-mono text-muted hover:text-danger transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
             {product.description && <p className="text-sm text-muted mt-1 leading-relaxed">{product.description}</p>}
+            {err && <p className="text-danger text-xs font-mono mt-1">{err}</p>}
             {noted && (
               <motion.p
                 initial={{ opacity: 0 }}

@@ -25,14 +25,14 @@ function makeAction(overrides: Partial<AgentAction> = {}): AgentAction {
 describe('OptionCard — constraint_check', () => {
   it('renders the constraint check line when present', () => {
     render(<OptionCard action={makeAction({ constraint_check: '60% exceeds your 40% discount ceiling. Clamped to 40%.' })}
-      onApprove={vi.fn()} onDismiss={vi.fn()} />)
+      onApprove={vi.fn()} onDismiss={vi.fn()} onClamped={vi.fn()} />)
     expect(screen.getByText(/Constraint check:/)).toBeInTheDocument()
     expect(screen.getByText(/Clamped to 40%/)).toBeInTheDocument()
   })
 
   it('renders nothing when constraint_check is empty', () => {
     render(<OptionCard action={makeAction({ constraint_check: '' })}
-      onApprove={vi.fn()} onDismiss={vi.fn()} />)
+      onApprove={vi.fn()} onDismiss={vi.fn()} onClamped={vi.fn()} />)
     expect(screen.queryByText(/Constraint check:/)).toBeNull()
   })
 })

@@ -54,8 +54,13 @@ class Settings(BaseSettings):
     flash_gmv_rate: float = 0.15     # expected uplift $ per surged view
     # Pending action TTL — if the merchant doesn't act within this window, the
     # signal is stale (anomaly resolved, traffic moved on). Auto-dismiss prevents
-    # one ignored card from blocking all future decisions.
+    # one ignored card from blocking all future decisions. This "traffic moved
+    # on" premise only holds for REACTIVE triggers (a velocity spike really can
+    # pass in 5 minutes) — see decision_engine.DURABLE_ACTION_TYPES for the
+    # proactive/structural types (duplicate SKUs, an underperforming product)
+    # that don't decay on a clock and use pending_action_ttl_seconds_durable.
     pending_action_ttl_seconds: int = 300  # 5 minutes
+    pending_action_ttl_seconds_durable: int = 86400  # 24 hours
 
     # ── App ───────────────────────────────────────────────
     app_env: str = "development"

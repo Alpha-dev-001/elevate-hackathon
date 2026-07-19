@@ -50,6 +50,58 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out
 }
 
+// A plain FileList from dataTransfer.files never recurses into a dropped
+// folder — the browser only lists the folder itself, not what's inside it.
+// Reading a folder's contents requires the separate FileSystemEntry API
+// (webkitGetAsEntry), walked recursively, since directoryReader.readEntries
+// caps how many entries it returns per call and must be re-invoked until empty.
+type FileSystemEntryLike = {
+  isFile: boolean
+  isDirectory: boolean
+  file: (success: (f: File) => void, error: () => void) => void
+  createReader: () => { readEntries: (success: (e: FileSystemEntryLike[]) => void, error: () => void) => void }
+}
+
+function readAllDirEntries(reader: ReturnType<FileSystemEntryLike['createReader']>): Promise<FileSystemEntryLike[]> {
+  return new Promise((resolve) => {
+    const all: FileSystemEntryLike[] = []
+    const readBatch = () => {
+      reader.readEntries((batch) => {
+        if (!batch.length) { resolve(all); return }
+        all.push(...batch)
+        readBatch()
+      }, () => resolve(all))
+    }
+    readBatch()
+  })
+}
+
+async function filesFromEntry(entry: FileSystemEntryLike): Promise<File[]> {
+  if (entry.isFile) {
+    return new Promise((resolve) => entry.file((f) => resolve([f]), () => resolve([])))
+  }
+  if (entry.isDirectory) {
+    const entries = await readAllDirEntries(entry.createReader())
+    const nested = await Promise.all(entries.map(filesFromEntry))
+    return nested.flat()
+  }
+  return []
+}
+
+async function filesFromDataTransfer(dataTransfer: DataTransfer): Promise<File[]> {
+  const items = dataTransfer.items
+  if (items && items.length) {
+    const entries = Array.from(items)
+      .map((item) => item.webkitGetAsEntry?.() as FileSystemEntryLike | null)
+      .filter((e): e is FileSystemEntryLike => !!e)
+    if (entries.length) {
+      const nested = await Promise.all(entries.map(filesFromEntry))
+      return nested.flat()
+    }
+  }
+  return Array.from(dataTransfer.files)
+}
+
 const EMPTY_PROGRESS: Progress = {
   phase: 'idle', total: 0, deduped: 0, uploaded: 0, visionCount: 0, visionDone: 0,
   created: 0, uncertain: 0, failed: 0, csvAdded: 0, csvSkipped: 0,
@@ -259,7 +311,10 @@ export function ImageDropZone({
               onDrop={(e) => {
                 e.preventDefault()
                 setDragOver(false)
-                if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files)
+                const dataTransfer = e.dataTransfer
+                filesFromDataTransfer(dataTransfer).then((files) => {
+                  if (files.length) handleFiles(files)
+                })
               }}
               className={`cursor-pointer rounded-lg border-2 border-dashed p-5 text-center transition-colors
                 ${dragOver ? 'border-accent bg-accent-dim/30' : 'border-border hover:border-accent'}`}

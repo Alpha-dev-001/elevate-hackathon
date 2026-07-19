@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatePresence } from 'framer-motion'
-import { api, ApiError, type DashboardData, type Capability } from '@/lib/api'
+import { api, ApiError, type DashboardData, type Capability, type EligibleTrust } from '@/lib/api'
 import { connectTerminal } from '@/lib/ws'
 import type { AgentAction, Merchant, Product } from '@/types/schemas'
 import { StoreSnapshot } from '@/components/terminal/StoreSnapshot'
 import { DecisionFeed } from '@/components/terminal/DecisionFeed'
 import { AttributionDashboard } from '@/components/terminal/AttributionDashboard'
 import { CapabilityProposals } from '@/components/terminal/CapabilityProposals'
+import { EarnedTrustPanel } from '@/components/terminal/EarnedTrustPanel'
 import { ConstraintsSettings } from '@/components/terminal/ConstraintsSettings'
 import { PendingProductCard, type PendingProduct } from '@/components/terminal/PendingProductCard'
 import { SearchDemandInsights } from '@/components/terminal/SearchDemandInsights'
@@ -28,9 +29,16 @@ export default function TerminalPage() {
   const [lastTokens, setLastTokens] = useState<number | null>(null)
   const [capabilities, setCapabilities] = useState<Capability[]>([])
   const [qwenFallback, setQwenFallback] = useState<{ message: string; type: string } | null>(null)
-  const [pendingProducts, setPendingProducts] = useState<PendingProduct[]>([])
+  const [clampAlert, setClampAlert] = useState<string | null>(null)
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // A card that lands, gets clamped, and vanishes in the same few seconds
+  // is easy to miss if you're not staring at that exact spot. Page-level
+  // and manually dismissed (no auto-timeout) — the merchant should have to
+  // actively clear it, not have it disappear whether or not they saw it.
+  const handleClamped = useCallback((msg: string) => setClampAlert(msg), [])
+  const [pendingProducts, setPendingProducts] = useState<PendingProduct[]>([])
+  const [eligibleTrust, setEligibleTrust] = useState<EligibleTrust[]>([])
+  const [autoExecutedAlert, setAutoExecutedAlert] = useState<{ title: string; reasoning: string } | null>(null)
 
   // ── Auth gate ──────────────────────────────────────────────────────────────
 
@@ -85,24 +93,28 @@ export default function TerminalPage() {
     }
   }, [])
 
+  const fetchEligibleTrust = useCallback(async () => {
+    try {
+      const { eligible } = await api.listAutopilotTrust()
+      setEligibleTrust(eligible)
+    } catch {
+      // non-critical surface — leave whatever we had
+    }
+  }, [])
+
   // ── Subscriptions ──────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!merchant) return
     const { slug, id } = merchant
 
-    // Initial fetch
+    // Initial fetch — one-time hydration on mount, not polling. Everything
+    // after this point arrives over the WS subscription below.
     fetchActions(slug)
     fetchDashboard(slug)
     fetchCapabilities(slug)
+    fetchEligibleTrust()
     api.listPendingProducts().then(setPendingProducts).catch(() => {})
-
-    // 5s poll for new actions + capability gaps (capability changes originate in
-    // the builder's point-and-edit flow, so the terminal learns of them by poll).
-    pollRef.current = setInterval(() => {
-      fetchActions(slug)
-      fetchCapabilities(slug)
-    }, 5000)
 
     // WS subscription
     const conn = connectTerminal(id, {
@@ -130,6 +142,14 @@ export default function TerminalPage() {
         }
         if (event === 'state_updated') {
           fetchDashboard(slug)
+          // Streaks shift on every approve/dismiss/auto-apply outcome —
+          // cheap to refetch, and this list is exactly what tells the
+          // merchant whether a product just became toggle-eligible.
+          fetchEligibleTrust()
+        }
+        if (event === 'action_auto_executed' && payload.action) {
+          const auto = payload.action as { title: string; reasoning: string }
+          setAutoExecutedAlert({ title: auto.title, reasoning: auto.reasoning })
         }
         if (event === 'products_pending' && Array.isArray(payload.products)) {
           const incoming = payload.products as PendingProduct[]
@@ -139,14 +159,19 @@ export default function TerminalPage() {
             return newOnes.length ? [...newOnes, ...prev] : prev
           })
         }
+        if (event === 'capability_updated' && Array.isArray(payload.capabilities)) {
+          // The only source for capability gaps — they originate in the
+          // builder's point-and-edit flow, a different page than this one,
+          // so there's no local mutation to react to; this push is it.
+          setCapabilities(payload.capabilities as Capability[])
+        }
       },
     })
 
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
       conn.close()
     }
-  }, [merchant, fetchActions, fetchDashboard, fetchCapabilities])
+  }, [merchant, fetchActions, fetchDashboard, fetchCapabilities, fetchEligibleTrust])
 
   // ── Action handlers ────────────────────────────────────────────────────────
 
@@ -210,10 +235,10 @@ export default function TerminalPage() {
     <main className="min-h-screen" style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}>
       {/* ── Header ── */}
       <header
-        className="sticky top-0 z-10 border-b px-6 py-4 flex items-center justify-between"
+        className="sticky top-0 z-10 border-b px-6 py-4 flex flex-wrap items-center justify-between gap-y-3"
         style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg)' }}
       >
-        <div>
+        <div className="whitespace-nowrap">
           <h1
             className="text-lg font-semibold"
             style={{ fontFamily: 'var(--font-display)', color: 'var(--color-text)' }}
@@ -225,29 +250,29 @@ export default function TerminalPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full"
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="whitespace-nowrap text-[10px] font-mono px-2 py-0.5 rounded-full"
                 style={{ background: 'rgba(110,231,183,0.12)', color: 'var(--color-accent)' }}>
             ✦ qwen-max · Remembers {memoryCount ?? 0} previous decision{memoryCount === 1 ? '' : 's'}
             {lastTokens != null ? ` · ~${lastTokens.toLocaleString()} tokens` : ''}
           </span>
           <a
             href={`/builder?slug=${merchant.slug}`}
-            className="text-xs font-medium px-3 py-1.5 rounded-md transition-opacity hover:opacity-90"
+            className="whitespace-nowrap text-xs font-medium px-3 py-1.5 rounded-md transition-opacity hover:opacity-90"
             style={{ background: 'var(--color-accent)', color: 'var(--color-bg)' }}
           >
             Customize store
           </a>
           <a
             href="/products"
-            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            className="whitespace-nowrap text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
           >
             Products
           </a>
           <a
             href="/terminal/decisions"
-            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            className="whitespace-nowrap text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
           >
             Decision trace
@@ -256,21 +281,23 @@ export default function TerminalPage() {
             href={`/s/${merchant.slug}`}
             target="_blank"
             rel="noreferrer"
-            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            className="whitespace-nowrap text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
           >
             View store ↗
           </a>
           <a
             href="/logout"
-            className="text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
+            className="whitespace-nowrap text-xs font-mono px-3 py-1.5 rounded-md border transition-colors hover:opacity-80"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
           >
             Sign out
           </a>
-          <span className="w-2 h-2 rounded-full" style={{ background: wsColor }} />
-          <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
-            {wsStatus}
+          <span className="flex items-center gap-1.5 whitespace-nowrap">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: wsColor }} />
+            <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+              {wsStatus}
+            </span>
           </span>
         </div>
       </header>
@@ -294,6 +321,53 @@ export default function TerminalPage() {
         </div>
       )}
 
+      {/* ── Interceptor clamp alert (manual dismiss, no auto-timeout) ── */}
+      {clampAlert && (
+        <div className="px-6 pt-3 max-w-[1400px] mx-auto">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm animate-in fade-in slide-in-from-top-1 duration-300"
+               style={{
+                 background: 'rgba(255, 209, 102, 0.1)',
+                 border: '1px solid rgba(255, 209, 102, 0.25)',
+                 color: 'var(--color-warning, #FFD166)',
+               }}>
+            <span className="text-base">⚠</span>
+            <span className="flex-1 font-mono">Clamped on approval: {clampAlert}</span>
+            <button onClick={() => setClampAlert(null)}
+                    className="text-xs opacity-60 hover:opacity-100 transition-opacity">
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Auto-applied FYI (manual dismiss, no auto-timeout) — the one path
+          that skips the approval card entirely, so it's the one that most
+          needs an explicit "here's what just happened and why." ── */}
+      {autoExecutedAlert && (
+        <div className="px-6 pt-3 max-w-[1400px] mx-auto">
+          <div className="flex items-start gap-3 px-4 py-3 rounded-lg text-sm animate-in fade-in slide-in-from-top-1 duration-300"
+               style={{
+                 background: 'var(--color-accent-dim, rgba(110,231,183,0.1))',
+                 border: '1px solid var(--color-accent)',
+                 color: 'var(--color-accent)',
+               }}>
+            <span className="text-base">✦</span>
+            <div className="flex-1 min-w-0">
+              <p className="font-mono font-semibold">Auto-applied: {autoExecutedAlert.title}</p>
+              {autoExecutedAlert.reasoning && (
+                <p className="text-xs font-mono mt-1" style={{ color: 'var(--color-text-muted)' }}>
+                  {autoExecutedAlert.reasoning}
+                </p>
+              )}
+            </div>
+            <button onClick={() => setAutoExecutedAlert(null)}
+                    className="text-xs opacity-60 hover:opacity-100 transition-opacity shrink-0">
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Two zones: what needs a decision now (left, wide) vs. store state
           & config (right, narrower sidebar) — everything in the left column
           shares one width so a pending-product card, a capability proposal,
@@ -311,9 +385,21 @@ export default function TerminalPage() {
             slug={merchant.slug}
             onApproveAction={handleApproveAction}
             onDismissAction={handleDismissAction}
+            onClamped={handleClamped}
           />
 
           <CapabilityProposals capabilities={capabilities} />
+
+          <EarnedTrustPanel
+            eligible={eligibleTrust}
+            onToggled={(updated) => {
+              setEligibleTrust((prev) =>
+                prev.map((e) =>
+                  e.product_id === updated.product_id && e.action_type === updated.action_type ? updated : e
+                )
+              )
+            }}
+          />
 
           {pendingProducts.length > 0 && (
             <div className="flex flex-col gap-3">

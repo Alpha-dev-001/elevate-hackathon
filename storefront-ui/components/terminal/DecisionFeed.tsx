@@ -25,9 +25,10 @@ interface DecisionFeedProps {
   slug: string
   onApproveAction: (id: string) => void
   onDismissAction: (id: string) => void
+  onClamped: (msg: string) => void
 }
 
-export function DecisionFeed({ actions, onApproveAction, onDismissAction }: DecisionFeedProps) {
+export function DecisionFeed({ actions, onApproveAction, onDismissAction, onClamped }: DecisionFeedProps) {
   const prefersReduced = useReducedMotion()
 
   return (
@@ -92,6 +93,7 @@ export function DecisionFeed({ actions, onApproveAction, onDismissAction }: Deci
                   action={action}
                   onApprove={onApproveAction}
                   onDismiss={onDismissAction}
+                  onClamped={onClamped}
                   delay={i * 0.07}
                 />
               </AnimatePresence>

@@ -540,6 +540,8 @@ class WSEventType(str, Enum):
     ACTION_EXPIRED = "action_expired"
     QWEN_FALLBACK = "qwen_fallback"
     PRODUCTS_PENDING = "products_pending"
+    CAPABILITY_UPDATED = "capability_updated"
+    ACTION_AUTO_EXECUTED = "action_auto_executed"
     # Client → Server
     APPROVE_ACTION = "approve_action"
     REJECT_ACTION = "reject_action"
@@ -817,6 +819,13 @@ class ApproveActionRequest(BaseModel):
     clamped by the interceptor exactly like Qwen's own number — an override
     can loosen toward the merchant's own ceiling, never bypass it."""
     discount_percent_override: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class AutopilotTrustToggleRequest(BaseModel):
+    """The merchant's own opt-in/opt-out for a (product, action_type) pair
+    that has already earned a trust streak — see AutopilotTrustDB."""
+    action_type: str
+    enabled: bool
 
 
 # ─── 19. Sprint 2 — Qwen observes: catalog pricing review (read-only) ─────────

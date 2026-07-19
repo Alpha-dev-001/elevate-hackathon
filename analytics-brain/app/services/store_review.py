@@ -296,11 +296,13 @@ async def run_store_review(
     found = await find_underperformer(merchant_id, db)
     if not found:
         return None
-    _, description = found
+    product_id, description = found
 
     from app.services.decision_engine import run_decision_cycle
     from app.services.qwen_roles import STORE_CURATOR
-    return await run_decision_cycle(merchant_id, description, db, redis, role=STORE_CURATOR)
+    return await run_decision_cycle(
+        merchant_id, description, db, redis, role=STORE_CURATOR, target_product_id=product_id,
+    )
 
 
 def start_background_loop() -> None:

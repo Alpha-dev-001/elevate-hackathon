@@ -40,21 +40,31 @@ PROACTIVE: dict[str, str] = {
 }
 
 
-def build_events(scenario: str, product_ids: list[str], customers: int) -> list[dict]:
+def build_events(
+    scenario: str, product_ids: list[str], customers: int, target_product_id: str | None = None
+) -> list[dict]:
     """Pure: a fanned list of synthetic customer events for one scenario.
 
     Each event is `{event_type, product_id, session_id, delay}`. The counts are
     floored so the scenario crosses its anomaly threshold even for one customer;
     events fan across at most `customers` sessions. Raises ValueError on an
     unknown scenario or an empty product list. No I/O.
+
+    `target_product_id`, if given and present in `product_ids`, is the product
+    that spikes — otherwise defaults to `product_ids[0]` (retakes on the same
+    store would otherwise always re-target the same first product).
     """
     if not product_ids:
         raise ValueError("no products to simulate against")
     if scenario not in SCENARIOS:
         raise ValueError(f"unknown scenario: {scenario!r} (known: {', '.join(SCENARIOS)})")
 
-    target = product_ids[0]
-    others = product_ids[1:]
+    if target_product_id and target_product_id in product_ids:
+        target = target_product_id
+        others = [pid for pid in product_ids if pid != target]
+    else:
+        target = product_ids[0]
+        others = product_ids[1:]
     customers = max(1, customers)
     events: list[dict] = []
     clock = [0.0]
@@ -89,7 +99,12 @@ def build_events(scenario: str, product_ids: list[str], customers: int) -> list[
 
 
 async def run_reactive_scenario(
-    slug: str, scenario: str, customers: int, db: "AsyncSession", redis: "Redis"
+    slug: str,
+    scenario: str,
+    customers: int,
+    db: "AsyncSession",
+    redis: "Redis",
+    target_product_id: str | None = None,
 ) -> dict:
     """Push a scenario's events through the real pipeline, then run the real
     anomaly check + decision cycle (routed to the real role). Returns a summary."""
@@ -119,7 +134,7 @@ async def run_reactive_scenario(
     ).scalars().all()
     product_ids = [p.id for p in rows] or ["demo-product"]
 
-    events = build_events(scenario, product_ids, customers)
+    events = build_events(scenario, product_ids, customers, target_product_id)
     now = time.time()
     for ev in events:
         ts = now + ev["delay"]

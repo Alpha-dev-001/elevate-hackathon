@@ -11,12 +11,12 @@
 
 [License: MIT](./LICENSE) · [Built with Qwen](https://qwencloud.com) · [Alibaba Cloud](https://alibabacloud.com)
 
-**A swarm of 4 role-scoped Qwen specialists (extensible — not fixed at four) · 2 models (incl. multimodal) · 10 typed tools · a Layer-0 structural guard + 3-layer interceptor + tamper-evident decision ledger · reactive *and* proactive triggers · per-store learning · 500+ backend tests across 105 test files · live Qwen benchmark: 100% valid, 5.6s avg**
+**A swarm of 4 role-scoped Qwen specialists (extensible — not fixed at four) · 2 models (incl. multimodal) · 10 typed tools · a Layer-0 structural guard + 3-layer interceptor + tamper-evident decision ledger · reactive *and* proactive triggers · per-store learning · 540+ backend tests across 87 test files · live Qwen benchmark: 100% valid, 5.6s avg**
 
 <!-- TODO(hero): 1280×640 — merchant terminal mid-decision, an option card visible + Decision Trace panel open. See docs/IMAGE_GALLERY.md #01 -->
 ![Elevate — autonomous autopilot for running a store](docs/images/01-hero.png)
 
-**▶ [3-minute demo video](TODO_DEMO_VIDEO_URL)**  ·  **🌐 [Live backend](http://47.243.86.14/api/health)** (on Alibaba Cloud ECS)  ·  **🖼 [Screenshots](TODO_DEVPOST_GALLERY_URL)**
+**▶ [3-minute demo video](TODO_DEMO_VIDEO_URL)**  ·  **🌐 [Live backend](http://47.243.86.14/api/health)** (on Alibaba Cloud ECS)  ·  **🖼 [More screenshots](docs/images/)**
 
 ---
 
@@ -65,11 +65,11 @@ Scheduled tick (proactive) ─┘   │                              │
                                 │                    │  3 System safety → hard block      │
                                 │                    └───────────────┬────────────────────┘
                                 │                                    ▼
-                                │                          TRUST GATE — earned?
+                                │                   TRUST GATE — earned + merchant opted in?
                                 │                        ┌───────────┴───────────┐
                                 │                 human-in-the-loop        auto-apply (bounded,
-                                │                 option card, merchant     already-safe moves only)
-                                │                 approves / rejects              │
+                                │                 option card, merchant     already-safe moves,
+                                │                 approves / rejects        merchant's own toggle)
                                 │                        └───────────┬───────────┘
                                 ▼                                    ▼
                         DECISION LEDGER  ◄──── every status change ──► EXECUTE → storefront morphs
@@ -168,10 +168,14 @@ with human-in-the-loop checkpoints at critical decisions."* In Elevate the optio
 card **is** that checkpoint — it's the only path a gated decision can take to
 reach the live storefront. The merchant approves or rejects, and **both outcomes
 are written to the ledger and the learning loop.** Trust is *earned per
-(store, product)*: only small, already-interceptor-safe pricing moves auto-apply,
-trust only ever removes the gate — it never widens the safe range — and a single
-dismissal resets it. Full autonomy everywhere would score *worse* on this track,
-and the design reflects that on purpose.
+(store, product)*, but earning it only unlocks the option — small,
+already-interceptor-safe pricing moves can auto-apply once trust is earned
+*and* the merchant has explicitly opted that product into it, one toggle at
+a time, reversible any time. Trust only ever removes the gate — it never
+widens the safe range — and a single dismissal resets the streak. Full
+autonomy everywhere would score *worse* on this track, and the design
+reflects that on purpose: the merchant decides when Qwen gets to skip the
+checkpoint, not just how good Qwen's track record has been.
 
 | Judging criterion | Weight | Where Elevate proves it |
 | --- | --- | --- |
@@ -297,7 +301,7 @@ The README keeps the pitch tight. Everything goes deeper in dedicated docs.
 | **How it works** — interceptor, guard, roles, learning, MCP, telemetry, token efficiency | [docs/TECHNICAL-DEEP-DIVE.md](./docs/TECHNICAL-DEEP-DIVE.md) |
 | **Live Qwen benchmarks** — real API, latency + validity, guarded-vs-bare ablation | [BENCHMARKS.md](./BENCHMARKS.md) |
 | **Architecture diagrams** — Mermaid flowcharts, data flow | [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) |
-| **Testing** — 105 test files (78 backend, 27 frontend), adversarial suites, benchmarks | [docs/TESTING.md](./docs/TESTING.md) |
+| **Testing** — 115 test files (87 backend, 28 frontend), adversarial suites, benchmarks | [docs/TESTING.md](./docs/TESTING.md) |
 | **Qwen model usage** — which models, which jobs, token costs | [QWEN_USAGE.md](./QWEN_USAGE.md) |
 
 ---

@@ -25,7 +25,7 @@ function makeAction(overrides: Partial<AgentAction> = {}): AgentAction {
 
 describe('OptionCard — discount override', () => {
   it('shows an input pre-filled with Qwen\'s proposed percent for a discount action', () => {
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={vi.fn()} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={vi.fn()} onClamped={vi.fn()} />)
     const input = screen.getByDisplayValue('20') as HTMLInputElement
     expect(input).toBeInTheDocument()
     expect(screen.getByText(/Qwen proposed 20%/)).toBeInTheDocument()
@@ -33,18 +33,18 @@ describe('OptionCard — discount override', () => {
 
   it('renders no override input for an action type with no discount', () => {
     render(<OptionCard action={makeAction({ action_type: 'layout_morph', payload: { hero_product_id: 'p1' } })}
-      onApprove={vi.fn()} onDismiss={vi.fn()} />)
+      onApprove={vi.fn()} onDismiss={vi.fn()} onClamped={vi.fn()} />)
     expect(screen.queryByText(/Discount %/)).toBeNull()
   })
 
   it('approving with an unedited percent sends no override', async () => {
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={vi.fn()} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={vi.fn()} onClamped={vi.fn()} />)
     fireEvent.click(screen.getByText('Approve'))
     expect(api.approveAction).toHaveBeenCalledWith('act_1', undefined)
   })
 
   it('editing the percent and approving sends the override', async () => {
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={vi.fn()} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={vi.fn()} onClamped={vi.fn()} />)
     const input = screen.getByDisplayValue('20') as HTMLInputElement
     fireEvent.change(input, { target: { value: '35' } })
     fireEvent.click(screen.getByText('Approve'))

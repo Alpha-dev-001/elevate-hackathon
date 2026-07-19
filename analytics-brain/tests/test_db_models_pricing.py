@@ -24,7 +24,7 @@ def test_product_price_history_defaults():
 
 def test_autopilot_trust_has_expected_columns():
     cols = AutopilotTrustDB.__table__.columns
-    for name in ("merchant_id", "product_id", "action_type", "streak", "updated_at"):
+    for name in ("merchant_id", "product_id", "action_type", "streak", "auto_apply_enabled", "updated_at"):
         assert name in cols
 
 

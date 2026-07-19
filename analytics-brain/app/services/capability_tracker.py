@@ -64,6 +64,25 @@ async def record_unmet(
     await db.commit()
 
     logger.info("[capability] %s wants %r (count=%d proposed=%s)", merchant_id, key, entry["count"], proposed)
+
+    # Terminal has no other way to learn of this — capability gaps originate
+    # in the builder's point-and-edit flow, a different page than the
+    # terminal, so this WS push is the only path (see CAPABILITY_UPDATED).
+    try:
+        from app.core.ws_manager import manager
+        from app.models.schemas import WSMessage, WSEventType
+        await manager.push_to_terminal(
+            merchant_id,
+            WSMessage(
+                event=WSEventType.CAPABILITY_UPDATED,
+                payload={"capabilities": await list_capabilities(merchant_id, db)},
+                merchant_id=merchant_id,
+                timestamp=int(time.time() * 1000),
+            ),
+        )
+    except Exception as e:  # noqa: BLE001 — a missed push must never break the intent flow
+        logger.warning("[capability] WS push failed for %s: %s", merchant_id, e)
+
     return {"capability": key, "label": capability_label, "count": entry["count"], "proposed": proposed}
 
 

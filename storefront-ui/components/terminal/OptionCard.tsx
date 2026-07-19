@@ -6,8 +6,20 @@ import { api } from '@/lib/api'
 import { IconBolt } from '@/components/icons'
 import type { AgentAction } from '@/types/schemas'
 
-// ── Pending action TTL (must match backend config: pending_action_ttl_seconds) ─
-const PENDING_ACTION_TTL_MS = 5 * 60 * 1000 // 5 minutes
+// ── Pending action TTL (must match backend config: pending_action_ttl_seconds /
+// pending_action_ttl_seconds_durable — see decision_engine.DURABLE_ACTION_TYPES).
+// A reactive trigger (flash sale, cart nudge) really can go stale in minutes;
+// a structural catalog finding (duplicate SKUs, an underperformer) does not
+// resolve itself on a clock, so it gets a much longer window before the UI
+// calls it "expired" and offers to dismiss it. ─────────────────────────────
+const REACTIVE_TTL_MS = 5 * 60 * 1000        // 5 minutes
+const DURABLE_TTL_MS = 24 * 60 * 60 * 1000   // 24 hours
+const DURABLE_ACTION_TYPES = new Set([
+  'duplicate_merge', 'layout_morph', 'copy_rewrite', 'feature_product', 'price_rebalance',
+])
+function ttlMsFor(actionType: string): number {
+  return DURABLE_ACTION_TYPES.has(actionType) ? DURABLE_TTL_MS : REACTIVE_TTL_MS
+}
 
 // ── Dismiss-confirm window for duplicate_merge only (must exceed nothing on
 // the backend — this is purely client-side, the real dismiss call is just
@@ -71,13 +83,17 @@ interface OptionCardProps {
   onApprove: (id: string) => void
   /** Called with the action id after a successful dismiss. */
   onDismiss: (id: string) => void
+  /** Called when approval succeeded but the interceptor clamped the request —
+   *  parent shows this as a page-level alert, since the card itself is about
+   *  to unmount and a message tied to its lifecycle is easy to miss. */
+  onClamped: (msg: string) => void
   /** Entry stagger delay in seconds */
   delay?: number
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCardProps) {
+export function OptionCard({ action, onApprove, onDismiss, onClamped, delay = 0 }: OptionCardProps) {
   const reduced = useReducedMotion()
   const duration = reduced ? 0 : 0.45
   const microDuration = reduced ? 0 : 0.15
@@ -117,7 +133,8 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
     return () => clearInterval(interval)
   }, [action.created_at])
 
-  const isExpired = ageSeconds >= PENDING_ACTION_TTL_MS / 1000
+  const isExpired = ageSeconds >= ttlMsFor(action.action_type) / 1000
+  const isDurable = DURABLE_ACTION_TYPES.has(action.action_type)
   const ageLabel = ageSeconds < 60 ? `${ageSeconds}s ago` : `${Math.floor(ageSeconds / 60)}m ago`
 
   const isLoading = isApproving || isDismissing
@@ -144,6 +161,11 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
         // visible and tell the merchant plainly; do NOT treat this as success.
         showError('Blocked at approval — store conditions changed, this did not go live')
       } else {
+        // Applied — but if the interceptor's execution-time re-check clamped
+        // it (e.g. an override above the discount ceiling), surface that as
+        // a page-level alert. The card is about to unmount either way, so a
+        // message tied to ITS lifecycle is easy to miss.
+        if (updated.constraint_check) onClamped(updated.constraint_check)
         onApprove(action.id)
       }
     } catch {
@@ -281,7 +303,9 @@ export function OptionCard({ action, onApprove, onDismiss, delay = 0 }: OptionCa
               color: 'var(--color-danger)',
               border: '1px solid rgba(255, 107, 107, 0.2)',
             }}>
-              Signal expired — the anomaly that triggered this has likely resolved. Dismiss or approve anyway.
+              {isDurable
+                ? 'This proposal has sat a long time — worth a fresh look before approving. Dismiss or approve anyway.'
+                : 'Signal expired — the anomaly that triggered this has likely resolved. Dismiss or approve anyway.'}
             </p>
           )}
 

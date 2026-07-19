@@ -57,8 +57,17 @@ export function LayoutRouter({ store, slug }: { store: PublicStore; slug: string
   const theme = resolveTheme(store)
   const bt = store.brand_token ?? null
 
-  // Promo banner (shared across all layouts)
+  // Promo banner (shared across all layouts). Each product prices itself
+  // independently (see best_active_promo in store.py) — several can be on
+  // sale at once. Naming just promos[0] here would misrepresent the others
+  // as either absent or as if they shared its label, so a single active promo
+  // is named directly and multiple collapse to an accurate count instead of
+  // picking one arbitrarily.
   const hasPromo = store.promos.length > 0
+  const promoText =
+    store.promos.length === 1
+      ? store.promos[0].label
+      : `${store.promos.length} items on sale right now`
   const promoBar = hasPromo ? (
     <div
       className="w-full text-center py-2.5 text-sm font-medium"
@@ -69,7 +78,7 @@ export function LayoutRouter({ store, slug }: { store: PublicStore; slug: string
           : readableOn(store.palette.accent, store.palette.background),
       }}
     >
-      {store.promos[0].label}
+      {promoText}
     </div>
   ) : null
 

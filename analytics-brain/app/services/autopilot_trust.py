@@ -38,6 +38,7 @@ def next_streak(current_streak: int, *, approved: bool, outcome_negative: bool) 
 
 def should_auto_apply(
     streak: int,
+    auto_apply_enabled: bool,
     clamped_price: float,
     baseline_price: float,
     constraints: "BusinessConstraints",
@@ -49,8 +50,12 @@ def should_auto_apply(
     ceiling means the effective band is min(10%, 5%) = 5%, not a flat 10%
     regardless of what the merchant authorized); downward moves are already
     floor-clamped by enforce_price_rebalance (margin floor / below-cost
-    block), so the flat 10% band applies directly."""
-    if streak < TRUST_STREAK_THRESHOLD or baseline_price <= 0:
+    block), so the flat 10% band applies directly.
+
+    A qualifying streak is necessary but never sufficient — auto_apply_enabled
+    is a separate, merchant-set choice (see AutopilotTrustDB's own docstring).
+    Earning trust unlocks the option; it never flips the switch itself."""
+    if not auto_apply_enabled or streak < TRUST_STREAK_THRESHOLD or baseline_price <= 0:
         return False
     move_percent = (clamped_price - baseline_price) / baseline_price * 100
     if move_percent > 0:
@@ -74,6 +79,97 @@ async def get_trust_streak(
         .where(AutopilotTrustDB.action_type == action_type)
     )
     return row.streak if row else 0
+
+
+async def get_trust_state(
+    merchant_id: str, product_id: str, action_type: str, db: "AsyncSession"
+) -> tuple[int, bool]:
+    """(streak, auto_apply_enabled) — the pair should_auto_apply actually
+    needs. Missing row == (0, False), same "never defaults to trusted"
+    guarantee as get_trust_streak."""
+    from sqlalchemy import select
+    from app.models.db_models import AutopilotTrustDB
+
+    row = await db.scalar(
+        select(AutopilotTrustDB)
+        .where(AutopilotTrustDB.merchant_id == merchant_id)
+        .where(AutopilotTrustDB.product_id == product_id)
+        .where(AutopilotTrustDB.action_type == action_type)
+    )
+    return (row.streak, row.auto_apply_enabled) if row else (0, False)
+
+
+async def set_auto_apply_enabled(
+    merchant_id: str, product_id: str, action_type: str, enabled: bool, db: "AsyncSession"
+) -> int:
+    """The merchant's own toggle — called from the /products/{id}/autopilot-trust
+    endpoint, never automatically. Enabling requires an already-earned streak
+    (can't opt into trust that doesn't exist yet); disabling is always allowed,
+    no threshold check, matching "trust is lost faster than it's earned."
+    Returns the current streak so the caller can report it back.
+
+    Raises ValueError if enabling is attempted below TRUST_STREAK_THRESHOLD —
+    the caller (a real merchant action) should never hit this in the normal
+    UI flow, where the toggle is only ever shown once eligible; it exists as
+    a genuine guard against enabling trust that was never earned, not just a
+    UI nicety."""
+    from sqlalchemy import select
+    from app.models.db_models import AutopilotTrustDB
+
+    row = await db.scalar(
+        select(AutopilotTrustDB)
+        .where(AutopilotTrustDB.merchant_id == merchant_id)
+        .where(AutopilotTrustDB.product_id == product_id)
+        .where(AutopilotTrustDB.action_type == action_type)
+    )
+    streak = row.streak if row else 0
+    if enabled and streak < TRUST_STREAK_THRESHOLD:
+        raise ValueError(
+            f"cannot enable auto-apply below the trust threshold "
+            f"(streak={streak}, needs {TRUST_STREAK_THRESHOLD})"
+        )
+    if row:
+        row.auto_apply_enabled = enabled
+        row.updated_at = int(time.time() * 1000)
+    else:
+        # Only reachable for enabled=False on a never-earned pair — a no-op
+        # worth persisting anyway so list_eligible_trust has one row per pair.
+        db.add(AutopilotTrustDB(
+            id=str(uuid.uuid4()), merchant_id=merchant_id, product_id=product_id,
+            action_type=action_type, streak=0, auto_apply_enabled=enabled,
+        ))
+    await db.commit()
+    logger.info(
+        "[autopilot_trust] %s/%s/%s auto_apply_enabled -> %s (streak=%d)",
+        merchant_id, product_id, action_type, enabled, streak,
+    )
+    return streak
+
+
+async def list_eligible_trust(merchant_id: str, db: "AsyncSession") -> list[dict]:
+    """Every (product, action_type) pair that has earned the threshold —
+    what the terminal's Earned Trust panel shows, regardless of whether the
+    merchant has already toggled it on. Includes the product name since the
+    frontend has no other cheap way to resolve product_id -> a human label."""
+    from sqlalchemy import select
+    from app.models.db_models import AutopilotTrustDB, ProductDB
+
+    rows = (await db.execute(
+        select(AutopilotTrustDB, ProductDB.name)
+        .join(ProductDB, ProductDB.id == AutopilotTrustDB.product_id)
+        .where(AutopilotTrustDB.merchant_id == merchant_id)
+        .where(AutopilotTrustDB.streak >= TRUST_STREAK_THRESHOLD)
+    )).all()
+    return [
+        {
+            "product_id": trust.product_id,
+            "product_name": name,
+            "action_type": trust.action_type,
+            "streak": trust.streak,
+            "auto_apply_enabled": trust.auto_apply_enabled,
+        }
+        for trust, name in rows
+    ]
 
 
 async def update_trust_streak(

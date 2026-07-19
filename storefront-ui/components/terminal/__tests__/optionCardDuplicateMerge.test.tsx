@@ -46,7 +46,7 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
   it('shows an undo snackbar instead of dismissing immediately', async () => {
     const onDismiss = vi.fn()
     const user = userEvent.setup({ delay: null })
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} onClamped={vi.fn()} />)
     await user.click(screen.getByText('Dismiss'))
 
     expect(screen.getByText(/Duplicate merge dismissed/)).toBeTruthy()
@@ -57,7 +57,7 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
   it('Undo cancels the dismiss and restores the card', async () => {
     const onDismiss = vi.fn()
     const user = userEvent.setup({ delay: null })
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} onClamped={vi.fn()} />)
     await user.click(screen.getByText('Dismiss'))
     await user.click(screen.getByText('Undo'))
 
@@ -70,7 +70,7 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
   it('commits the real dismiss after the undo window elapses', async () => {
     const onDismiss = vi.fn()
     const user = userEvent.setup({ delay: null })
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} onClamped={vi.fn()} />)
     await user.click(screen.getByText('Dismiss'))
 
     vi.advanceTimersByTime(5100)
@@ -82,7 +82,7 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
     const onDismiss = vi.fn()
     const user = userEvent.setup({ delay: null })
     render(
-      <OptionCard action={makeAction({ action_type: 'flash_sale' })} onApprove={vi.fn()} onDismiss={onDismiss} />,
+      <OptionCard action={makeAction({ action_type: 'flash_sale' })} onApprove={vi.fn()} onDismiss={onDismiss} onClamped={vi.fn()} />,
     )
     await user.click(screen.getByText('Dismiss'))
 
@@ -95,7 +95,7 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
     const onDismiss = vi.fn()
     const user = userEvent.setup({ delay: null })
     const old = Date.now() - 10 * 60 * 1000 // 10 minutes ago — past the 5-minute TTL
-    render(<OptionCard action={makeAction({ created_at: old })} onApprove={vi.fn()} onDismiss={onDismiss} />)
+    render(<OptionCard action={makeAction({ created_at: old })} onApprove={vi.fn()} onDismiss={onDismiss} onClamped={vi.fn()} />)
     await user.click(screen.getByText('Dismiss (expired)'))
 
     await waitFor(() => expect(dismissAction).toHaveBeenCalledWith('act_1'))
@@ -108,7 +108,7 @@ describe('OptionCard — duplicate_merge dismiss confirm/undo', () => {
     dismissAction.mockImplementationOnce(
       () => new Promise((resolve) => { resolveDismiss = resolve }),
     )
-    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} />)
+    render(<OptionCard action={makeAction()} onApprove={vi.fn()} onDismiss={onDismiss} onClamped={vi.fn()} />)
     await user.click(screen.getByText('Dismiss'))
 
     // Fire the undo-window timer — commitDismiss() starts, dismissAction is

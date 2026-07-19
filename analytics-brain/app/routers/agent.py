@@ -36,6 +36,7 @@ def _to_schema(row: AgentActionDB) -> AgentAction:
         estimated_confidence=row.estimated_confidence,
         payload=row.payload,
         brand_check=row.brand_check,
+        constraint_check=row.constraint_check or "",
         status=AgentActionStatus(row.status),
         created_at=row.created_at,
         approved_at=row.approved_at,
@@ -142,8 +143,12 @@ async def approve_action(
             if state is not None:
                 schedule_observation(row.id, state, redis=await get_redis())
         except Exception as e:  # noqa: BLE001 — observation scheduling must never fail the approve
+            # action_id (this endpoint's own string parameter), not row.id —
+            # a failed op in this try block can leave the session's
+            # transaction poisoned; re-touching an expired ORM attribute here
+            # would trigger a lazy reload on that same broken session.
             import logging
-            logging.getLogger(__name__).warning("[agent] could not schedule observation for %s: %s", row.id, e)
+            logging.getLogger(__name__).warning("[agent] could not schedule observation for %s: %s", action_id, e)
 
     return {"action": _to_schema(row).model_dump()}
 
@@ -178,8 +183,9 @@ async def dismiss_action(
         from app.core.redis import get_redis
         await observe_outcome(row.id, db, await get_redis(), behavior="dismissed")
     except Exception as e:  # noqa: BLE001
+        # action_id, not row.id — see the schedule_observation except above.
         import logging
-        logging.getLogger(__name__).warning("[agent] dismiss observation failed for %s: %s", row.id, e)
+        logging.getLogger(__name__).warning("[agent] dismiss observation failed for %s: %s", action_id, e)
 
     if row.action_type == "duplicate_merge":
         try:
@@ -192,7 +198,7 @@ async def dismiss_action(
             if len(group_ids) >= 2:
                 await suppress_duplicate_group(row.merchant_id, group_ids, await get_redis())
         except Exception as e:  # noqa: BLE001 — suppression must never block a dismiss
-            logger.warning("[agent] duplicate-merge suppression failed for %s: %s", row.id, e)
+            logger.warning("[agent] duplicate-merge suppression failed for %s: %s", action_id, e)
 
     if row.action_type == "cart_dwell_nudge":
         session_id = (row.payload or {}).get("session_id")
@@ -202,7 +208,7 @@ async def dismiss_action(
                 from app.core.redis import get_redis
                 await suppress_dwell_session(row.merchant_id, session_id, await get_redis())
             except Exception as e:  # noqa: BLE001 — suppression must never block a dismiss
-                logger.warning("[agent] dwell suppression failed for %s: %s", row.id, e)
+                logger.warning("[agent] dwell suppression failed for %s: %s", action_id, e)
 
     return {"action": _to_schema(row).model_dump()}
 
@@ -213,8 +219,8 @@ async def dismiss_action(
 # it must not blanket-discount the browse grid. Labels only; the discount depth is
 # Qwen's payload, falling back to the per-type config default.
 _PROMO_LABELS = {
-    "flash_sale":     "Flash Sale — {d}% off",
-    "scarcity_price": "Limited time — {d}% off",
+    "flash_sale":     "Flash Sale — {d}% off {name}",
+    "scarcity_price": "Limited time — {d}% off {name}",
 }
 
 
@@ -286,6 +292,15 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
         )
         return False
 
+    # Record what was ACTUALLY applied, not just what was requested — the row
+    # is what gets committed, receipted, and returned to the merchant, so if
+    # this doesn't happen the interceptor can correctly protect the live
+    # store while the audit trail and the merchant-facing response both keep
+    # showing the pre-clamp number with no warning at all.
+    row.payload = {**payload_with_default, **clamped_args}
+    if constraint_check:
+        row.constraint_check = constraint_check
+
     discount = clamped_args["discount_percent"]
     expires_at = _payload_duration_ms(payload)
 
@@ -293,7 +308,7 @@ async def _register_promo(row: AgentActionDB, label_tmpl: str, payload: dict, db
         id=row.promo_id,
         product_id=product_id,
         discount_percent=discount,
-        label=label_tmpl.format(d=int(discount)),
+        label=label_tmpl.format(d=int(discount), name=product.name),
         expires_at=expires_at,
         triggered_by="auto",
     )
@@ -346,6 +361,13 @@ async def _register_recovery(row: AgentActionDB, payload: dict, db: AsyncSession
             row.merchant_id, constraint_check,
         )
         return False
+
+    # Same reasoning as _register_promo: the row must reflect what was
+    # actually applied, not the pre-clamp request, or the audit trail and
+    # the merchant-facing response silently disagree with the live store.
+    row.payload = {**payload_with_default, **clamped_args}
+    if constraint_check:
+        row.constraint_check = constraint_check
 
     discount = clamped_args["discount_percent"]
     expires_at = _payload_duration_ms(payload)
@@ -421,6 +443,11 @@ async def _register_price_rebalance(row: AgentActionDB, payload: dict, db: Async
             row.id, constraint_check,
         )
         return False
+
+    # Same reasoning as _register_promo: record what was actually applied.
+    row.payload = {**payload, "new_price": clamped_price}
+    if constraint_check:
+        row.constraint_check = constraint_check
 
     product.price = clamped_price
     await db.flush()

@@ -26,6 +26,29 @@ from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Action types whose premise is a structural/catalog fact, not a live signal —
+# duplicate SKUs or an underperforming product don't resolve themselves on a
+# clock the way a velocity spike or a dwelling cart does. These use the longer
+# pending_action_ttl_seconds_durable instead of the short reactive-trigger TTL,
+# so a card doesn't vanish on a merchant (or a judge) who takes >5 minutes to
+# read the reasoning before approving.
+DURABLE_ACTION_TYPES = frozenset({
+    AgentActionType.DUPLICATE_MERGE,
+    AgentActionType.LAYOUT_MORPH,
+    AgentActionType.COPY_REWRITE,
+    AgentActionType.FEATURE_PRODUCT,
+    AgentActionType.PRICE_REBALANCE,
+})
+
+
+def _pending_ttl_for(action_type: str) -> int:
+    settings = get_settings()
+    try:
+        is_durable = AgentActionType(action_type) in DURABLE_ACTION_TYPES
+    except ValueError:
+        is_durable = False
+    return settings.pending_action_ttl_seconds_durable if is_durable else settings.pending_action_ttl_seconds
+
 DECISION_PROMPT = """{role_intro}
 Brand mood: {mood} | Voice: {brand_voice}
 Brand rules (never violate): {brand_rules_summary}
@@ -159,13 +182,16 @@ def compose_decision_prompt(
     return prompt
 
 
-async def _dismiss_pending_action(action: AgentActionDB, merchant_id: str, redis: "Redis", reason: str) -> None:
-    """Mark a pending action dismissed and fire its side effects: dwell
-    suppression for a cart_dwell_nudge, and an ACTION_EXPIRED push so the
-    terminal removes the card immediately. Does NOT commit — the caller owns
-    the transaction boundary. The stale path commits right away; the
-    priority-supersede path commits together with the replacement action, so
-    the old card is never retired unless the new one is really created.
+async def _dismiss_pending_action(
+    action: AgentActionDB, merchant_id: str, db: "AsyncSession", redis: "Redis", reason: str
+) -> None:
+    """Mark a pending action dismissed and fire its side effects: a ledger
+    receipt, dwell suppression for a cart_dwell_nudge, and an ACTION_EXPIRED
+    push so the terminal removes the card immediately. Does NOT commit — the
+    caller owns the transaction boundary. The stale path commits right away;
+    the priority-supersede path commits together with the replacement action,
+    so the old card is never retired unless the new one is really created.
+    append_receipt only flushes, never commits, so it's safe either way.
 
     The dismissed action's `session_id` is read into a LOCAL (dwell_session_id)
     rather than reassigning run_decision_cycle's own `session_id` parameter —
@@ -174,6 +200,8 @@ async def _dismiss_pending_action(action: AgentActionDB, merchant_id: str, redis
     the `if session_id:` line further down. Isolating it in the helper removes
     that footgun entirely."""
     action.status = "dismissed"
+    from app.services import receipts
+    await receipts.append_receipt(db, merchant_id, "dismissed", action_row=action)
     if action.action_type == "cart_dwell_nudge":
         dwell_session_id = (action.payload or {}).get("session_id")
         if dwell_session_id:
@@ -281,11 +309,11 @@ async def run_decision_cycle(
     superseded_prefix = ""
     supersede_existing = None  # a non-stale, lower-priority action to retire IFF a replacement is created
     if existing:
-        ttl = get_settings().pending_action_ttl_seconds
+        ttl = _pending_ttl_for(existing.action_type)
         age_seconds = (int(time.time() * 1000) - existing.created_at) / 1000
         if age_seconds > ttl:
             # Stale — safe to dismiss immediately (unchanged from today).
-            await _dismiss_pending_action(existing, merchant_id, redis, "signal_stale")
+            await _dismiss_pending_action(existing, merchant_id, db, redis, "signal_stale")
             await db.commit()
             logger.info(
                 "[decision] auto-dismissed stale action %s (age: %.0fs, ttl: %ds) for %s",
@@ -511,12 +539,33 @@ async def run_decision_cycle(
             if p.id == targeted_pid:
                 targeted_product = p
                 break
-        if targeted_product is None and target_product_id is not None:
+        # duplicate_merge's keep_product_id is authoritative for its target
+        # (unlike a generically-parsed product_id, which could be Qwen
+        # hallucination) — a top-10-sample miss must still resolve via DB,
+        # or the narrative silently mislabels the card with products[0]'s
+        # name instead of the actual duplicate-merge target.
+        if targeted_product is None and (
+            target_product_id is not None or tool_name == "propose_duplicate_merge"
+        ):
             targeted_product = await db.get(ProductDB, targeted_pid)
             if targeted_product and targeted_product.merchant_id != merchant_id:
                 targeted_product = None
     targeted_product_name = targeted_product.name if targeted_product else None
     product_name_for_narrative = targeted_product_name or (products[0].name if products else None)
+
+    # A caller-supplied target_product_id is a verified, real product (the
+    # caller looked it up in the DB before calling us) — it must win over
+    # whatever product_id string Qwen's own tool call happened to contain.
+    # Without this, the interceptor's cost/price check and the narrative both
+    # correctly use the resolved product, but the PERSISTED payload still
+    # carries Qwen's raw tool_args.product_id — so a hallucinated ID (Qwen
+    # sees a full multi-product catalog and free-text description, not a
+    # single scoped target) silently survives into the option card and can
+    # never execute, since nothing else ever corrects it. See store_review.py
+    # find_underperformer's real, verified id being discarded for the bug
+    # this closes.
+    if target_product_id is not None and targeted_product is not None and "product_id" in tool_args:
+        tool_args = {**tool_args, "product_id": target_product_id}
 
     # Interceptor — real Layer 2/3 primitives, before this ever becomes an
     # option card. Declining here mirrors "Qwen declined to propose an action".
@@ -598,10 +647,10 @@ async def run_decision_cycle(
     # outside the auto-apply band, takes the unchanged "pending" path.
     auto_trusted = False
     if action_type_enum == AgentActionType.PRICE_REBALANCE and targeted_product:
-        from app.services.autopilot_trust import get_trust_streak, should_auto_apply
-        streak = await get_trust_streak(merchant_id, targeted_pid, "price_rebalance", db)
+        from app.services.autopilot_trust import get_trust_state, should_auto_apply
+        streak, auto_apply_enabled = await get_trust_state(merchant_id, targeted_pid, "price_rebalance", db)
         auto_trusted = should_auto_apply(
-            streak, tool_args["new_price"], targeted_product.baseline_price, constraints,
+            streak, auto_apply_enabled, tool_args["new_price"], targeted_product.baseline_price, constraints,
         )
 
     # Deferred priority-supersede (decided at the gate): the replacement is
@@ -613,7 +662,7 @@ async def run_decision_cycle(
     # anywhere above, this line is never reached and the old card survives.
     if supersede_existing is not None:
         await _dismiss_pending_action(
-            supersede_existing, merchant_id, redis, "superseded_by_higher_priority"
+            supersede_existing, merchant_id, db, redis, "superseded_by_higher_priority"
         )
 
     action_db = AgentActionDB(
@@ -661,6 +710,33 @@ async def run_decision_cycle(
             await db.commit()
             await receipts.append_receipt(db, merchant_id, "executed", action_row=action_db)
             await _broadcast_state_update(merchant_id)
+            # The merchant explicitly opted into this via the auto-apply
+            # toggle, but "opted in" isn't the same as "invisible" — this is
+            # the one path that skips the approval card entirely, so it's
+            # also the one that most needs an explicit FYI. Belt-and-suspenders
+            # with state_updated above: that morphs the storefront, this
+            # tells the terminal WHY.
+            try:
+                from app.models.schemas import WSMessage
+                await manager.push_to_terminal(
+                    merchant_id,
+                    WSMessage(
+                        event=WSEventType.ACTION_AUTO_EXECUTED,
+                        payload={"action": {
+                            "id": action_db.id,
+                            "action_type": action_db.action_type,
+                            "title": action_db.title,
+                            "description": action_db.description,
+                            "reasoning": action_db.reasoning,
+                            "role": action_db.role,
+                            "payload": action_db.payload,
+                        }},
+                        merchant_id=merchant_id,
+                        timestamp=int(time.time() * 1000),
+                    ),
+                )
+            except Exception as e:  # noqa: BLE001 — a missed FYI push must never break execution
+                logger.warning("[decision] auto-executed WS push failed for %s: %s", action_db.id, e)
     else:
         await receipts.append_receipt(db, merchant_id, "proposed", action_row=action_db)
     await db.commit()

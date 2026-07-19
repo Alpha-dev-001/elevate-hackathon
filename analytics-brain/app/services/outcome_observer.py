@@ -96,9 +96,33 @@ async def observe_outcome(
                     approved=False, outcome_negative=True,
                 )
             except Exception as e:  # noqa: BLE001 — trust tracking must never block outcome observation
+                # action_id (this function's own string parameter), not
+                # action.id — a failed write can leave the session's
+                # transaction poisoned, and re-touching an ORM attribute here
+                # would trigger a lazy reload on that same broken session,
+                # raising a SECOND exception from inside this handler.
                 logger.warning(
-                    "[outcome_observer] dismiss trust-reset failed for %s: %s", action.id, e,
+                    "[outcome_observer] dismiss trust-reset failed for %s: %s", action_id, e,
                 )
+                # Recover the session — without this, every subsequent query
+                # on this same `db` (including the caller's own ORM attribute
+                # access right after this function returns) raises
+                # PendingRollbackError instead of working normally. Safe here
+                # specifically because write_memory (above) already committed
+                # its own entry in a separate transaction — this only
+                # discards the failed, uncommitted trust-streak write.
+                await db.rollback()
+                # rollback() unconditionally expires every object in the
+                # session regardless of expire_on_commit (that setting only
+                # governs commit) — `action` is the SAME identity-mapped
+                # object the caller holds (dismiss_action's `row`), so a
+                # plain attribute access on it right after this function
+                # returns would trigger an implicit lazy-load, which async
+                # SQLAlchemy does not support outside an explicit await
+                # (raises MissingGreenlet). Refresh it back to a loaded state
+                # now, on the properly awaited path, instead of leaving that
+                # landmine for whatever the caller does next.
+                await db.refresh(action)
 
     return entry
 

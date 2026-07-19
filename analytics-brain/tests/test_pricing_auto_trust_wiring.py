@@ -8,7 +8,7 @@ def test_auto_trusted_status_fields_are_internally_consistent():
     merchant_behavior must all agree, or the terminal feed shows a
     self-contradictory row (e.g. status='executed' with approved_at=None)."""
     constraints = BusinessConstraints(max_uplift_percent=10.0)
-    auto_trusted = should_auto_apply(TRUST_STREAK_THRESHOLD, 21.0, 20.0, constraints)
+    auto_trusted = should_auto_apply(TRUST_STREAK_THRESHOLD, True, 21.0, 20.0, constraints)
     assert auto_trusted is True
 
     # The fields run_decision_cycle sets when auto_trusted is True:
@@ -25,7 +25,7 @@ def test_auto_trusted_status_fields_are_internally_consistent():
 
 def test_gated_status_fields_are_internally_consistent():
     constraints = BusinessConstraints(max_uplift_percent=10.0)
-    auto_trusted = should_auto_apply(0, 21.0, 20.0, constraints)  # streak 0, below threshold
+    auto_trusted = should_auto_apply(0, True, 21.0, 20.0, constraints)  # streak 0, below threshold
     assert auto_trusted is False
 
     status = "executed" if auto_trusted else "pending"

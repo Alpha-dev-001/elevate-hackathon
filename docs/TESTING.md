@@ -1,6 +1,6 @@
 # Elevate — Testing
 
-**105 test files** (78 backend, 27 frontend) · **500+ backend tests** covering
+**115 test files** (87 backend, 28 frontend) · **540+ backend tests** covering
 every Qwen output path, validation layer, role/guard/learning path, and
 adversarial input.
 

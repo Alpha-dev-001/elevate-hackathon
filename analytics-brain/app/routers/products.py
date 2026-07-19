@@ -34,6 +34,7 @@ from app.models.schemas import (
     OnboardingStatus,
     WSMessage,
     WSEventType,
+    AutopilotTrustToggleRequest,
 )
 from app.services import brand as brand_svc
 from app.services.brand import BrandGenerationError
@@ -357,16 +358,83 @@ async def delete_product(
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pending products (never approved, is_active=False) are hard-deleted —
-    they were never live and no orders reference them.  Active products are
-    soft-deleted (is_active=False) to keep order history intact."""
+    """Pending products (never approved: is_active=False, deleted_at=None) are
+    hard-deleted — they were never live, so nothing (price history, trust
+    tracking) SHOULD reference them. Everything else is soft-deleted
+    (is_active=False, deleted_at set) to keep order/pricing history intact
+    and to keep it out of the pending-approval queue, which checks
+    deleted_at to tell "soft-deleted" apart from "genuinely pending" — both
+    share is_active=False.
+
+    That "should" is load-bearing, not guaranteed: a pending product CAN end
+    up with real references anyway (found live — a rollup/price-history
+    write landed against one before it was ever approved). Check for that
+    BEFORE attempting the hard delete, rather than attempt-and-catch — a
+    failed flush's IntegrityError leaves the async session in a state where
+    recovering it well enough to keep serving this same request is its own
+    minefield (rollback() unconditionally expires every object, and a
+    subsequent implicit reload outside a fresh awaited call reliably hits
+    SQLAlchemy's async MissingGreenlet). Checking first means the delete
+    itself never fails, so there's nothing to recover from."""
+    from app.models.db_models import ProductPriceHistoryDB
+
     product = await _owned_product(db, merchant.id, product_id)
+    if product.deleted_at is not None:
+        return  # already deleted — idempotent
+
+    can_hard_delete = False
     if not product.is_active:
+        has_history = await db.scalar(
+            select(ProductPriceHistoryDB.id)
+            .where(ProductPriceHistoryDB.product_id == product_id)
+            .limit(1)
+        )
+        can_hard_delete = has_history is None
+
+    if can_hard_delete:
         await db.delete(product)
     else:
         product.is_active = False
+        product.deleted_at = _now()
     await db.flush()
     await _sync_state_if_live(db, merchant.id)
+
+
+# ── Autopilot trust — the merchant's own opt-in, not auto-apply itself ────────
+
+@router.get("/autopilot-trust")
+async def list_autopilot_trust(
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """Every (product, action_type) pair that has earned the trust threshold
+    for this store — the terminal's Earned Trust panel. Includes pairs the
+    merchant hasn't toggled on yet (auto_apply_enabled=False) so the option
+    is visible before it's used, not just after."""
+    from app.services.autopilot_trust import list_eligible_trust
+    return {"eligible": await list_eligible_trust(merchant.id, db)}
+
+
+@router.post("/{product_id}/autopilot-trust")
+async def toggle_autopilot_trust(
+    product_id: str,
+    body: AutopilotTrustToggleRequest,
+    merchant: MerchantDB = Depends(get_current_merchant),
+    db: AsyncSession = Depends(get_db),
+):
+    """The merchant explicitly opting a specific product+action into (or out
+    of) auto-apply once it's earned the streak. This is the only place
+    auto_apply_enabled ever changes — nothing sets it automatically."""
+    from app.services.autopilot_trust import set_auto_apply_enabled
+
+    await _owned_product(db, merchant.id, product_id)  # 404s if not this merchant's
+    try:
+        streak = await set_auto_apply_enabled(
+            merchant.id, product_id, body.action_type, body.enabled, db,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"product_id": product_id, "action_type": body.action_type, "enabled": body.enabled, "streak": streak}
 
 
 # ── Vision batch (photo drop) ────────────────────────────────────────────────
@@ -447,10 +515,18 @@ async def vision_batch(
             failed_urls.append(url)
             continue
 
+        # Qwen lists every colourway it sees in the photo (vision_result.colors)
+        # separately from the name — fold confidently-identified colors into the
+        # name here, same as scripts/build_owoyemi.py, so a multi-colorway photo
+        # reads as "Logo Slides (black/olive)" instead of losing that entirely.
+        name = vision_result.name
+        if vision_result.colors and vision_result.confident:
+            name = f"{vision_result.name} ({'/'.join(vision_result.colors)})"
+
         product = ProductDB(
             id=f"prod_{uuid.uuid4().hex[:12]}",
             merchant_id=merchant.id,
-            name=vision_result.name,
+            name=name,
             description=vision_result.description or f"{vision_result.name}.",
             price=vision_result.suggested_price,
             cost_price=round(vision_result.suggested_price * DEFAULT_COST_RATIO, 2),
@@ -498,10 +574,16 @@ async def list_pending_products(
     merchant: MerchantDB = Depends(get_current_merchant),
     db: AsyncSession = Depends(get_db),
 ):
-    """Vision-created products awaiting merchant approval (is_active=False)."""
+    """Vision-created products awaiting merchant approval (is_active=False,
+    deleted_at=None — excludes soft-deleted products, which also have
+    is_active=False but must not resurface as if pending)."""
     rows = await db.scalars(
         select(ProductDB)
-        .where(ProductDB.merchant_id == merchant.id, ProductDB.is_active.is_(False))
+        .where(
+            ProductDB.merchant_id == merchant.id,
+            ProductDB.is_active.is_(False),
+            ProductDB.deleted_at.is_(None),
+        )
         .order_by(ProductDB.created_at.desc())
     )
     return [db_to_product(r) for r in rows]
@@ -532,7 +614,11 @@ async def approve_all_products(
     storefront once at the end."""
     rows = await db.scalars(
         select(ProductDB)
-        .where(ProductDB.merchant_id == merchant.id, ProductDB.is_active.is_(False))
+        .where(
+            ProductDB.merchant_id == merchant.id,
+            ProductDB.is_active.is_(False),
+            ProductDB.deleted_at.is_(None),
+        )
     )
     approved = []
     for row in rows:

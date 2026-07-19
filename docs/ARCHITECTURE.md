@@ -324,13 +324,23 @@ interceptor; a merely-aggressive value that passes Layer 0 still gets clamped.
 
 **Graduated autonomy** (`autopilot_trust.py`). Human-in-the-loop is the default,
 but trust is *earned per (store, product)*. Only `price_rebalance` — and only a
-move already inside the interceptor-clamped safe band — can auto-apply once a
-trust streak is earned; every other action type, and every rebalance below the
-threshold or outside the band, still takes the option-card path. **Trust only ever
-removes the gate — it never widens the safe range** — and a single dismissal resets
-the streak. An auto-applied move surfaces as an `action_auto_executed` FYI card, so
-nothing happens invisibly. Full autonomy everywhere would score *worse* on Track 4;
-the design is deliberately bounded.
+move already inside the interceptor-clamped safe band — is *eligible* to
+auto-apply once a trust streak is earned. Earning the streak unlocks the
+option; it does not flip it on. The merchant explicitly opts in per
+(product, action_type) via a toggle in the terminal (`POST
+/products/{id}/autopilot-trust`, gated server-side by `set_auto_apply_enabled`
+— can't be enabled below the streak threshold), and can turn it back off at
+any time. Only once opted in does a qualifying move actually skip the
+approval card; every other action type, every rebalance below the threshold
+or outside the band, and every not-yet-opted-in pair still takes the
+option-card path. **Trust only ever removes the gate — it never widens the
+safe range** — and a single dismissal resets the streak (the opt-in flag
+itself is untouched by a reset streak; it only stops mattering until trust
+is re-earned). An auto-applied move still surfaces as an
+`action_auto_executed` FYI card, so nothing happens invisibly even for a
+move the merchant pre-authorized. Full autonomy everywhere would score
+*worse* on Track 4; the design is deliberately bounded, and the merchant
+stays the one who decides when Qwen gets to skip the approval step.
 
 **The Decision Ledger** (`receipts.py`). Every lifecycle transition — proposed,
 blocked, approved, executed, dismissed — is written to a hash-chained, HMAC-signed
@@ -343,7 +353,7 @@ so neither can mutate an action's status without a receipt. Verify offline:
 
 | Concern | File | Function |
 |---|---|---|
-| Earned autonomy | `app/services/autopilot_trust.py` | `get_trust_streak`, `should_auto_apply`, `update_trust_streak` |
+| Earned autonomy | `app/services/autopilot_trust.py` | `get_trust_state`, `should_auto_apply`, `update_trust_streak`, `set_auto_apply_enabled`, `list_eligible_trust` |
 | Audit chain | `app/services/receipts.py` | `append_receipt`, `verify_chain`, `verify_row_consistency` |
 | Offline verifier | `scripts/verify_ledger.py` | CLI over a store's full chain |
 
@@ -450,6 +460,18 @@ SERVER → CLIENT (terminal)
                          arriving before the terminal sent its first message
   action_expired         a pending action's TTL elapsed — auto-dismissed,
                          card removed from the feed
+  action_auto_executed   a trust-eligible move the merchant had already
+                         opted into (autopilot-trust toggle) just executed
+                         with no approval card — pushed from
+                         run_decision_cycle's auto-trusted branch, the one
+                         path that skips the option card, so it's the one
+                         path that most needs an explicit FYI
+  capability_updated     a point-and-edit intent the store couldn't satisfy
+                         recurred — pushed from capability_tracker.py; this
+                         was the one terminal surface with no WS path at
+                         all until this event existed, which is why the
+                         terminal used to poll for it every 5s instead —
+                         removed once this push replaced it
   qwen_fallback          a Qwen call failed and a deterministic fallback ran
                          — surfaced as a transparency toast, not an error
 

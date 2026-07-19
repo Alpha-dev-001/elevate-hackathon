@@ -81,7 +81,7 @@ export default function DecisionsPage() {
           </p>
         </div>
 
-        <DecisionLog />
+        <DecisionLog merchantId={merchant.id} />
       </div>
     </main>
   )

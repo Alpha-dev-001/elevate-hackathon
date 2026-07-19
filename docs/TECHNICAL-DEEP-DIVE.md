@@ -477,12 +477,17 @@ decision.
 
 **Graduated autonomy** (`autopilot_trust.py`). Human-in-the-loop is the default, but
 trust is *earned per (store, product)*. Only `price_rebalance` — and only a move
-already inside the interceptor-clamped safe band — can auto-apply once a trust
-streak is earned; everything else still takes the option-card path. **Trust only
-removes the gate — it never widens the safe range** — and a single dismissal resets
-the streak. An auto-applied move surfaces as an `action_auto_executed` FYI card, so
-nothing happens invisibly. (Full autonomy everywhere would score *worse* on Track 4;
-the bound is deliberate.)
+already inside the interceptor-clamped safe band — is *eligible* to auto-apply once
+a trust streak is earned. Earning the streak unlocks the option; it does not flip it
+on. The merchant explicitly opts in per (product, action_type) via a toggle in the
+terminal (gated server-side — can't be enabled below the streak threshold, always
+reversible), and only once opted in does a qualifying move actually skip the
+approval card. **Trust only removes the gate — it never widens the safe range** —
+and a single dismissal resets the streak. An auto-applied move still surfaces as an
+`action_auto_executed` FYI card, so nothing happens invisibly even for a move the
+merchant pre-authorized. (Full autonomy everywhere would score *worse* on Track 4;
+the bound is deliberate — the merchant decides when Qwen skips the checkpoint, not
+just how good its track record has been.)
 
 **The Decision Ledger** (`receipts.py`). Every lifecycle transition — proposed,
 blocked, approved, executed, dismissed — is written to a hash-chained, HMAC-signed

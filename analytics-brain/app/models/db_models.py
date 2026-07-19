@@ -69,7 +69,14 @@ class ProductPriceHistoryDB(Base):
 class AutopilotTrustDB(Base):
     """Graduated-autonomy trust counter per (merchant, product, action_type).
     Read/written by autopilot_trust.py on every PRICE_REBALANCE outcome.
-    Missing row == streak 0 == always gates; never defaults to trusted."""
+    Missing row == streak 0 == always gates; never defaults to trusted.
+
+    Earning a streak unlocks the OPTION to auto-apply, not auto-apply
+    itself — auto_apply_enabled is a separate, merchant-set flag the
+    merchant flips on once eligible (POST /products/{id}/autopilot-trust).
+    Defaults false, so trust never silently starts acting on its own; the
+    merchant stays the one who decides when Qwen gets to skip the approval
+    step, not just how good Qwen's track record has been."""
     __tablename__ = "autopilot_trust"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -81,6 +88,7 @@ class AutopilotTrustDB(Base):
     )
     action_type: Mapped[str] = mapped_column(String, nullable=False)
     streak: Mapped[int] = mapped_column(Integer, default=0)
+    auto_apply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[int] = mapped_column(
         BigInteger, default=lambda: int(time.time() * 1000)
     )
@@ -151,6 +159,10 @@ class ProductDB(Base):
     is_featured: Mapped[bool] = mapped_column(Boolean, default=False)
     featured_label: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[int] = mapped_column(BigInteger, default=lambda: int(time.time() * 1000))
+    # is_active=False alone is ambiguous — it means either "never approved"
+    # (pending) or "soft-deleted" (used to be live). deleted_at disambiguates:
+    # only set when a merchant deletes a product that already had history.
+    deleted_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     merchant: Mapped["MerchantDB"] = relationship(back_populates="products")
 
