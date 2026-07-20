@@ -16,7 +16,7 @@
 <!-- TODO(hero): 1280×640 — merchant terminal mid-decision, an option card visible + Decision Trace panel open. See docs/IMAGE_GALLERY.md #01 -->
 ![Elevate — autonomous autopilot for running a store](docs/images/01-hero.png)
 
-**▶ [3-minute demo video](TODO_DEMO_VIDEO_URL)**  ·  **🌐 [Live backend](http://47.243.86.14/api/health)** (on Alibaba Cloud ECS)  ·  **🖼 [More screenshots](docs/images/)**
+**▶ [3-minute demo video](https://youtu.be/OpZMQjcYeAM)**  ·  **🌐 [Live backend](http://47.243.86.14/api/health)** (on Alibaba Cloud ECS)  ·  **🖼 [More screenshots](docs/images/)**
 
 ---
 
